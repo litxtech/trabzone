@@ -1,0 +1,97 @@
+{
+  "cli": {
+    "version": ">= 12.5.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "node": "22.11.0",
+      "developmentClient": true,
+      "distribution": "internal",
+      "credentialsSource": "remote",
+      "env": {
+        "NODE_OPTIONS": "--max-old-space-size=4096",
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
+        "EXPO_NO_CAPABILITY_SYNC": "1",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://nzvoufcywppavaioirac.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_ZYQM1T9P20NsEIDcoZTQdw_fWG69C96",
+        "EXPO_PUBLIC_APP_URL": "https://trabzone.app",
+        "EXPO_PUBLIC_LIVEKIT_URL": "wss://trabzone-pvll6x7f.livekit.cloud",
+        "EXPO_PUBLIC_ENABLE_SOCIAL_AUTH": "false"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Debug",
+        "resourceClass": "medium",
+        "image": "latest",
+        "autoIncrement": false
+      },
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug",
+        "resourceClass": "medium",
+        "image": "latest"
+      }
+    },
+    "preview": {
+      "node": "22.11.0",
+      "distribution": "internal",
+      "env": {
+        "NODE_OPTIONS": "--max-old-space-size=4096",
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://nzvoufcywppavaioirac.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_ZYQM1T9P20NsEIDcoZTQdw_fWG69C96",
+        "EXPO_PUBLIC_APP_URL": "https://trabzone.app",
+        "EXPO_PUBLIC_LIVEKIT_URL": "wss://trabzone-pvll6x7f.livekit.cloud",
+        "EXPO_PUBLIC_ENABLE_SOCIAL_AUTH": "false"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release",
+        "resourceClass": "medium",
+        "image": "latest",
+        "autoIncrement": false
+      },
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease",
+        "resourceClass": "medium",
+        "image": "latest"
+      }
+    },
+    "production": {
+      "node": "22.11.0",
+      "env": {
+        "NODE_OPTIONS": "--max-old-space-size=4096",
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://nzvoufcywppavaioirac.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_ZYQM1T9P20NsEIDcoZTQdw_fWG69C96",
+        "EXPO_PUBLIC_APP_URL": "https://trabzone.app",
+        "EXPO_PUBLIC_LIVEKIT_URL": "wss://trabzone-pvll6x7f.livekit.cloud",
+        "EXPO_PUBLIC_ENABLE_SOCIAL_AUTH": "false"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release",
+        "resourceClass": "medium",
+        "image": "latest",
+        "autoIncrement": false
+      },
+      "android": {
+        "buildType": "app-bundle",
+        "gradleCommand": ":app:bundleRelease",
+        "resourceClass": "medium",
+        "image": "latest"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "developerilksepet@gmail.com",
+        "ascAppId": "6825082780",
+        "appleTeamId": "9W6CR7KXM7"
+      }
+    }
+  }
+}
