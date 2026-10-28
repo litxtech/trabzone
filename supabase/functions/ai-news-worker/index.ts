@@ -1688,7 +1688,6 @@ Yanıtı yalnızca şu JSON olarak ver:
 async function saveDistrictPhoto(
   ctx: RunContext,
   eventId: string,
-  title: string,
   district: string | null,
 ): Promise<boolean> {
   const photo = districtPhoto(district);
@@ -1747,7 +1746,7 @@ async function resolveMedia(
   sourceInfo: Source | undefined,
 ): Promise<void> {
   // 1) İlçenin kendi fotoğrafı: her haberde o ilçeyi temsil eden gerçek görsel.
-  if (await saveDistrictPhoto(ctx, eventId, title, district)) return;
+  if (await saveDistrictPhoto(ctx, eventId, district)) return;
 
   // 2) Resmî kaynağın yazılı izinli görseli.
   if (
@@ -1854,7 +1853,7 @@ async function resolveMedia(
 
   // 4) Son çare: Trabzon merkezini temsil eden ilçe fotoğrafı.
   // Kategori tasarımı veya yapay zekâ görseli hiçbir zaman kullanılmaz.
-  await saveDistrictPhoto(ctx, eventId, title, null);
+  await saveDistrictPhoto(ctx, eventId, null);
 }
 
 async function processCandidate(
