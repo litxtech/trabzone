@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { Redirect, type Href } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
@@ -7,9 +8,14 @@ import { AppText, Button, Card, Skeleton } from '@/components/ui';
 import { AuthGate } from '@/features/auth/components/AuthGate';
 import { AuthScreen } from '@/features/auth/components/AuthScreen';
 import { PUBLIC_LEGAL_PAGES } from '@/features/legal/catalog';
-import { usePendingAcceptances, useRecordAcceptance } from '@/features/legal/hooks/use-legal';
+import {
+  legalKeys,
+  usePendingAcceptances,
+  useRecordAcceptance,
+} from '@/features/legal/hooks/use-legal';
 import type { PendingAcceptance } from '@/features/legal/types';
 import { fetchMyProfile } from '@/features/profile/services/profile-service';
+import { errorMessage } from '@/services/errors';
 import { useRouter } from '@/utils/router';
 
 import { useWebMeta } from '@/features/web/use-web-meta';
@@ -29,6 +35,7 @@ function documentPath(slug: string) {
 function LegalConsentScreen() {
   const router = useRouter();
   const { data: pending, isLoading } = usePendingAcceptances(true);
+  const queryClient = useQueryClient();
   const record = useRecordAcceptance();
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +76,21 @@ function LegalConsentScreen() {
           source: Platform.OS === 'web' ? 'web_consent_gate' : 'mobile_settings',
         });
       }
+
+      // Onay kaydı sunucuda oluştu; yönlendirmeden önce bekleyen listesini
+      // tazele. Aksi halde kapı eski önbelleği görüp ekrana geri atıyor ve
+      // kullanıcı "onayladım ama ilerlemiyor" durumunda kalıyor.
+      await queryClient.refetchQueries({ queryKey: legalKeys.pending });
+      const remaining =
+        queryClient.getQueryData<PendingAcceptance[]>(legalKeys.pending) ?? [];
+      if (remaining.length > 0) {
+        setChecked({});
+        setError(
+          'Onayın kaydedildi ancak bazı belgeler hâlâ onay bekliyor. Sayfayı yenileyip tekrar dene.',
+        );
+        return;
+      }
+
       const profile = await fetchMyProfile();
       if (profile.ok && !profile.data?.onboarding_completed) {
         router.replace('/complete-profile');
@@ -77,9 +99,10 @@ function LegalConsentScreen() {
       router.replace('/feed');
     } catch (cause) {
       setError(
-        cause instanceof Error
-          ? cause.message
-          : 'Onay kaydedilemedi. Lütfen bağlantını kontrol edip tekrar dene.',
+        errorMessage(
+          cause,
+          'Onay kaydedilemedi. Lütfen bağlantını kontrol edip tekrar dene.',
+        ),
       );
     }
   };
