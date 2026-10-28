@@ -10,6 +10,7 @@ import { AppText, Button, TextField } from '@/components/ui';
 import { AuthScreen, InlineLink } from '@/features/auth/components/AuthScreen';
 import { WebRegisterPage } from '@/features/web/components/WebRegisterPage';
 import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons';
+import { env } from '@/config/env';
 import { FormError } from '@/features/auth/components/FormError';
 import {
   passwordStrength,
@@ -322,15 +323,19 @@ function RegisterScreen() {
 
       <Button label="Devam et" loading={formState.isSubmitting} onPress={() => void onSubmit()} />
 
-      <View style={styles.divider}>
-        <View style={styles.dividerLine} />
-        <AppText variant="caption" color="#6F7C96">
-          veya
-        </AppText>
-        <View style={styles.dividerLine} />
-      </View>
+      {env.enableSocialAuth ? (
+        <>
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <AppText variant="caption" color="#6F7C96">
+              veya
+            </AppText>
+            <View style={styles.dividerLine} />
+          </View>
 
-      <SocialAuthButtons />
+          <SocialAuthButtons />
+        </>
+      ) : null}
 
       <View style={styles.footer}>
         <AppText variant="caption" color="textSecondary">

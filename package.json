@@ -33,6 +33,7 @@
     "r2:cors": "node scripts/r2-cors.mjs",
     "r2:domain": "node scripts/r2-domain.mjs",
     "r2:dev": "node scripts/r2-enable-dev.mjs",
+    "email:worker": "node scripts/email-worker.mjs",
     "eas-build-post-install": "node scripts/check-entitlements.mjs"
   },
   "expo": {

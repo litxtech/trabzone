@@ -5,6 +5,8 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-nat
 import Svg, { Path } from 'react-native-svg';
 
 import { AppText } from '@/components/ui';
+import { env } from '@/config/env';
+import { fetchPendingAcceptances } from '@/features/legal/services/legal-service';
 import { fetchMyProfile } from '@/features/profile/services/profile-service';
 import {
   signInWithApple,
@@ -75,15 +77,31 @@ export function SocialAuthButtons({ onError, showInlineError = true }: Props) {
         return;
       }
 
-      const profile = await fetchMyProfile();
+      const [profile, pendingResult] = await Promise.all([
+        fetchMyProfile(),
+        fetchPendingAcceptances(),
+      ]);
       const completed = profile.ok && profile.data?.onboarding_completed;
       haptics.success();
-      router.replace(completed ? '/feed' : '/complete-profile');
+      if (!completed) {
+        router.replace('/complete-profile');
+        return;
+      }
+      if (pendingResult.ok && pendingResult.data.length > 0) {
+        router.replace('/legal/consent');
+        return;
+      }
+      router.replace('/feed');
     },
     [onError, pending, router, showInlineError],
   );
 
   const disabled = pending !== null;
+
+  // OAuth sağlayıcıları yapılandırılmadan çalışmayan bir buton gösterme.
+  if (!env.enableSocialAuth) {
+    return null;
+  }
 
   return (
     <View style={styles.wrap}>

@@ -8,6 +8,8 @@ import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { z } from 'zod';
 
 import { AppText, Button, TextField } from '@/components/ui';
+import { env } from '@/config/env';
+import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons';
 import {
   emailSchema,
   nameSchema,
@@ -474,13 +476,18 @@ export function WebRegisterPage() {
           </AppText>
         </View>
 
-        <View style={[styles.socialNote, { borderColor: theme.colors.border }]}>
-          <Ionicons name="phone-portrait-outline" size={18} color={theme.colors.textTertiary} />
-          <AppText variant="caption" color="textSecondary" style={styles.flex}>
-            Apple ve Google ile kayıt şu anda mobil uygulamada kullanılabilir. Web üzerinde e-posta
-            ile hesap oluşturabilirsin.
-          </AppText>
-        </View>
+        {env.enableSocialAuth ? (
+          <>
+            <View style={styles.divider}>
+              <View style={[styles.dividerLine, { backgroundColor: theme.colors.border }]} />
+              <AppText variant="caption" color="textTertiary">
+                veya
+              </AppText>
+              <View style={[styles.dividerLine, { backgroundColor: theme.colors.border }]} />
+            </View>
+            <SocialAuthButtons />
+          </>
+        ) : null}
 
         {formError ? (
           <View style={[styles.errorBox, { backgroundColor: theme.colors.dangerSoft }]}>
@@ -569,14 +576,8 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   checkError: { marginLeft: 30 },
-  socialNote: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-  },
+  divider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 2 },
+  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth },
   errorBox: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', padding: 12, borderRadius: 10 },
   footer: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 6 },
   linkStrong: { fontWeight: '600' },

@@ -16,6 +16,7 @@ import { AppText, Button, Logo, Wordmark } from '@/components/ui';
 import { AuthBackdrop } from '@/features/auth/components/AuthBackdrop';
 import { LobbyShowcase } from '@/features/auth/components/LobbyShowcase';
 import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons';
+import { env } from '@/config/env';
 import { ThemeScope } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 
@@ -145,15 +146,19 @@ function LobbyContent() {
             </AppText>
           </Pressable>
 
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <AppText variant="caption" color="#6F7C96" style={styles.dividerText}>
-              veya sosyal hesabınla devam et
-            </AppText>
-            <View style={styles.dividerLine} />
-          </View>
+          {env.enableSocialAuth ? (
+            <>
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <AppText variant="caption" color="#6F7C96" style={styles.dividerText}>
+                  veya sosyal hesabınla devam et
+                </AppText>
+                <View style={styles.dividerLine} />
+              </View>
 
-          <SocialAuthButtons />
+              <SocialAuthButtons />
+            </>
+          ) : null}
 
           <View style={styles.legal}>
             <View style={styles.legalRow}>

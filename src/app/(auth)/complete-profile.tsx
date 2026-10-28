@@ -13,6 +13,7 @@ import {
   type CompleteProfileValues,
 } from '@/features/auth/validators';
 import { completeRegistration, fetchMyProfile, isUsernameAvailable } from '@/features/profile/services/profile-service';
+import { fetchPendingAcceptances } from '@/features/legal/services/legal-service';
 import { getSignUpMetadata } from '@/services/supabase/auth';
 import { haptics } from '@/utils/haptics';
 
@@ -79,6 +80,12 @@ export default function CompleteProfileScreen() {
 
     await queryClient.invalidateQueries({ queryKey: ['my-profile'] });
     haptics.success();
+
+    const pending = await fetchPendingAcceptances();
+    if (pending.ok && pending.data.length > 0) {
+      router.replace('/legal/consent');
+      return;
+    }
     router.replace('/feed');
   });
 
@@ -156,7 +163,7 @@ export default function CompleteProfileScreen() {
       </View>
 
       <AppText variant="caption" color="textTertiary">
-        Devam ederek topluluk kurallarını kabul etmiş olursun.
+        Devam ettiğinde güncel kullanım koşulları ve topluluk kuralları onayı istenecek.
       </AppText>
 
       <Button label="Trabzone'a gir" loading={formState.isSubmitting} onPress={() => void onSubmit()} />

@@ -90,6 +90,10 @@
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
     },
     {
+      "source": "/legal/consent",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
       "source": "/feed",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
     },

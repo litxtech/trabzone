@@ -9,6 +9,8 @@ import {
   SUPPORT_EMAIL,
   SUPPORT_RESPONSE_TARGET_HOURS,
 } from '@/features/safety/constants';
+import { useContactChannels } from '@/features/web-content/hooks/use-web-content';
+import type { ContactChannel } from '@/features/web-content/types';
 import { useTheme } from '@/theme/ThemeProvider';
 
 import { useWebMeta } from '../use-web-meta';
@@ -31,13 +33,6 @@ const CHANNELS: Channel[] = [
     body: 'Sık sorulan sorular, sorun kategorileri ve destek talebi oluşturma.',
     action: 'Destek merkezine git',
     href: '/support',
-  },
-  {
-    icon: 'mail-outline',
-    title: 'E-posta',
-    body: `Destek ekibimize ${SUPPORT_EMAIL} adresinden ulaşabilirsin.`,
-    action: SUPPORT_EMAIL,
-    email: SUPPORT_EMAIL,
   },
   {
     icon: 'folder-open-outline',
@@ -68,6 +63,15 @@ const CHANNELS: Channel[] = [
     href: '/terms',
   },
 ];
+
+const EMAIL_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+  support: 'help-buoy-outline',
+  privacy: 'lock-closed-outline',
+  child_safety: 'shield-checkmark-outline',
+  legal: 'document-text-outline',
+  business: 'storefront-outline',
+  other: 'mail-outline',
+};
 
 function ChannelCard({ channel }: { channel: Channel }) {
   const { theme } = useTheme();
@@ -103,7 +107,7 @@ function ChannelCard({ channel }: { channel: Channel }) {
         onPress={() => {
           const url = `mailto:${channel.email}`;
           if (Platform.OS === 'web' && typeof window !== 'undefined') {
-            window.location.href = url;
+            window.location.assign(url);
             return;
           }
           void Linking.openURL(url).catch(() => undefined);
@@ -130,6 +134,22 @@ function ChannelCard({ channel }: { channel: Channel }) {
 
 export function WebContactPage() {
   const { theme } = useTheme();
+  const { data: channelData } = useContactChannels();
+
+  // Adresler admin panelindeki doğrulanmış kanal yapılandırmasından gelir.
+  // Yapılandırma henüz yüklenmediyse yalnızca herkese açık destek adresi gösterilir.
+  const emailChannels: ContactChannel[] =
+    channelData && channelData.length > 0
+      ? channelData.filter((channel) => Boolean(channel.email))
+      : [
+          {
+            key: 'support',
+            label: 'Genel Destek',
+            email: SUPPORT_EMAIL,
+            description: 'Hesap, uygulama ve genel sorular için destek ekibi.',
+            sort_order: 10,
+          },
+        ];
 
   useWebMeta({
     title: 'İletişim · Trabzone',
@@ -137,6 +157,15 @@ export function WebContactPage() {
       'Trabzone destek ekibine e-posta ile ulaşın, destek merkezini kullanın veya veri taleplerinizi iletin.',
     path: '/contact',
   });
+
+  const openEmail = (email: string) => {
+    const url = `mailto:${email}`;
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.location.assign(url);
+      return;
+    }
+    void Linking.openURL(url).catch(() => undefined);
+  };
 
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
@@ -186,6 +215,52 @@ export function WebContactPage() {
           {CHANNELS.map((channel) => (
             <ChannelCard key={channel.title} channel={channel} />
           ))}
+        </View>
+
+        <View style={styles.section}>
+          <AppText variant="h1">E-posta kanalları</AppText>
+          <AppText variant="body" color="textSecondary" style={styles.paragraph}>
+            Aşağıdaki adresler admin panelinden doğrulanmış ve etkin kanallardır. Tıklayarak
+            e-posta uygulamanızda yeni bir ileti hazırlayabilirsiniz. KVKK ve veri talepleri için
+            ayrıca veri talepleri merkezini kullanmanız önerilir.
+          </AppText>
+          <View style={styles.emailList}>
+            {emailChannels.map((channel) => (
+              <Pressable
+                key={channel.key}
+                accessibilityRole="link"
+                accessibilityLabel={`${channel.label}: ${channel.email}`}
+                onPress={() => openEmail(channel.email ?? '')}
+                style={({ pressed }) => [
+                  styles.emailRow,
+                  {
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.border,
+                    opacity: pressed ? 0.82 : 1,
+                  },
+                ]}
+              >
+                <View style={[styles.cardIcon, { backgroundColor: theme.colors.primarySoft }]}>
+                  <Ionicons
+                    name={EMAIL_ICONS[channel.key] ?? 'mail-outline'}
+                    size={19}
+                    color={theme.colors.primaryDeep}
+                  />
+                </View>
+                <View style={styles.flex}>
+                  <AppText variant="bodyStrong">{channel.label}</AppText>
+                  {channel.description ? (
+                    <AppText variant="caption" color="textSecondary">
+                      {channel.description}
+                    </AppText>
+                  ) : null}
+                </View>
+                <AppText variant="bodyStrong" color="primaryDeep">
+                  {channel.email}
+                </AppText>
+              </Pressable>
+            ))}
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -286,6 +361,16 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   cardAction: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
+  emailList: { gap: 10, marginTop: 4 },
+  emailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    flexWrap: 'wrap',
+  },
   section: { gap: 12 },
   paragraph: { fontSize: 15.5, lineHeight: 26, maxWidth: 820 },
   cta: {

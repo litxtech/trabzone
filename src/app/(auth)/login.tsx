@@ -8,8 +8,10 @@ import { AppText, Button, TextField } from '@/components/ui';
 import { AuthScreen, InlineLink } from '@/features/auth/components/AuthScreen';
 import { WebLoginPage } from '@/features/web/components/WebLoginPage';
 import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons';
+import { env } from '@/config/env';
 import { FormError } from '@/features/auth/components/FormError';
 import { loginSchema, type LoginValues } from '@/features/auth/validators';
+import { fetchPendingAcceptances } from '@/features/legal/services/legal-service';
 import { fetchMyProfile } from '@/features/profile/services/profile-service';
 import { signInWithPassword } from '@/services/supabase/auth';
 import { haptics } from '@/utils/haptics';
@@ -38,9 +40,17 @@ function LoginScreen() {
       return;
     }
 
-    const profile = await fetchMyProfile();
+    const [profile, pending] = await Promise.all([fetchMyProfile(), fetchPendingAcceptances()]);
     const completed = profile.ok && profile.data?.onboarding_completed;
-    router.replace(completed ? '/feed' : '/complete-profile');
+    if (!completed) {
+      router.replace('/complete-profile');
+      return;
+    }
+    if (pending.ok && pending.data.length > 0) {
+      router.replace('/legal/consent');
+      return;
+    }
+    router.replace('/feed');
   });
 
   return (
@@ -97,15 +107,19 @@ function LoginScreen() {
 
       <Button label="Giriş Yap" loading={formState.isSubmitting} onPress={() => void onSubmit()} />
 
-      <View style={styles.divider}>
-        <View style={styles.dividerLine} />
-        <AppText variant="caption" color="#6F7C96">
-          veya
-        </AppText>
-        <View style={styles.dividerLine} />
-      </View>
+      {env.enableSocialAuth ? (
+        <>
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <AppText variant="caption" color="#6F7C96">
+              veya
+            </AppText>
+            <View style={styles.dividerLine} />
+          </View>
 
-      <SocialAuthButtons />
+          <SocialAuthButtons />
+        </>
+      ) : null}
 
       <View style={styles.footer}>
         <AppText variant="caption" color="textSecondary">

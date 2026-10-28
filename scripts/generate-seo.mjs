@@ -502,6 +502,7 @@ Allow: /_expo/static/
 # Oturum gerektiren ve arama sonucunda görünmemesi gereken alanlar
 Disallow: /admin
 Disallow: /settings
+Disallow: /legal/consent
 Disallow: /chat
 Disallow: /call
 Disallow: /compose
