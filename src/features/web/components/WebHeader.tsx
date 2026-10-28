@@ -20,7 +20,6 @@ import Animated, {
 import { AppText, Logo, Wordmark } from '@/components/ui';
 import { useReduceMotion } from '@/perf/use-reduce-motion';
 import { useAuthStatus } from '@/stores/auth-store';
-import { useSettingsStore } from '@/stores/settings-store';
 import { useTheme } from '@/theme/ThemeProvider';
 
 import { flatStyle } from '../link-style';
@@ -123,6 +122,9 @@ export function WebHeader() {
 
   const authenticated = authStatus === 'authenticated';
   const navItems = useMemo(() => NAV_ITEMS, []);
+  // Koyu temada `primaryDeep` açık bir maviye denk geliyor; üzerine beyaz yazı
+  // konduğunda kontrast düşüyordu. Bu yüzden CTA zemini şemaya göre seçilir.
+  const drawerCtaBg = scheme === 'dark' ? theme.colors.primary : theme.colors.primaryDeep;
 
   const closeMenu = () => setMenuOpen(false);
 
@@ -299,7 +301,19 @@ export function WebHeader() {
               onPress={closeMenu}
             />
           </Animated.View>
-          <Animated.View style={[styles.drawer, { width: drawerWidth }, drawerStyle]}>
+          {/* Zemin rengi temadan gelmeli: sabit beyaz zemin koyu temada
+              metinleri (açık renk) okunamaz hale getiriyordu. */}
+          <Animated.View
+            style={[
+              styles.drawer,
+              {
+                width: drawerWidth,
+                backgroundColor: theme.colors.surface,
+                shadowColor: theme.colors.shadow,
+              },
+              drawerStyle,
+            ]}
+          >
             <View style={styles.drawerHead}>
               <View style={styles.brand}>
                 <Logo size={30} />
@@ -342,7 +356,7 @@ export function WebHeader() {
                     >
                       <AppText
                         variant="bodyStrong"
-                        color={active ? 'primaryDeep' : 'text'}
+                        color={active && scheme === 'light' ? 'primaryDeep' : 'text'}
                         style={styles.flex}
                       >
                         {item.label}
@@ -370,7 +384,7 @@ export function WebHeader() {
                       }}
                       style={({ pressed }) => [
                         styles.drawerCta,
-                        { backgroundColor: theme.colors.primaryDeep, opacity: pressed ? 0.85 : 1 },
+                        { backgroundColor: drawerCtaBg, opacity: pressed ? 0.85 : 1 },
                       ]}
                     >
                       <AppText variant="bodyStrong" color="onPrimary">
@@ -403,7 +417,7 @@ export function WebHeader() {
                       }}
                       style={({ pressed }) => [
                         styles.drawerCta,
-                        { backgroundColor: theme.colors.primaryDeep, opacity: pressed ? 0.85 : 1 },
+                        { backgroundColor: drawerCtaBg, opacity: pressed ? 0.85 : 1 },
                       ]}
                     >
                       <AppText variant="bodyStrong" color="onPrimary">
@@ -573,13 +587,11 @@ const styles = StyleSheet.create({
   },
   drawer: {
     height: '100%',
-    backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 22,
     borderBottomLeftRadius: 22,
     paddingTop: 18,
     paddingBottom: 12,
     paddingHorizontal: 18,
-    shadowColor: '#000000',
     shadowOpacity: 0.28,
     shadowRadius: 24,
     shadowOffset: { width: -8, height: 0 },

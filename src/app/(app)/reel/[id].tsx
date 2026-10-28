@@ -20,8 +20,9 @@ import { ReelItem } from '@/features/reels/components/ReelItem';
 import { useTheme } from '@/theme/ThemeProvider';
 
 export default function ReelViewerScreen() {
-  const params = useLocalSearchParams<{ id?: string }>();
+  const params = useLocalSearchParams<{ id?: string; comment?: string }>();
   const reelId = typeof params.id === 'string' ? params.id : '';
+  const initialCommentId = typeof params.comment === 'string' ? params.comment : undefined;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { scheme } = useTheme();
@@ -29,7 +30,7 @@ export default function ReelViewerScreen() {
 
   const { data: reel, isLoading, isError, refetch } = useReel(reelId);
   const [muted, setMuted] = useState(false);
-  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(Boolean(initialCommentId));
   const [editing, setEditing] = useState(false);
 
   useFocusEffect(

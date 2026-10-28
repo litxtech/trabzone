@@ -29,6 +29,7 @@ import {
   useConversations,
   useLeaveConversation,
   useMuteConversation,
+  usePinConversation,
 } from '@/features/messaging/hooks/use-chat';
 import type { Conversation } from '@/features/messaging/services/messaging-service';
 import { useSession } from '@/stores/auth-store';
@@ -54,10 +55,16 @@ export default function MessagesScreen() {
   const [menuTarget, setMenuTarget] = useState<Conversation | null>(null);
 
   const mute = useMuteConversation();
+  const pin = usePinConversation();
   const leave = useLeaveConversation();
 
   const items = useMemo(() => {
-    const list = conversations.data ?? [];
+    const list = [...(conversations.data ?? [])].sort((a, b) => {
+      if (a.is_pinned !== b.is_pinned) {
+        return a.is_pinned ? -1 : 1;
+      }
+      return (b.last_message_at ?? '').localeCompare(a.last_message_at ?? '');
+    });
     const needle = query.trim().toLocaleLowerCase('tr-TR');
     if (!needle) {
       return list;
@@ -163,6 +170,9 @@ export default function MessagesScreen() {
 
           <View style={styles.rowBody}>
             <View style={styles.rowTop}>
+              {item.is_pinned ? (
+                <Ionicons name="bookmark" size={12} color={theme.colors.primaryDeep} />
+              ) : null}
               <AppText variant="bodyStrong" numberOfLines={1} style={styles.flex}>
                 {item.title}
               </AppText>
@@ -408,6 +418,11 @@ export default function MessagesScreen() {
         title={menuTarget?.title}
         items={[
           {
+            key: 'pin',
+            label: menuTarget?.is_pinned ? 'Sabitlemeyi kaldır' : 'Sohbeti sabitle',
+            icon: menuTarget?.is_pinned ? 'bookmark-outline' : 'bookmark',
+          },
+          {
             key: 'mute',
             label: menuTarget?.is_muted ? 'Bildirimleri aç' : 'Bildirimleri sessize al',
             icon: menuTarget?.is_muted ? 'notifications-outline' : 'notifications-off-outline',
@@ -424,7 +439,17 @@ export default function MessagesScreen() {
           if (!menuTarget) {
             return;
           }
-          if (key === 'mute') {
+          if (key === 'pin') {
+            const target = menuTarget;
+            setActionOpen(false);
+            pin.mutate(
+              { conversationId: target.id, pinned: !target.is_pinned },
+              {
+                onSuccess: () => haptics.selection(),
+                onError: (error) => Alert.alert('İşlem tamamlanamadı', error.message),
+              },
+            );
+          } else if (key === 'mute') {
             const target = menuTarget;
             setActionOpen(false);
             mute.mutate(

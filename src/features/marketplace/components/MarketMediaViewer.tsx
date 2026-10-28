@@ -83,7 +83,7 @@ export function MarketMediaViewer({
       presentationStyle="fullScreen"
     >
       <GestureHandlerRootView style={styles.flex}>
-        <MarketMediaViewerStage
+        <MarketMediaViewerContent
           key={`viewer-${initialIndex}`}
           items={items}
           initialIndex={initialIndex}
@@ -95,14 +95,18 @@ export function MarketMediaViewer({
   );
 }
 
-function MarketMediaViewerStage({
+/**
+ * Modal'sız sürüm. Yorum/profil gibi birden fazla katmanın tek bir native Modal
+ * içinde yaşadığı akışlarda kullanılır (iOS'ta iç içe Modal açılamaz).
+ */
+export function MarketMediaViewerContent({
   items,
-  initialIndex,
+  initialIndex = 0,
   onClose,
   footer,
 }: {
   items: MarketMediaViewerItem[];
-  initialIndex: number;
+  initialIndex?: number;
   onClose: () => void;
   footer?: React.ReactNode;
 }) {

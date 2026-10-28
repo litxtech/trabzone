@@ -17,6 +17,7 @@ export type Conversation = {
   last_message_preview: string | null;
   last_message_sender_id: string | null;
   is_muted: boolean;
+  is_pinned: boolean;
   unread_count: number;
 };
 
@@ -33,6 +34,32 @@ export type ChatMember = {
 
 export type MessageKind = 'text' | 'image' | 'video' | 'audio' | 'file';
 
+/** Giden mesajın istemci taraflı yaşam döngüsü (optimistic UI). */
+export type DeliveryStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+
+export type MessageMediaItem = {
+  id: string;
+  media_type: MessageKind;
+  storage_path: string;
+  thumbnail_path: string | null;
+  width: number | null;
+  height: number | null;
+  duration_ms: number | null;
+  sort_order: number;
+};
+
+export type MessageMediaInput = {
+  media_type: MessageKind;
+  storage_path: string;
+  thumbnail_path?: string | null;
+  width?: number | null;
+  height?: number | null;
+  duration_ms?: number | null;
+  mime?: string | null;
+  name?: string | null;
+  size?: number | null;
+};
+
 export type ChatMessage = {
   id: string;
   conversation_id: string;
@@ -45,16 +72,26 @@ export type ChatMessage = {
   body: string | null;
   media_path: string | null;
   media_meta: Record<string, unknown> | null;
+  media: MessageMediaItem[];
   reply_to_id: string | null;
-  reply_preview: { body: string | null; kind: MessageKind; sender_username: string } | null;
+  reply_preview: {
+    id: string;
+    body: string | null;
+    kind: MessageKind;
+    sender_username: string;
+    sender_first_name?: string | null;
+    deleted_at?: string | null;
+    has_media?: boolean;
+  } | null;
   edited_at: string | null;
   deleted_at: string | null;
   created_at: string;
+  client_id: string | null;
   is_mine: boolean;
+  delivery_status: DeliveryStatus;
 };
 
-export type CallSession = {
-  id: string;
+export type CallSession = {  id: string;
   conversation_id: string;
   caller_id: string;
   callee_id: string;
@@ -78,6 +115,17 @@ export const chatQueryKeys = {
   members: (conversationId: string) => ['chat', 'members', conversationId] as const,
   call: (callId: string) => ['chat', 'call', callId] as const,
 };
+
+/** Eksik alanları güvenli varsayılanlarla doldurur (eski kayıt + yeni şema). */
+function normalizeMessage(message: ChatMessage): ChatMessage {
+  return {
+    ...message,
+    media: Array.isArray(message.media) ? message.media : [],
+    client_id: message.client_id ?? null,
+    delivery_status: message.delivery_status ?? (message.is_mine ? 'sent' : 'read'),
+    reply_preview: message.reply_preview ?? null,
+  };
+}
 
 // -----------------------------------------------------------------------------
 // Conversations
@@ -206,6 +254,21 @@ export async function setConversationMuted(
   return ok(null);
 }
 
+export async function setConversationPinned(
+  conversationId: string,
+  pinned: boolean,
+): Promise<Result<boolean>> {
+  const { data, error } = await supabase.rpc('chat_set_pin', {
+    p_conversation_id: conversationId,
+    p_pinned: pinned,
+  });
+
+  if (error) {
+    return fail(rpcError(error));
+  }
+  return ok(Boolean(data));
+}
+
 // -----------------------------------------------------------------------------
 // Messages
 // -----------------------------------------------------------------------------
@@ -235,7 +298,11 @@ export async function fetchMessages(params: {
   if (error) {
     return fail(rpcError(error));
   }
-  return ok(((data as { items?: ChatMessage[] } | null)?.items ?? []) as ChatMessage[]);
+  return ok(
+    (((data as { items?: ChatMessage[] } | null)?.items ?? []) as ChatMessage[]).map(
+      normalizeMessage,
+    ),
+  );
 }
 
 export async function sendMessage(input: {
@@ -245,6 +312,8 @@ export async function sendMessage(input: {
   mediaPath?: string | null;
   mediaMeta?: Record<string, unknown>;
   replyToId?: string | null;
+  media?: MessageMediaInput[];
+  clientId?: string | null;
 }): Promise<Result<ChatMessage>> {
   const { data, error } = await supabase.rpc('chat_send_message', {
     p_conversation_id: input.conversationId,
@@ -253,12 +322,34 @@ export async function sendMessage(input: {
     p_media_path: input.mediaPath ?? null,
     p_media_meta: input.mediaMeta ?? {},
     p_reply_to: input.replyToId ?? null,
+    p_media: input.media ?? [],
+    p_client_id: input.clientId ?? null,
   });
 
   if (error) {
     return fail(rpcError(error));
   }
-  return ok(data as ChatMessage);
+  return ok(normalizeMessage(data as ChatMessage));
+}
+
+/** Realtime tek mesaj yaması için dar kapsamlı okuma (tüm sohbeti yeniden çekmez). */
+export async function fetchMessage(messageId: string): Promise<Result<ChatMessage>> {
+  const { data, error } = await supabase.rpc('chat_message_get', { p_message_id: messageId });
+  if (error) {
+    return fail(rpcError(error));
+  }
+  return ok(normalizeMessage(data as ChatMessage));
+}
+
+/** Mesaj karşı tarafa ulaştığında teslim damgası bırakır. */
+export async function markMessagesDelivered(conversationId: string): Promise<Result<number>> {
+  const { data, error } = await supabase.rpc('chat_mark_delivered', {
+    p_conversation_id: conversationId,
+  });
+  if (error) {
+    return fail(rpcError(error));
+  }
+  return ok(typeof data === 'number' ? data : 0);
 }
 
 export async function markConversationRead(conversationId: string): Promise<Result<number>> {
@@ -284,12 +375,13 @@ export async function editMessage(messageId: string, body: string): Promise<Resu
   return ok(null);
 }
 
-export async function deleteMessage(messageId: string): Promise<Result<null>> {
-  const { error } = await supabase.rpc('chat_delete_message', { p_message_id: messageId });
+export async function deleteMessage(messageId: string): Promise<Result<string[]>> {
+  const { data, error } = await supabase.rpc('chat_delete_message', { p_message_id: messageId });
   if (error) {
     return fail(rpcError(error));
   }
-  return ok(null);
+  const paths = ((data as { media_paths?: unknown } | null)?.media_paths ?? []) as unknown[];
+  return ok(paths.filter((path): path is string => typeof path === 'string'));
 }
 
 // -----------------------------------------------------------------------------
