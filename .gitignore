@@ -45,6 +45,8 @@ coverage/
 remote-admin-*
 tmp-admin-check.sql
 tmp-*.json
+.tmp-*
+ai-news-smoke-report.json
 scripts/.cache/
 supabase/_conflicting_parallel_work/
 

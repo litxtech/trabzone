@@ -19,7 +19,7 @@ import { formatCount } from '@/features/reels/utils/format';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 
-type TabKey = 'posts' | 'media' | 'reels' | 'saved' | 'listings' | 'trips';
+type TabKey = 'posts' | 'media' | 'news' | 'reels' | 'saved' | 'listings' | 'trips';
 
 export type ProfileContentTabsProps = {
   username: string;
@@ -34,10 +34,13 @@ export type ProfileContentTabsProps = {
 export function ProfileContentTabs({ username, userId, isOwner }: ProfileContentTabsProps) {
   const { theme } = useTheme();
   const router = useRouter();
-  const [tab, setTab] = useState<TabKey>('posts');
+  // Haber hesabında profil, doğrudan tüm yayınlanmış haberleri gösterir.
+  const isNewsPublisher = username.trim().toLocaleLowerCase('tr-TR') === 'trabzonehaber';
+  const [tab, setTab] = useState<TabKey>(isNewsPublisher ? 'news' : 'posts');
 
-  const posts = useProfilePosts(username, 'posts');
-  const media = useProfilePosts(username, 'media');
+  const posts = useProfilePosts(username, 'posts', 40);
+  const media = useProfilePosts(username, 'media', 40);
+  const news = useProfilePosts(username, 'news', 40);
   const saved = useSavedPosts();
   const listings = useSellerListings(userId || null);
   const reels = useUserReels(username, tab === 'reels');
@@ -50,6 +53,9 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
     icon: React.ComponentProps<typeof Ionicons>['name'];
   }[] = [
     { key: 'posts', label: 'Gönderiler', icon: 'grid-outline' },
+    ...((news.data?.length ?? 0) > 0
+      ? ([{ key: 'news', label: 'Haberler', icon: 'newspaper-outline' }] as const)
+      : []),
     { key: 'media', label: 'Medya', icon: 'images-outline' },
     { key: 'reels', label: 'Reels', icon: 'play-circle-outline' },
     ...(isOwner
@@ -312,6 +318,17 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
             'Henüz gönderi yok',
             isOwner ? 'İlk gönderini paylaşarak başla.' : 'Bu hesap henüz paylaşım yapmadı.',
             () => void posts.refetch(),
+          )
+        : null}
+
+      {tab === 'news'
+        ? renderPostGrid(
+            news.data,
+            news.isLoading,
+            news.isError,
+            'Henüz haber yok',
+            'Yayımlanan yerel haberler burada listelenir.',
+            () => void news.refetch(),
           )
         : null}
 

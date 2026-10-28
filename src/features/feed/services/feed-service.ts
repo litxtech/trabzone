@@ -93,7 +93,7 @@ export const feedQueryKeys = {
   post: (postId: string) => ['feed', 'post', postId] as const,
   comments: (postId: string) => ['feed', 'comments', postId] as const,
   saved: ['feed', 'saved'] as const,
-  profile: (username: string, kind: 'posts' | 'media') =>
+  profile: (username: string, kind: 'posts' | 'media' | 'news') =>
     ['feed', 'profile', username, kind] as const,
   storyFeed: ['stories', 'feed'] as const,
   storyUser: (userId: string) => ['stories', 'user', userId] as const,
@@ -275,7 +275,7 @@ export async function deleteComment(commentId: string): Promise<Result<null>> {
 
 export async function fetchProfilePosts(params: {
   username: string;
-  kind?: 'posts' | 'media';
+  kind?: 'posts' | 'media' | 'news';
   limit?: number;
   offset?: number;
 }): Promise<Result<FeedPost[]>> {

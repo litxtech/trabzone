@@ -1753,7 +1753,7 @@ function newsPostJsonLd(post, model) {
       isBasedOn: isSource ? post.canonical_source_url || undefined : undefined,
       creditText: isSource
         ? `${post.published_by || 'Haber kaynağı'} — kaynak izniyle aktarılmıştır`
-        : 'Trabzone AI Haber Merkezi — kamuya açık kaynak derlemesi',
+        : 'Trabzone Haber — yerel haber',
     },
     {
       '@type': 'BreadcrumbList',
@@ -1842,17 +1842,16 @@ function newsTransparencyHtml(post, model) {
   </section>`;
   }
 
-  return `<section class="tz-news__block tz-news__transparency" aria-labelledby="ai-bilgi">
-    <h2 id="ai-bilgi">Bu haber nasıl hazırlandı?</h2>
-    <p>${escapeHtml(post.disclosure || 'Bu haber, kamuya açık kaynaklardan yapay zekâ desteğiyle derlenmiştir.')}</p>
+  return `<section class="tz-news__block tz-news__transparency" aria-labelledby="haber-bilgi">
+    <h2 id="haber-bilgi">Kaynak ve yayın bilgisi</h2>
+    <p>${escapeHtml(post.disclosure || 'Bu haber, Trabzone Haber tarafından kamuya açık kaynaklardan yayıma hazırlanmıştır.')}</p>
     <ul>
       <li><strong>Yayıncı:</strong> ${escapeHtml(post.published_by || 'Trabzone Haber')} (Trabzone'un resmî haber hesabı)</li>
       <li><strong>Son kontrol:</strong> ${escapeHtml(newsStamp(model.checked) || 'Belirtilmemiş')}</li>
       <li><strong>Bağımsız kaynak sayısı:</strong> ${Number(post.independent_sources || 0)}</li>
-      ${post.ai_model ? `<li><strong>Kullanılan model:</strong> ${escapeHtml(post.ai_model)}</li>` : ''}
       <li><strong>Düzeltme talebi:</strong> <a href="${escapeHtml(`${SITE}${post.correction_path || '/support'}`)}">Destek merkezi</a> üzerinden iletilebilir.</li>
     </ul>
-    <p class="tz-news__muted">Trabzone haber kuruluşu veya gazeteci kimliği iddia etmez; içerikler otomatik derleme ve editör denetimiyle yayımlanır.</p>
+    <p class="tz-news__muted">Trabzone Haber, kamuya açık kaynaklardaki doğrulanmış bilgileri yerel gündeme taşır.</p>
   </section>`;
 }
 
@@ -1905,7 +1904,7 @@ function newsPostBodyHtml(post, model) {
         <span class="tz-news__tag">${escapeHtml(post.published_by || 'Trabzone Haber')}</span>
         ${post.kind === 'source'
           ? '<span class="tz-news__tag">Kaynak haber</span>'
-          : '<span class="tz-news__tag tz-news__tag--ai">AI destekli haber derlemesi</span>'}
+          : '<span class="tz-news__tag">Yerel haber</span>'}
         ${published ? `<span>· ${escapeHtml(published)}</span>` : ''}
         ${eventDate ? `<span>· Olay tarihi: ${escapeHtml(eventDate)}</span>` : ''}
         ${updated && updated !== published ? `<span>· Güncelleme: ${escapeHtml(updated)}</span>` : ''}
@@ -1967,14 +1966,14 @@ function newsCardHtml(item) {
   </article>`;
 }
 
-/** /haber dizini — yalnızca yayındaki AI haberleri. */
+/** /haber dizini — yayındaki yerel haberler. */
 async function renderNewsIndex(page) {
   const template = await getTemplate();
   const items = Array.isArray(page?.items) ? page.items.slice(0, 48) : [];
   const canonical = `${SITE}${NEWS_PATH}`;
-  const title = 'Trabzon Haberleri — AI Destekli Yerel Haber Merkezi | Trabzone';
+  const title = 'Trabzon Haberleri — Yerel Haber Merkezi | Trabzone';
   const description =
-    'Trabzon ve ilçelerinden doğrulanmış yerel gelişmeler. Trabzone AI Haber Merkezi tarafından kaynaklı, şeffaf ve güncel haber derlemeleri.';
+    'Trabzon ve ilçelerinden doğrulanmış yerel gelişmeler. Trabzone Haber tarafından kaynaklı ve güncel haberler.';
 
   let html = applyHead(template, {
     title: truncate(title, 70),
@@ -2012,7 +2011,7 @@ async function renderNewsIndex(page) {
     </style>
     <main class="tz-news-index">
       <h1>Trabzon haberleri</h1>
-      <p class="tz-news-index__lede">Trabzon ve 18 ilçesinden resmî kaynaklarla doğrulanmış gelişmeler. İçerikler yapay zekâ desteğiyle derlenir; kaynaklar ve son kontrol zamanı her haberde belirtilir.</p>
+      <p class="tz-news-index__lede">Trabzon ve 18 ilçesinden resmî kaynaklarla doğrulanmış gelişmeler. Kaynaklar ve son kontrol zamanı her haberde belirtilir.</p>
       <p class="tz-news-index__note">Yayıncı: Trabzone Haber · ${items.length ? `${Number(page?.total || items.length)} haber` : 'Henüz yayımlanmış haber yok'}</p>
       ${items.length ? `<div class="tz-grid">${items.map(newsCardHtml).join('')}</div>` : '<p>Yeni doğrulanmış haberler yayımlandıkça burada listelenir.</p>'}
     </main>`;

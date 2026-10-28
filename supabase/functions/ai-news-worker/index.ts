@@ -19,13 +19,51 @@ const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PLACEHOLDER_PATH = 'ai-news/_shared/card.png';
+import {
+  DISTRICT_IMAGE_CREDITS,
+  type DistrictImageCredit,
+} from './district-credits.ts';
 
 const DISTRICTS = [
   'Ortahisar', 'Akçaabat', 'Yomra', 'Arsin', 'Araklı', 'Sürmene', 'Of', 'Çaykara',
   'Dernekpazarı', 'Hayrat', 'Maçka', 'Düzköy', 'Vakfıkebir', 'Beşikdüzü', 'Çarşıbaşı',
   'Şalpazarı', 'Tonya', 'Köprübaşı',
 ];
+
+// Haber görselleri ilçenin kendi fotoğrafından seçilir. Dosyalar `posts`
+// kovasında `ai-news/districts/<slug>.jpg` altında tutulur.
+const DISTRICT_SLUGS: Record<string, string> = {
+  'akçaabat': 'akcaabat',
+  'araklı': 'arakli',
+  'arsin': 'arsin',
+  'beşikdüzü': 'besikduzu',
+  'çarşıbaşı': 'carsibasi',
+  'çaykara': 'caykara',
+  'dernekpazarı': 'dernekpazari',
+  'düzköy': 'duzkoy',
+  'hayrat': 'hayrat',
+  'köprübaşı': 'koprubasi',
+  'maçka': 'macka',
+  'of': 'of',
+  'ortahisar': 'ortahisar',
+  'sürmene': 'surmene',
+  'şalpazarı': 'salpazari',
+  'tonya': 'tonya',
+  'vakfıkebir': 'vakfikebir',
+  'yomra': 'yomra',
+};
+
+function districtPhoto(district: string | null): {
+  slug: string;
+  credit: DistrictImageCredit;
+} {
+  const key = (district ?? '').trim().toLocaleLowerCase('tr-TR');
+  const slug = DISTRICT_SLUGS[key] ?? 'ortahisar';
+  return {
+    slug,
+    credit: DISTRICT_IMAGE_CREDITS[slug] ?? DISTRICT_IMAGE_CREDITS.ortahisar,
+  };
+}
 
 const CATEGORY_SLUGS = [
   'son-dakika', 'trabzon-gundem', 'ilce-haberleri', 'trabzonspor', 'spor', 'belediye',
@@ -1128,7 +1166,7 @@ Yanıtı yalnızca şu JSON olarak ver:
   const raw = await chat(ctx, {
     model: ctx.settings.fast_model,
     system:
-      'Sen Trabzone AI Haber Merkezi için çalışan titiz bir yerel haber editörüsün. ' +
+      'Sen Trabzone Haber için çalışan titiz bir yerel haber editörüsün. ' +
       'Kaynakta olmayan hiçbir bilgiyi yazmazsın. Yanıtların yalnızca geçerli JSON olur.',
     user: prompt,
     maxTokens: 1600,
@@ -1570,6 +1608,8 @@ Kurallar:
 - Türkçe yazım kurallarına uy; resmî kurum adlarını doğru yaz.
 - SEO başlığı en fazla 60 karakter, SEO açıklaması 140-160 karakter.
 - social_copy: 1-2 cümle, sosyal akışta paylaşılabilir, abartısız.
+- Metnin hiçbir yerinde "yapay zekâ", "AI", "otomatik", "bot", "derleme", "özet" veya haberin nasıl hazırlandığına dair açıklama kullanma.
+- Okuyucuya doğrudan seslenen yapay zekâ notu, editör notu veya şeffaflık paragrafı ekleme; metin doğrudan haber gibi başlasın.
 
 Yanıtı yalnızca şu JSON olarak ver:
 {"title":"...","spot":"...","body":"paragraflar \\n\\n ile ayrılmış","social_copy":"...","seo_title":"...","seo_description":"...","quality_score":0.8}`;
@@ -1645,6 +1685,58 @@ Yanıtı yalnızca şu JSON olarak ver:
   return { draftId: data.draft_id, quality };
 }
 
+async function saveDistrictPhoto(
+  ctx: RunContext,
+  eventId: string,
+  title: string,
+  district: string | null,
+): Promise<boolean> {
+  const photo = districtPhoto(district);
+  const storagePath = `ai-news/districts/${photo.slug}.jpg`;
+  const creator = photo.credit.credit.split(' · ')[0] || 'Wikimedia Commons';
+  const altText = district
+    ? `${district} ilçesinden bir görünüm`
+    : 'Trabzon ilçelerinden bir görünüm';
+
+  try {
+    const saved = await svc<{ status: string }>('ai_news_media_save', {
+      p_event_id: eventId,
+      p_payload: {
+        storage_path: storagePath,
+        source_url: photo.credit.sourceUrl,
+        creator,
+        credit: photo.credit.credit,
+        attribution: photo.credit.credit,
+        license_code: photo.credit.license,
+        license_reference: photo.credit.sourceUrl,
+        is_placeholder: false,
+        event_match_score: 1,
+        mime_type: 'image/jpeg',
+        alt_text: altText.length > 280 ? altText.slice(0, 280) : altText,
+      },
+    });
+
+    if (saved.error) {
+      await logError(ctx, 'media', 'district_photo_save_failed', saved.error, {
+        eventId,
+        district: photo.slug,
+      });
+      return false;
+    }
+    if (saved.data?.status === 'approved') return true;
+    await logError(ctx, 'media', 'district_photo_not_approved', saved.data?.status ?? 'unknown', {
+      eventId,
+      district: photo.slug,
+    });
+  } catch (error) {
+    await logError(ctx, 'media', 'district_photo_failed', String(error), {
+      eventId,
+      district: photo.slug,
+    });
+  }
+  return false;
+}
+
 async function resolveMedia(
   ctx: RunContext,
   eventId: string,
@@ -1654,7 +1746,10 @@ async function resolveMedia(
   candidate: Candidate,
   sourceInfo: Source | undefined,
 ): Promise<void> {
-  // 1) Resmî kaynağın yazılı izinli görseli.
+  // 1) İlçenin kendi fotoğrafı: her haberde o ilçeyi temsil eden gerçek görsel.
+  if (await saveDistrictPhoto(ctx, eventId, title, district)) return;
+
+  // 2) Resmî kaynağın yazılı izinli görseli.
   if (
     sourceInfo &&
     sourceInfo.kind === 'official' &&
@@ -1714,7 +1809,7 @@ async function resolveMedia(
     }
   }
 
-  // 2) Lisansı ve olay ilişkisi doğrulanmış gerçek fotoğraf (Openverse / Wikimedia).
+  // 3) Lisansı ve olay ilişkisi doğrulanmış gerçek fotoğraf (Openverse / Wikimedia).
   try {
     const photo = await findLicensedPhoto(ctx, title, candidate.district ?? null, category);
     if (photo) {
@@ -1757,25 +1852,9 @@ async function resolveMedia(
     await logError(ctx, 'media', 'licensed_photo_failed', String(error), { eventId });
   }
 
-  // 3) Trabzone kategori tasarımı (olay fotoğrafı iddiası taşımaz).
-  try {
-    const saved = await svc<{ status: string; reject_reason: string | null }>('ai_news_media_save', {
-      p_event_id: eventId,
-      p_payload: {
-        storage_path: PLACEHOLDER_PATH,
-        license_code: 'category_artwork',
-        is_placeholder: true,
-        event_match_score: 1,
-        mime_type: 'image/png',
-        alt_text: `Trabzone AI Haber Merkezi kategori görseli: ${category}`,
-      },
-    });
-    if (saved.error) {
-      await logError(ctx, 'media', 'placeholder_save_failed', saved.error, { eventId });
-    }
-  } catch (error) {
-    await logError(ctx, 'media', 'placeholder_failed', String(error), { eventId });
-  }
+  // 4) Son çare: Trabzon merkezini temsil eden ilçe fotoğrafı.
+  // Kategori tasarımı veya yapay zekâ görseli hiçbir zaman kullanılmaz.
+  await saveDistrictPhoto(ctx, eventId, title, null);
 }
 
 async function processCandidate(
@@ -2445,7 +2524,7 @@ async function bootstrapPublisher(bearer: string, isAdmin: boolean): Promise<Jso
         last_name: 'Haber',
         is_verified: true,
         account_status: 'active',
-        bio: 'Trabzone’un resmî haber hesabı. Yerel gündem, resmî duyurular ve doğrulanmış gelişmeler. AI destekli haber derlemeleri açıkça etiketlenir.',
+        bio: 'Trabzone’un resmî haber hesabı. Trabzon ve 18 ilçesinden güncel gelişmeler, resmî duyurular ve yerel yaşam haberleri.',
       }),
     },
   );

@@ -3,7 +3,7 @@
 // Kaynak: https://turkiyeapi.dev (kamuya açık idari bölünme verisi).
 // İlçe merkez koordinatları Mapbox Geocoding ile çözümlenir; mahalle
 // koordinatı uydurulmaz, null bırakılır ve haritada ilçe merkezine göre
-// gruplanır. Üretilen SQL `supabase/migrations/0044_geo_seed.sql` dosyasına
+// gruplanır. Üretilen SQL `supabase/migrations/0047_geo_seed.sql` dosyasına
 // yazılır; çalışma zamanında dış servise bağımlılık yoktur.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -91,7 +91,7 @@ for (const district of districts) {
 }
 
 const lines = [];
-lines.push('-- 0045_geo_seed.sql');
+lines.push('-- 0047_geo_seed.sql');
 lines.push('-- OTOMATİK ÜRETİLDİ: scripts/build-geo-seed.mjs');
 lines.push('--');
 lines.push('-- Kaynak: turkiyeapi.dev (Trabzon ili idari bölünme verisi, kamuya açık).');
@@ -174,6 +174,6 @@ lines.push('comment on table public.neighborhoods is');
 lines.push("  'Trabzon mahalleleri. Kaynak: turkiyeapi.dev. Koordinat bilinmediği için center_lat/lng null.';");
 lines.push('');
 
-const out = join(root, 'supabase', 'migrations', '0045_geo_seed.sql');
+const out = join(root, 'supabase', 'migrations', '0047_geo_seed.sql');
 writeFileSync(out, lines.join('\n'), 'utf8');
 console.log(`wrote ${out} — ${districtRows.length} ilçe, ${neighborhoodRows.length} mahalle, ${requestCount} istek`);

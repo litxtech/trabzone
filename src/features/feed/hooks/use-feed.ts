@@ -100,10 +100,14 @@ export function useSavedPosts() {
   });
 }
 
-export function useProfilePosts(username: string, kind: 'posts' | 'media' = 'posts') {
+export function useProfilePosts(
+  username: string,
+  kind: 'posts' | 'media' | 'news' = 'posts',
+  limit = 18,
+) {
   return useQuery({
     queryKey: feedQueryKeys.profile(username, kind),
-    queryFn: () => unwrap(fetchProfilePosts({ username, kind })),
+    queryFn: () => unwrap(fetchProfilePosts({ username, kind, limit })),
     enabled: Boolean(username),
     staleTime: 30_000,
   });

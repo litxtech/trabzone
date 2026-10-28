@@ -1,7 +1,7 @@
 /**
  * Trabzone Yolculuk Paylaşımı — istemci tipleri.
  *
- * Şekiller `supabase/migrations/0033_ride_core.sql` ve `0034_ride_trips.sql`
+ * Şekiller `supabase/migrations/0035_ride_core.sql` ve `0036_ride_trips.sql`
  * içindeki SECURITY DEFINER RPC'lerin döndürdüğü JSON ile birebir eşleşir.
  * İstemci hiçbir zaman ride_* tablolarını doğrudan okumaz.
  */
