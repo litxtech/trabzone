@@ -49,6 +49,7 @@ export type Verification = {
   expires_at: string | null;
   reject_reason: string | null;
   created_at: string;
+  reviewed_at?: string | null;
   document_path?: string;
   meta?: Record<string, unknown>;
 };
@@ -77,6 +78,9 @@ export type RidePolicy = {
 export type RideMemberProfile = {
   user_id: string;
   identity_status: 'unverified' | 'pending' | 'approved' | 'rejected' | 'expired';
+  /** Sunucunun hesapladığı, süresi geçmemiş onaylı kimlik bayrağı. */
+  identity_verified?: boolean;
+  identity_verified_at?: string | null;
   driver_status: 'none' | 'pending' | 'approved' | 'rejected' | 'suspended';
   driver_bio: string | null;
   level: RideLevel;
@@ -161,7 +165,10 @@ export type RideDriverPublic = {
   username: string;
   first_name: string | null;
   avatar_path: string | null;
+  /** Genel profil doğrulaması (sosyal rozet). */
   is_verified: boolean;
+  /** Yolculuk kimliği doğrulaması; mavi tik bu alandan gelir. */
+  identity_verified?: boolean;
   bio?: string | null;
   level: RideLevel | null;
   rating_avg: number | null;
@@ -353,6 +360,7 @@ export type RideReservation = {
   driver_first_name: string | null;
   driver_avatar_path: string | null;
   driver_verified: boolean;
+  driver_identity_verified?: boolean;
   driver_level: RideLevel | null;
   driver_rating: number | null;
   driver_trips: number | null;
@@ -369,6 +377,7 @@ export type RideReservation = {
   passenger_username: string;
   passenger_first_name: string | null;
   passenger_avatar_path: string | null;
+  passenger_identity_verified?: boolean;
   passengers: ReservationPassenger[];
   seats_detail: SeatAllocation[];
   has_reviewed: boolean;
@@ -526,6 +535,27 @@ export type LocationShare = {
   id: string;
   token: string;
   expires_at: string;
+};
+
+/**
+ * Süreli konum bağlantısının karşı taraf görünümü.
+ *
+ * `ride_location_share_view` token'ı doğrular; süresi dolmuş veya iptal
+ * edilmiş bağlantıda RPC hata döner. Konum henüz akmamışsa `lat`/`lng` null
+ * gelir — bu durumda uydurma koordinat gösterilmez.
+ */
+export type LocationShareView = {
+  shared_by: string;
+  offer_status: string;
+  origin_label: string;
+  dest_label: string;
+  depart_at: string;
+  expires_at: string;
+  lat: number | null;
+  lng: number | null;
+  speed_kmh: number | null;
+  updated_at: string | null;
+  note: string;
 };
 
 export type Paged<T> = {

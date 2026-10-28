@@ -17,6 +17,7 @@ import { isR2Path, R2_ENABLED, r2PublicUrl, uploadToR2 } from '@/features/media/
 import type {
   EmergencyContact,
   LocationShare,
+  LocationShareView,
   Paged,
   PriceHint,
   ReservationStatus,
@@ -101,6 +102,7 @@ export const rideQueryKeys = {
   contacts: ['ride', 'contacts'] as const,
   reviews: (userId: string) => ['ride', 'reviews', userId] as const,
   waitlistOffers: ['ride', 'waitlist', 'offers'] as const,
+  locationShare: (token: string) => ['ride', 'share', token] as const,
   publicConfig: ['ride', 'public-config'] as const,
   admin: ['ride', 'admin'] as const,
 };
@@ -1002,6 +1004,13 @@ export const createLocationShare = (reservationId: string, minutes = 60) =>
 
 export const revokeLocationShare = (shareId: string) =>
   call<{ ok: boolean }>('ride_location_share_revoke', { p_share_id: shareId });
+
+/**
+ * Paylaşılan süreli konum bağlantısını okur. RPC oturum ister; bağlantıyı
+ * açan kişi giriş yapmamışsa uygulama önce giriş ekranına yönlendirir.
+ */
+export const viewLocationShare = (token: string) =>
+  call<LocationShareView>('ride_location_share_view', { p_token: token });
 
 export const listEmergencyContacts = () =>
   call<{ items: EmergencyContact[] }>('ride_emergency_contacts_list').then((result) =>

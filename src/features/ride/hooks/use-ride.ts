@@ -476,6 +476,24 @@ export function useRevokeLocationShare() {
   });
 }
 
+/**
+ * Paylaşılan konum bağlantısı.
+ *
+ * `refetchInterval` 20 sn: sürücünün konumu `ride_tracking_sessions` üzerinden
+ * güncellenir, karşı taraf sayfayı elle yenilemeden takip edebilmelidir.
+ * Bağlantı süresi dolduğunda RPC hata verir ve sorgu yeniden denenmez.
+ */
+export function useLocationShareView(token: string | null) {
+  return useQuery({
+    queryKey: ride.rideQueryKeys.locationShare(token ?? 'none'),
+    queryFn: () => unwrap(ride.viewLocationShare(token as string)),
+    enabled: Boolean(token),
+    staleTime: 10_000,
+    refetchInterval: 20_000,
+    retry: false,
+  });
+}
+
 export function useSubmitReview() {
   const client = useQueryClient();
   return useMutation({

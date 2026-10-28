@@ -141,6 +141,33 @@ export function staticMapUrl(input: {
   );
 }
 
+/**
+ * Tek nokta için statik harita (canlı konum takibi).
+ *
+ * Güzergâh önizlemesinden farkı: yol çizgisi yok, yalnızca iğne işareti var.
+ * Token yoksa null döner; istemci sahte harita göstermez.
+ */
+export function staticPointMapUrl(input: {
+  lat: number;
+  lng: number;
+  zoom?: number;
+  width?: number;
+  height?: number;
+}): string | null {
+  if (!env.mapboxToken) {
+    return null;
+  }
+  const width = Math.min(Math.max(input.width ?? 760, 200), 1280);
+  const height = Math.min(Math.max(input.height ?? 420, 160), 720);
+  const zoom = Math.min(Math.max(input.zoom ?? 14.5, 1), 19);
+  const center = `${input.lng.toFixed(5)},${input.lat.toFixed(5)}`;
+  const pin = `pin-l+2F6BFF(${input.lng.toFixed(5)},${input.lat.toFixed(5)})`;
+  return (
+    `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${pin}/${center},${zoom},0/` +
+    `${width}x${height}@2x?padding=30&access_token=${env.mapboxToken}`
+  );
+}
+
 function simplify(points: LatLng[], max: number): LatLng[] {
   if (points.length <= max) {
     return points;

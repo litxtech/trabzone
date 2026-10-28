@@ -14,11 +14,15 @@ import {
 
 import { AppText, Avatar, Badge, Button, Card } from '@/components/ui';
 import { Screen } from '@/components/ui/Screen';
-import { env } from '@/config/env';
 import { shareRideSummary } from '@/features/documents';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
+import { liveLocationShareLink } from '@/features/share/links';
 import { useTheme } from '@/theme/ThemeProvider';
 
+import {
+  VERIFIED_BLUE,
+  VerifiedTick,
+} from '@/features/ride/components/IdentityBadge';
 import { RideEmptyState, RideSection, StatusPill } from '@/features/ride/components/RideBits';
 import { RideHeader } from '@/features/ride/components/RideHeader';
 import { RideMapPreview } from '@/features/ride/components/RideMapPreview';
@@ -201,6 +205,9 @@ export default function RideTripDetailScreen() {
     : (reservation.driver_first_name ?? reservation.driver_username);
   const partnerAvatar = isDriver ? passengerAvatar : driverAvatar;
   const partnerId = isDriver ? reservation.passenger_id : reservation.driver_id;
+  const partnerIdentityVerified = isDriver
+    ? Boolean(reservation.passenger_identity_verified)
+    : Boolean(reservation.driver_identity_verified);
   const trackingPoint =
     tracking.data?.lat != null && tracking.data?.lng != null
       ? { lat: tracking.data.lat, lng: tracking.data.lng }
@@ -242,7 +249,7 @@ export default function RideTripDetailScreen() {
       { reservationId: reservation.id, minutes: 120 },
       {
         onSuccess: async (result) => {
-          const link = `${env.appUrl}/ride/share/${result.token}`;
+          const link = liveLocationShareLink(result.token);
           await Clipboard.setStringAsync(link);
           setShareLink(link);
           setNotice('Süreli konum bağlantısı kopyalandı. 2 saat sonra otomatik kapanır.');
@@ -333,6 +340,7 @@ export default function RideTripDetailScreen() {
               <AppText variant="bodyStrong" numberOfLines={1}>
                 {partnerName}
               </AppText>
+              {partnerIdentityVerified ? <VerifiedTick size={15} /> : null}
               <Badge label={isDriver ? 'Yolcu' : 'Sürücü'} tone="neutral" />
             </View>
             <AppText variant="caption" color="textSecondary">
@@ -340,6 +348,13 @@ export default function RideTripDetailScreen() {
                 ? `${reservation.seats} koltuk · ${reservation.passenger_username}`
                 : `${reservation.driver_trips ?? 0} yolculuk · ${reservation.driver_rating?.toFixed(1) ?? '—'} ★`}
             </AppText>
+            {partnerIdentityVerified ? (
+              <View style={styles.verifiedRow}>
+                <AppText variant="caption" color={VERIFIED_BLUE}>
+                  Kimlik doğrulandı · Yola çık
+                </AppText>
+              </View>
+            ) : null}
           </View>
           <Pressable
             accessibilityRole="button"
@@ -948,6 +963,7 @@ const styles = StyleSheet.create({
   summary: { gap: 12 },
   partnerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  verifiedRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   pdfBtn: {
     width: 34,
