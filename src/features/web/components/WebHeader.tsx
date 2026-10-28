@@ -248,12 +248,13 @@ export function WebHeader() {
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Menüyü aç"
+                  accessibilityLabel={menuOpen ? 'Menüyü kapat' : 'Menüyü aç'}
+                  accessibilityState={{ expanded: menuOpen }}
                   hitSlop={ICON_HIT_SLOP}
-                  onPress={openMenu}
+                  onPress={menuOpen ? closeMenu : openMenu}
                   style={({ pressed }) => [styles.menuButton, { opacity: pressed ? 0.6 : 1 }]}
                 >
-                  <Ionicons name="menu" size={22} color="#FFFFFF" />
+                  <Ionicons name={menuOpen ? 'close' : 'menu'} size={22} color="#FFFFFF" />
                 </Pressable>
               </>
             )}
