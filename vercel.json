@@ -34,6 +34,8 @@
     { "source": "/policy/real-estate-rules", "destination": "/seo/real-estate-rules.html" },
     { "source": "/policy/vehicle-rules", "destination": "/seo/vehicle-rules.html" },
 
+    { "source": "/sitemap-listings.xml", "destination": "/api/sitemap-listings" },
+
     { "source": "/marketplace/real-estate/create", "destination": "/index.html" },
     { "source": "/marketplace/real-estate/my-listings", "destination": "/index.html" },
     { "source": "/marketplace/real-estate", "destination": "/index.html" },
