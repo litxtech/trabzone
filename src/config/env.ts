@@ -11,7 +11,6 @@ const rawEnv = {
   EXPO_PUBLIC_LIVEKIT_URL: process.env.EXPO_PUBLIC_LIVEKIT_URL,
   EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN: process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN,
   EXPO_PUBLIC_ENABLE_SOCIAL_AUTH: process.env.EXPO_PUBLIC_ENABLE_SOCIAL_AUTH,
-  EXPO_PUBLIC_MAX_UPLOAD_MB: process.env.EXPO_PUBLIC_MAX_UPLOAD_MB,
   EXPO_PUBLIC_R2_PUBLIC_URL: process.env.EXPO_PUBLIC_R2_PUBLIC_URL,
 };
 
@@ -29,19 +28,6 @@ const envSchema = z.object({
   EXPO_PUBLIC_LIVEKIT_URL: z.string().optional(),
   EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN: z.string().optional(),
   EXPO_PUBLIC_ENABLE_SOCIAL_AUTH: booleanFlag,
-  /**
-   * Supabase Storage'ın tek dosya sınırı (MB). Yalnızca gizli sohbet medyası
-   * Supabase'e yazıldığı için bu değer yalnızca onu etkiler; herkese açık medya
-   * R2'ye sınırsız gider. Free planda 50'dir; plan yükseltildiğinde yalnızca
-   * ortam değişkeni güncellenir.
-   */
-  EXPO_PUBLIC_MAX_UPLOAD_MB: z
-    .string()
-    .optional()
-    .transform((value) => {
-      const parsed = Number(value);
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : 50;
-    }),
   /**
    * Cloudflare R2 public taban adresi (örn. `https://media.trabzoneapp.com`).
    * Tanımlıysa herkese açık kovalardaki bütün fotoğraf ve videolar R2'ye
@@ -72,11 +58,10 @@ export const env = {
   mapboxToken: parsed.data.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN ?? null,
   enableSocialAuth: parsed.data.EXPO_PUBLIC_ENABLE_SOCIAL_AUTH,
   /**
-   * Supabase Storage'ın tek dosya sınırı. Yalnızca gizli sohbet medyası için
-   * kullanılır; herkese açık içerikte ürün tarafında sınır yoktur.
+   * R2 public taban adresi. Tanımlıysa bütün medya R2'ye yüklenir ve herkese
+   * açık kovalar bu adresten sunulur; gizli sohbet medyası private bucket'ta
+   * kalır ve imzalı GET ile okunur.
    */
-  maxUploadBytes: Math.round(parsed.data.EXPO_PUBLIC_MAX_UPLOAD_MB * 1024 * 1024),
-  /** R2 public taban adresi; tanımlıysa herkese açık bütün medya R2'ye gider. */
   r2PublicUrl: parsed.data.EXPO_PUBLIC_R2_PUBLIC_URL ?? null,
   isDev: __DEV__,
 } as const;

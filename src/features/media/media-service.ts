@@ -3,11 +3,18 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 
 import { appError } from '@/services/errors';
 import { supabase } from '@/services/supabase/client';
-import { env } from '@/config/env';
 import { fail, ok, type Result } from '@/utils/result';
 
-import { loadLegacyFileSystem, localFileSize, type LegacyFileSystem } from './local-file';
-import { deleteFromR2, R2_ENABLED, isR2Path, r2PublicUrl, uploadToR2 } from './r2-service';
+import { localFileSize } from './local-file';
+import {
+  deleteFromR2,
+  isPrivateBucket,
+  isR2Path,
+  R2_ENABLED,
+  r2PublicUrl,
+  signedR2GetUrls,
+  uploadToR2,
+} from './r2-service';
 import {
   generateVideoPoster,
   prepareVideoForUpload,
@@ -65,22 +72,6 @@ export type UploadedVideo = {
   video: UploadedMedia;
   poster: UploadedMedia | null;
 };
-
-/**
- * Gizli sohbet medyası için tek dosya sınırı.
- *
- * Herkese açık kovalar (gönderi, hikâye, reels, ilan, işletme, emlak) Cloudflare
- * R2'ye yazılır ve orada tek dosya sınırı yoktur. Supabase Storage'a yalnızca
- * `message-media` gider; oradaki tavan Supabase projesinin "global file size
- * limit" ayarıdır (Free planda 50 MB, plan yükseltilince artırılabilir) ve
- * `EXPO_PUBLIC_MAX_UPLOAD_MB` ile istemciye yansıtılır.
- *
- * Bu değer bir ürün sınırı değil, depo tavanının istemci tarafındaki
- * karşılığıdır: video bu boyuta sıkıştırılarak yüklenir, kullanıcı reddedilmez.
- */
-const MESSAGE_MEDIA_LIMIT_BYTES = env.maxUploadBytes;
-/** Akış yolu yoksa belleğe alınabilecek en büyük dosya (OOM koruması). */
-const MAX_IN_MEMORY_BYTES = 32 * 1024 * 1024;
 
 const SAFE_SEGMENT = /[^a-zA-Z0-9._-]/g;
 
@@ -165,158 +156,6 @@ function fileNameFor(
   return `${kind}-${random}`;
 }
 
-function tooLargeError(maxBytes: number) {
-  const gb = maxBytes / (1024 * 1024 * 1024);
-  const label =
-    gb >= 1 ? `${Number(gb.toFixed(gb >= 10 ? 0 : 1))} GB` : `${Math.round(maxBytes / (1024 * 1024))} MB`;
-  return appError('invalid_input', `Dosya ${label} sınırını aşıyor.`);
-}
-
-function uploadErrorMessage(raw: string | null | undefined) {
-  const text = (raw ?? '').toLowerCase();
-  if (text.includes('bucket not found')) {
-    return 'Medya deposu hazır değil. Lütfen daha sonra tekrar dene.';
-  }
-  if (text.includes('too large') || text.includes('413') || text.includes('exceeded')) {
-    return 'Dosya depo sınırının üzerinde. Daha büyük dosyalar için depo ayarlarındaki dosya boyutu sınırını yükselt.';
-  }
-  return 'Medya yüklenemedi. Bağlantını kontrol edip tekrar dene.';
-}
-
-type PutInput = {
-  bucket: MediaBucket;
-  folder: string;
-  uploaderId?: string;
-  uri: string;
-  contentType: string;
-  extension: string;
-  kind: 'image' | 'video';
-  maxBytes: number;
-  onProgress?: (ratio: number) => void;
-};
-
-/**
- * Dosyayı diskten doğrudan imzalı URL'ye akıtır. Önceden dosya `fetch` +
- * `arrayBuffer` ile belleğe alınıp yükleniyordu; 10 MB'lık bir videoda bile
- * fazladan kopya ve yavaş JS köprüsü trafiği oluşuyordu. Akış yolu native
- * tarafta dosyayı olduğu gibi gönderir ve gerçek yükleme yüzdesi verir.
- *
- * İmzalı URL alınamazsa `null` döner ve çağıran bellek içi yola düşer.
- */
-async function streamUpload(
-  fs: LegacyFileSystem,
-  input: PutInput,
-  path: string,
-): Promise<Result<{ path: string; size: number | null }> | null> {
-  let signedUrl: string | null = null;
-  try {
-    const { data, error } = await supabase.storage.from(input.bucket).createSignedUploadUrl(path);
-    if (!error && data?.signedUrl) {
-      signedUrl = data.signedUrl;
-    }
-  } catch {
-    signedUrl = null;
-  }
-  if (!signedUrl) {
-    return null;
-  }
-
-  const knownSize = await localFileSize(input.uri);
-  if (knownSize !== null && knownSize > input.maxBytes) {
-    return fail(tooLargeError(input.maxBytes));
-  }
-
-  try {
-    const task = fs.createUploadTask(
-      signedUrl,
-      input.uri,
-      {
-        httpMethod: 'PUT',
-        uploadType: fs.FileSystemUploadType.BINARY_CONTENT,
-        headers: {
-          'Content-Type': input.contentType,
-          'cache-control': 'max-age=31536000',
-          'x-upsert': 'false',
-          // İmzalı URL token'ı yetkilendirmeyi taşır; anahtar gateway için.
-          Authorization: `Bearer ${env.supabasePublishableKey}`,
-        },
-      },
-      (progress) => {
-        if (progress.totalBytesExpectedToSend > 0) {
-          input.onProgress?.(
-            Math.min(1, progress.totalBytesSent / progress.totalBytesExpectedToSend),
-          );
-        }
-      },
-    );
-
-    const result = await task.uploadAsync();
-
-    if (result && result.status >= 200 && result.status < 300) {
-      return ok({ path, size: knownSize });
-    }
-    if (result && (result.status === 400 || result.status === 413)) {
-      // Boyut/doğrulama hatası: yeniden denemek anlamsız.
-      return fail(appError('unknown', uploadErrorMessage(result.body)));
-    }
-    // Diğer durumlarda imzalı yol desteklenmiyor olabilir; bellek içi yola düş.
-    return null;
-  } catch {
-    // Akış görevi başlatılamadı (modül bu derlemede yok vb.) — bellek içi yol.
-    return null;
-  }
-}
-
-async function putObject(input: PutInput): Promise<Result<{ path: string; size: number | null }>> {
-  const fileName = fileNameFor(input.bucket, input.uploaderId, input.kind, input.extension);
-  const path = `${input.folder}/${fileName}`;
-
-  const fs = await loadLegacyFileSystem();
-  if (fs) {
-    const streamed = await streamUpload(fs, input, path);
-    if (streamed) {
-      return streamed;
-    }
-  }
-
-  // Web veya imzalı URL kullanılamadığında bellek içi yol. Bu yol dosyayı
-  // RAM'e aldığı için büyük dosyalarda uygulamayı düşürmemek adına sınırlıdır.
-  try {
-    const knownSize = await localFileSize(input.uri);
-    if (knownSize !== null && knownSize > MAX_IN_MEMORY_BYTES) {
-      return fail(
-        appError(
-          'unknown',
-          'Bu derlemede büyük dosya aktarımı desteklenmiyor. Uygulamayı güncelleyip tekrar dene.',
-        ),
-      );
-    }
-
-    const response = await fetch(input.uri);
-    const blob = await response.arrayBuffer();
-
-    if (blob.byteLength > input.maxBytes) {
-      return fail(tooLargeError(input.maxBytes));
-    }
-
-    input.onProgress?.(0.5);
-    const { error } = await supabase.storage.from(input.bucket).upload(path, blob, {
-      contentType: input.contentType,
-      upsert: false,
-      cacheControl: '31536000',
-    });
-
-    if (error) {
-      return fail(appError('unknown', uploadErrorMessage(error.message)));
-    }
-
-    input.onProgress?.(1);
-    return ok({ path, size: blob.byteLength });
-  } catch {
-    return fail(appError('network'));
-  }
-}
-
 /**
  * Uploads one media file and returns its storage path. Nothing is written to a
  * table here: the caller commits the path through an RPC so a failed metadata
@@ -368,9 +207,7 @@ export async function uploadMedia(input: UploadInput): Promise<Result<UploadedMe
       size,
     };
     preparedVideo = await prepareVideoForUpload(source, {
-      // Yalnızca Supabase Storage'a giden gizli sohbet medyası boyut sınırına
-      // tabidir; herkese açık içerik R2'ye sınırsız gider.
-      targetBytes: input.bucket === 'message-media' ? MESSAGE_MEDIA_LIMIT_BYTES : null,
+      // Sohbet medyası da sınırsız: R2'ye gider, sıkıştırma yalnızca hız için.
       onProgress: (ratio) => input.onProgress?.('preparing', ratio),
     });
     preparedUri = preparedVideo.uri;
@@ -382,99 +219,46 @@ export async function uploadMedia(input: UploadInput): Promise<Result<UploadedMe
     contentType = 'video/mp4';
     extension = 'mp4';
 
-    // Boyut meta veriden gelmediyse diskten okunur; son kontrol buna bağlı.
+    // Boyut meta veriden gelmediyse diskten okunur.
     if (size === null) {
       size = await localFileSize(preparedUri);
     }
   }
 
-  // Boyut kontrolü yalnızca Supabase Storage'a giden gizli sohbet medyası için
-  // geçerlidir; R2'ye giden herkese açık içerikte tavan yoktur.
-  const oversized = size !== null && size > MESSAGE_MEDIA_LIMIT_BYTES;
-
-  // Depolama politikası: herkese açık kovalardaki (ilan, gönderi, hikâye,
-  // reels, işletme, emlak) bütün fotoğraf ve videolar Cloudflare R2'ye yazılır.
-  // Supabase Storage'a yalnızca gizli sohbet medyası gider; orada imzalı URL ve
-  // RLS politikaları gerektiği için tek istisna budur. Herkese açık bir kovada
-  // Supabase'e sessiz düşüş yoktur: R2 yapılandırılmadıysa yükleme reddedilir.
-  if (input.bucket !== 'message-media') {
-    if (!R2_ENABLED) {
-      return fail(
-        appError(
-          'unknown',
-          'Cloudflare R2 medya deposu yapılandırılmadı (EXPO_PUBLIC_R2_PUBLIC_URL eksik). Yükleme yapılamaz.',
-        ),
-      );
-    }
-
-    const r2Path = `${cleanSegment(input.folder)}/r2/${fileNameFor(
-      input.bucket,
-      input.uploaderId,
-      kind === 'video' ? 'video' : 'image',
-      extension,
-    )}`;
-    input.onProgress?.('uploading', 0);
-    const uploaded = await uploadToR2({
-      bucket: input.bucket,
-      path: r2Path,
-      uri: preparedUri,
-      contentType,
-      onProgress: (ratio) => input.onProgress?.('uploading', ratio),
-    });
-    if (!uploaded.ok) {
-      return fail(uploaded.error);
-    }
-    input.onProgress?.('uploading', 1);
-    return ok({
-      path: uploaded.data.path,
-      publicUrl: uploaded.data.publicUrl || null,
-      mediaType: kind === 'video' ? 'video' : 'image',
-      mime: contentType,
-      size: kind === 'video' ? (size ?? uploaded.data.size) : uploaded.data.size,
-      width,
-      height,
-      durationMs,
-      thumbnailPath: null,
-      thumbnailUrl: null,
-    });
-  }
-
-  if (oversized) {
+  // Depolama politikası: bütün medya Cloudflare R2'ye yazılır. R2'de tek dosya
+  // boyutu sınırı yoktur; sıkıştırma yalnızca paylaşım hızı içindir.
+  // Gizli sohbet medyası ayrı (private) bucket'a gider ve yalnızca imzalı GET
+  // adresiyle okunur, bu yüzden public URL üretilmez.
+  if (!R2_ENABLED) {
     return fail(
       appError(
-        'invalid_input',
-        'Sohbet videosu depo sınırına sığdırılamadı. Bağlantını kontrol edip tekrar dene; sorun sürerse uygulamayı güncelle.',
+        'unknown',
+        'Cloudflare R2 medya deposu yapılandırılmadı (EXPO_PUBLIC_R2_PUBLIC_URL eksik). Yükleme yapılamaz.',
       ),
     );
   }
 
+  const r2Path = `${cleanSegment(input.folder)}/r2/${fileNameFor(
+    input.bucket,
+    input.uploaderId,
+    kind === 'video' ? 'video' : 'image',
+    extension,
+  )}`;
   input.onProgress?.('uploading', 0);
-  const uploaded = await putObject({
+  const uploaded = await uploadToR2({
     bucket: input.bucket,
-    folder: input.folder,
-    uploaderId: input.uploaderId,
+    path: r2Path,
     uri: preparedUri,
     contentType,
-    extension,
-    kind: kind === 'video' ? 'video' : 'image',
-    maxBytes: MESSAGE_MEDIA_LIMIT_BYTES,
     onProgress: (ratio) => input.onProgress?.('uploading', ratio),
   });
-
   if (!uploaded.ok) {
     return fail(uploaded.error);
   }
-
   input.onProgress?.('uploading', 1);
-
-  const publicUrl =
-    input.bucket === 'message-media'
-      ? null
-      : supabase.storage.from(input.bucket).getPublicUrl(uploaded.data.path).data.publicUrl;
-
   return ok({
     path: uploaded.data.path,
-    publicUrl: publicUrl || null,
+    publicUrl: isPrivateBucket(input.bucket) ? null : uploaded.data.publicUrl || null,
     mediaType: kind === 'video' ? 'video' : 'image',
     mime: contentType,
     size: kind === 'video' ? (size ?? uploaded.data.size) : uploaded.data.size,
@@ -592,7 +376,13 @@ export async function removeMedia(bucket: MediaBucket, paths: string[]) {
   }
 }
 
-/** Signs private chat media in a single round-trip. */
+/**
+ * Gizli sohbet medyasını imzalar.
+ *
+ * Yeni medya R2'deki private bucket'ta durur ve `r2-sign` üzerinden tek turda
+ * toplu imzalanır. Eski (R2 öncesi) mesajlar Supabase Storage'da kaldığı için
+ * onlar da imzalanır; iki yol aynı haritada birleşir.
+ */
 export async function signedMessageUrls(
   paths: string[],
   expiresIn = 3600,
@@ -602,19 +392,31 @@ export async function signedMessageUrls(
     return {};
   }
 
-  const { data, error } = await supabase.storage
-    .from('message-media')
-    .createSignedUrls(unique, expiresIn);
-  if (error || !data) {
-    return {};
+  const r2Paths = unique.filter((path) => isR2Path(path));
+  const legacyPaths = unique.filter((path) => !isR2Path(path));
+  const map: Record<string, string> = {};
+
+  if (r2Paths.length > 0) {
+    Object.assign(map, await signedR2GetUrls('message-media', r2Paths));
   }
 
-  const map: Record<string, string> = {};
-  for (const entry of data) {
-    if (entry.signedUrl && entry.path) {
-      map[entry.path] = entry.signedUrl;
+  if (legacyPaths.length > 0) {
+    try {
+      const { data, error } = await supabase.storage
+        .from('message-media')
+        .createSignedUrls(legacyPaths, expiresIn);
+      if (!error && data) {
+        for (const entry of data) {
+          if (entry.signedUrl && entry.path) {
+            map[entry.path] = entry.signedUrl;
+          }
+        }
+      }
+    } catch {
+      // Eski medya imzalanamazsa yeni medya yine gösterilir.
     }
   }
+
   return map;
 }
 

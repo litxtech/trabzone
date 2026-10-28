@@ -26,6 +26,17 @@ export const R2_ENABLED = env.r2PublicUrl !== null;
 
 const R2_SEGMENT = 'r2';
 
+/**
+ * Public özel alan adından sunulmayan, yalnızca imzalı GET ile okunan kovalar.
+ * Sohbet medyası buradadır: nesne adresi tahmin edilse bile public adresten
+ * okunamaz.
+ */
+const PRIVATE_BUCKETS = new Set<string>(['message-media']);
+
+export function isPrivateBucket(bucket: string): boolean {
+  return PRIVATE_BUCKETS.has(bucket);
+}
+
 export type R2UploadResult = { path: string; publicUrl: string; size: number | null };
 
 /** Depo yolu R2'de mi tutuluyor? */
@@ -36,9 +47,9 @@ export function isR2Path(path: string | null | undefined): boolean {
   return path.split('/')[1] === R2_SEGMENT;
 }
 
-/** R2 nesnesinin herkese açık adresi. */
+/** R2 nesnesinin herkese açık adresi. Gizli kovalarda `null` döner. */
 export function r2PublicUrl(bucket: string, path: string): string | null {
-  if (!env.r2PublicUrl) {
+  if (!env.r2PublicUrl || isPrivateBucket(bucket)) {
     return null;
   }
   return `${env.r2PublicUrl.replace(/\/+$/, '')}/${bucket}/${path}`;
@@ -177,4 +188,49 @@ export async function uploadToR2(input: R2UploadInput): Promise<Result<R2UploadR
     publicUrl: r2PublicUrl(input.bucket, input.path) ?? '',
     size,
   });
+}
+
+/**
+ * Gizli nesneler için süreli imzalı GET adresleri.
+ *
+ * Anahtarlar tek turda (50'lik parçalar hâlinde) imzalanır; sohbet ekranı
+ * onlarca medyayı ayrı ayrı function çağırmadan açabilir. Sonuç, depo yoluna
+ * göre anahtarlanır: `{ '<conversation>/r2/dosya.mp4': 'https://...' }`.
+ */
+export async function signedR2GetUrls(
+  bucket: string,
+  paths: string[],
+): Promise<Record<string, string>> {
+  if (!R2_ENABLED || paths.length === 0) {
+    return {};
+  }
+  const map: Record<string, string> = {};
+  const CHUNK_SIZE = 50;
+
+  for (let start = 0; start < paths.length; start += CHUNK_SIZE) {
+    const slice = paths.slice(start, start + CHUNK_SIZE);
+    const keyToPath = new Map<string, string>();
+    for (const path of slice) {
+      keyToPath.set(r2Key(bucket, path), path);
+    }
+    try {
+      const { data, error } = await supabase.functions.invoke<{ urls?: Record<string, string> }>(
+        'r2-sign',
+        { body: { action: 'get', keys: Array.from(keyToPath.keys()) } },
+      );
+      if (error || !data?.urls) {
+        continue;
+      }
+      for (const [key, url] of Object.entries(data.urls)) {
+        const path = keyToPath.get(key);
+        if (path && url) {
+          map[path] = url;
+        }
+      }
+    } catch {
+      // İmzalama başarısız olduysa çağıran yer tutucu gösterir.
+    }
+  }
+
+  return map;
 }

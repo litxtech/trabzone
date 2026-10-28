@@ -25,6 +25,8 @@
     "r2:check": "node scripts/r2-check.mjs",
     "r2:setup": "node scripts/r2-setup.mjs",
     "r2:e2e": "node scripts/r2-e2e.mjs",
+    "r2:private": "node scripts/r2-private-bucket.mjs",
+    "smoke:r2private": "node scripts/smoke-r2-private.mjs",
     "livekit:check": "node scripts/livekit-check.mjs",
     "r2:cors": "node scripts/r2-cors.mjs",
     "r2:domain": "node scripts/r2-domain.mjs",
