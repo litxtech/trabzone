@@ -32,6 +32,19 @@ const LEGAL_ERRORS: Record<string, AppError> = {
   invalid_body: appError('invalid_input', 'Belge içeriği çok kısa.'),
   invalid_doc_type: appError('invalid_input'),
   already_published: appError('duplicate', 'Bu sürüm zaten yayımlanmış.'),
+  not_published: appError('invalid_input', 'Bu sürüm yayında değil.'),
+  cannot_delete_published: appError(
+    'invalid_input',
+    'Yayındaki bir sürüm silinemez. Önce "Yayından kaldır" işlemini kullan.',
+  ),
+  has_acceptances: appError(
+    'forbidden',
+    'Bu belgeye ait kullanıcı kabul kayıtları var; silinemez. Yayından kaldırabilirsin.',
+  ),
+  cannot_archive_current_version: appError(
+    'invalid_input',
+    'Yürürlükteki sürüm arşivlenemez. Önce yayından kaldır.',
+  ),
   invalid_purpose: appError('invalid_input'),
   rate_limited: appError('rate_limited'),
 };
@@ -171,3 +184,24 @@ export const adminArchiveLegalDocument = (id: string, reason?: string | null) =>
     p_id: id,
     p_reason: reason ?? null,
   });
+
+/** Yayındaki sürümü kaldırır. Varsa önceki yayınlanmış sürüm yeniden yürürlüğe girer. */
+export const adminUnpublishLegalDocument = (id: string, reason?: string | null) =>
+  callRpc<LegalAdminVersion & { previous_version: number | null }>(
+    'legal_admin_unpublish',
+    {
+      p_id: id,
+      p_reason: reason ?? null,
+    },
+  );
+
+export const adminDeleteLegalVersion = (id: string) =>
+  callRpc<{ slug: string; version: number; deleted: boolean }>('legal_admin_delete', {
+    p_id: id,
+  });
+
+export const adminDeleteLegalDocument = (slug: string, locale: LegalLocale = 'tr') =>
+  callRpc<{ slug: string; deleted_versions: number; deleted: boolean }>(
+    'legal_admin_delete_document',
+    { p_slug: slug, p_locale: locale },
+  );

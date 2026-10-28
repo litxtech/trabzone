@@ -1,8 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText, Card, IconButton, Screen } from '@/components/ui';
-import { PUBLIC_LEGAL_PAGES, type LegalCatalogItem } from '@/features/legal/catalog';
+import {
+  buildLegalDirectory,
+  groupLegalDirectory,
+  type LegalCatalogItem,
+} from '@/features/legal/catalog';
+import { useLegalDocuments, useLegalRealtime } from '@/features/legal/hooks/use-legal';
 import { useRouter, type Href } from '@/utils/router';
 import { useTheme } from '@/theme/ThemeProvider';
 
@@ -63,6 +69,14 @@ const DESTINATIONS: Destination[] = [
 export default function LegalSettingsScreen() {
   const { theme } = useTheme();
   const router = useRouter();
+  const { data: documents } = useLegalDocuments('tr');
+  useLegalRealtime(true);
+
+  // Yönetim panelinden eklenen sözleşmeler de bu listede anında görünür.
+  const sections = useMemo(
+    () => groupLegalDirectory(buildLegalDirectory(documents)),
+    [documents],
+  );
 
   const openPolicy = (item: LegalCatalogItem) => {
     router.push({ pathname: '/policy/[slug]', params: { slug: item.slug } });
@@ -88,54 +102,46 @@ export default function LegalSettingsScreen() {
         gösterir.
       </AppText>
 
-      {(['Sözleşmeler', 'Veri ve Gizlilik', 'Güvenlik', 'Platform Kuralları'] as const).map(
-        (category) => {
-          const items = PUBLIC_LEGAL_PAGES.filter((item) => item.category === category);
-          if (items.length === 0) {
-            return null;
-          }
-          return (
-            <View key={category} style={styles.section}>
-              <AppText variant="overline" color="textTertiary" style={styles.sectionTitle}>
-                {category.toLocaleUpperCase('tr-TR')}
-              </AppText>
-              <Card padding={0}>
-                {items.map((item, index) => (
-                  <View key={item.slug}>
-                    {index > 0 ? <Divider /> : null}
-                    <Pressable
-                      accessibilityRole="link"
-                      accessibilityLabel={item.title}
-                      onPress={() => openPolicy(item)}
-                      style={({ pressed }) => [
-                        styles.row,
-                        { opacity: pressed ? 0.7 : 1 },
-                      ]}
-                    >
-                      <View style={[styles.iconWrap, { backgroundColor: theme.colors.primarySoft }]}>
-                        <Ionicons
-                          name={ICONS[item.slug] ?? 'document-text-outline'}
-                          size={18}
-                          color={theme.colors.primary}
-                        />
-                      </View>
-                      <View style={styles.rowText}>
-                        <AppText variant="bodyStrong" numberOfLines={1}>
-                          {item.title}
-                        </AppText>
-                        <AppText variant="caption" color="textSecondary">
-                          {item.description}
-                        </AppText>
-                      </View>
-                      <Ionicons name="chevron-forward" size={17} color={theme.colors.textTertiary} />
-                    </Pressable>
+      {sections.map(({ category, items }) => (
+        <View key={category} style={styles.section}>
+          <AppText variant="overline" color="textTertiary" style={styles.sectionTitle}>
+            {category.toLocaleUpperCase('tr-TR')}
+          </AppText>
+          <Card padding={0}>
+            {items.map((item, index) => (
+              <View key={item.slug}>
+                {index > 0 ? <Divider /> : null}
+                <Pressable
+                  accessibilityRole="link"
+                  accessibilityLabel={item.title}
+                  onPress={() => openPolicy(item)}
+                  style={({ pressed }) => [
+                    styles.row,
+                    { opacity: pressed ? 0.7 : 1 },
+                  ]}
+                >
+                  <View style={[styles.iconWrap, { backgroundColor: theme.colors.primarySoft }]}>
+                    <Ionicons
+                      name={ICONS[item.slug] ?? 'document-text-outline'}
+                      size={18}
+                      color={theme.colors.primary}
+                    />
                   </View>
-                ))}
-              </Card>
-            </View>
-          );
-        },
-      )}
+                  <View style={styles.rowText}>
+                    <AppText variant="bodyStrong" numberOfLines={1}>
+                      {item.title}
+                    </AppText>
+                    <AppText variant="caption" color="textSecondary">
+                      {item.description}
+                    </AppText>
+                  </View>
+                  <Ionicons name="chevron-forward" size={17} color={theme.colors.textTertiary} />
+                </Pressable>
+              </View>
+            ))}
+          </Card>
+        </View>
+      ))}
 
       <View style={styles.section}>
         <AppText variant="overline" color="textTertiary" style={styles.sectionTitle}>

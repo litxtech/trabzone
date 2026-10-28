@@ -7,38 +7,26 @@ import { Platform, StyleSheet, View } from 'react-native';
 import { AppText, Button, Card, Skeleton } from '@/components/ui';
 import { Screen } from '@/components/ui/Screen';
 import { LegalDocumentRoute } from '@/features/web/components/LegalDocumentRoute';
+import { useLegalDocument, useLegalRealtime } from '@/features/legal/hooks/use-legal';
 import { SafetyHeader } from '@/features/safety/components/SafetyHeader';
 import { PolicyBody } from '@/features/safety/components/PolicyBody';
-import { useSafetyPolicy } from '@/features/safety/hooks/use-safety';
 import { parsePolicyMarkdown } from '@/features/safety/utils/policy-markdown';
 import { useAuthStatus } from '@/stores/auth-store';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatDateTr } from '@/utils/date';
 
 /**
- * Genel yasal politika ekrani: /policy/terms ve /policy/privacy.
+ * Genel yasal politika ekrani: /policy/terms, /policy/privacy ve yönetim
+ * panelinden eklenen tüm belgeler (/policy/<slug>).
  * Metinler veritabanindan surumlenmis olarak gelir; bu sayede icerik
  * guncellemesi icin yeni uygulama surumu gerekmez.
  *
  * Magaza incelemesi ve yasal seffaflik icin oturum acmadan da acilabilir;
  * bu nedenle AuthGate kullanilmaz.
  */
-const ALLOWED_SLUGS = [
-  'terms',
-  'privacy',
-  'kvkk',
-  'data-protection',
-  'cookies',
-  'child-safety',
-  'community-guidelines',
-  'account-deletion',
-  'marketplace-rules',
-  'real-estate-rules',
-  'vehicle-rules',
-] as const;
-type PolicySlug = (typeof ALLOWED_SLUGS)[number];
+const SLUG_PATTERN = /^[a-z0-9-]{3,64}$/;
 
-const COPY: Record<PolicySlug, { title: string; icon: keyof typeof Ionicons.glyphMap }> = {
+const COPY: Record<string, { title: string; icon: keyof typeof Ionicons.glyphMap }> = {
   terms: { title: 'Kullanım Koşulları', icon: 'document-text-outline' },
   privacy: { title: 'Gizlilik Politikası', icon: 'lock-closed-outline' },
   kvkk: { title: 'KVKK Aydınlatma Metni', icon: 'shield-checkmark-outline' },
@@ -67,12 +55,12 @@ function NativeLegalPolicyScreen() {
   const authStatus = useAuthStatus();
   const params = useLocalSearchParams<{ slug?: string }>();
 
-  const slug = (ALLOWED_SLUGS as readonly string[]).includes(params.slug ?? '')
-    ? (params.slug as PolicySlug)
-    : null;
-  const copy = slug ? COPY[slug] : null;
+  const requested = params.slug ?? '';
+  const slug = SLUG_PATTERN.test(requested) ? requested : null;
+  const copy = slug ? COPY[slug] : undefined;
 
-  const { data: policy, isLoading } = useSafetyPolicy(slug ?? 'terms');
+  const { data: policy, isLoading } = useLegalDocument(slug ?? '');
+  useLegalRealtime(Boolean(slug));
   const sections = useMemo(() => parsePolicyMarkdown(policy?.body_md ?? ''), [policy?.body_md]);
 
   const goBack = () => {
@@ -103,7 +91,7 @@ function NativeLegalPolicyScreen() {
   return (
     <Screen edges={['top', 'left', 'right']} scroll padded>
       <SafetyHeader
-        title={copy?.title ?? 'Politika'}
+        title={copy?.title ?? policy?.title ?? 'Politika'}
         subtitle={
           policy
             ? `Sürüm ${policy.version} · ${formatDateTr(policy.effective_at ?? policy.published_at)}`
