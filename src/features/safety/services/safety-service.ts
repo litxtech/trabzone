@@ -25,6 +25,7 @@ import type {
   SafetyState,
   StaffInfo,
   SupportCategoryCode,
+  SupportReplyTemplate,
   TicketDetail,
   TicketPriority,
   TicketReceipt,
@@ -376,6 +377,26 @@ export const adminOverrideAge = (userId: string, birthDate: string, note?: strin
     p_user_id: userId,
     p_birth_date: birthDate,
     p_note: note ?? null,
+  });
+
+export const fetchSupportTemplates = () =>
+  callRpc<{ items: SupportReplyTemplate[] }>('admin_support_templates_list');
+
+export const adminSaveSupportTemplate = (input: {
+  id?: string | null;
+  title: string;
+  category?: string | null;
+  body: string;
+  isActive?: boolean;
+  reason?: string | null;
+}) =>
+  callRpc<SupportReplyTemplate>('admin_support_template_save', {
+    p_id: input.id ?? null,
+    p_title: input.title,
+    p_category: input.category ?? null,
+    p_body: input.body,
+    p_is_active: input.isActive ?? true,
+    p_reason: input.reason ?? null,
   });
 
 export const fetchAuditLogs = (entityType?: string | null, limit = 50) =>

@@ -13,10 +13,13 @@ export function AppProviders({ children }: PropsWithChildren) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 30_000,
-            gcTime: 5 * 60_000,
+            // Sekme degisimi ve geri donuslerde gereksiz istek atilmaz;
+            // veri tazeyse bellekten okunur, ekran aninda boyanir.
+            staleTime: 60_000,
+            gcTime: 10 * 60_000,
             retry: 1,
             refetchOnWindowFocus: false,
+            refetchOnReconnect: true,
           },
           mutations: {
             retry: 0,

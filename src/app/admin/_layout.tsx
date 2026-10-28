@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 
 import { AuthGate } from '@/features/auth/components/AuthGate';
+import { AdminShell } from '@/features/admin/components/AdminShell';
 import { useTheme } from '@/theme/ThemeProvider';
 
 export default function AdminLayout() {
@@ -8,13 +9,15 @@ export default function AdminLayout() {
 
   return (
     <AuthGate>
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: theme.colors.background },
-          animation: 'slide_from_right',
-        }}
-      />
+      <AdminShell>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: theme.colors.background },
+            animation: 'fade',
+          }}
+        />
+      </AdminShell>
     </AuthGate>
   );
 }

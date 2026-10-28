@@ -27,6 +27,8 @@ export type ThemeColors = {
   primarySoft: string;
   accent: string;
   accentSoft: string;
+  /** Marka yazisindaki vurgu harfi icin parlak aksan. */
+  accentBright: string;
   success: string;
   successSoft: string;
   warning: string;
@@ -81,6 +83,7 @@ const lightColors: ThemeColors = {
   primarySoft: palette.blue100,
   accent: palette.premiumPurple,
   accentSoft: '#F1EBFF',
+  accentBright: '#7C4DFF',
   success: palette.green500,
   successSoft: '#E7F7EE',
   warning: palette.amber500,
@@ -92,9 +95,9 @@ const lightColors: ThemeColors = {
   overlay: 'rgba(9, 16, 30, 0.55)',
   skeleton: '#E6ECF8',
   skeletonHighlight: '#F3F7FF',
-  tabBar: 'rgba(255, 255, 255, 0.94)',
-  tabBarBorder: 'rgba(23, 34, 56, 0.07)',
-  glass: 'rgba(255, 255, 255, 0.72)',
+  tabBar: 'rgba(255, 255, 255, 0.96)',
+  tabBarBorder: 'rgba(21, 32, 57, 0.07)',
+  glass: 'rgba(255, 255, 255, 0.78)',
   shadow: '#1E3A8A',
 };
 
@@ -102,22 +105,23 @@ const darkColors: ThemeColors = {
   background: palette.navy900,
   backgroundAlt: palette.navy950,
   surface: palette.navy800,
-  surfaceElevated: '#18233A',
-  surfaceMuted: '#1B2740',
+  surfaceElevated: palette.navy700,
+  surfaceMuted: '#1B2640',
   surfaceInverse: palette.white,
-  inputBackground: '#141E33',
-  border: '#243352',
-  borderStrong: '#31446A',
-  divider: '#1F2C47',
-  text: '#F2F5FC',
-  textSecondary: '#A9B5CB',
-  textTertiary: '#71809A',
+  inputBackground: '#101729',
+  border: '#243252',
+  borderStrong: '#31426A',
+  divider: '#1E2A46',
+  text: '#F5F7FF',
+  textSecondary: '#A2AEC7',
+  textTertiary: '#7482A0',
   textInverse: palette.ink,
-  primary: '#5E8BFF',
-  primaryDeep: '#2F6BFF',
+  primary: '#4169F5',
+  primaryDeep: '#6284FF',
   primarySoft: '#16264B',
-  accent: '#A785FF',
+  accent: '#8057F4',
   accentSoft: '#241B3D',
+  accentBright: '#A78BFA',
   success: '#3DD68C',
   successSoft: '#10281E',
   warning: '#FBBF24',
@@ -126,12 +130,12 @@ const darkColors: ThemeColors = {
   dangerSoft: '#2C1418',
   info: '#38BDF8',
   onPrimary: '#FFFFFF',
-  overlay: 'rgba(3, 7, 14, 0.66)',
-  skeleton: '#1A2740',
+  overlay: 'rgba(3, 7, 14, 0.68)',
+  skeleton: '#182440',
   skeletonHighlight: '#22314F',
-  tabBar: 'rgba(11, 18, 32, 0.94)',
+  tabBar: 'rgba(11, 16, 32, 0.96)',
   tabBarBorder: 'rgba(255, 255, 255, 0.07)',
-  glass: 'rgba(18, 26, 43, 0.72)',
+  glass: 'rgba(20, 28, 48, 0.76)',
   shadow: '#000000',
 };
 

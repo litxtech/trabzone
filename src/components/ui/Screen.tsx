@@ -33,7 +33,9 @@ export function Screen({
   edges = ['left', 'right'],
   scroll = false,
   padded = true,
-  keyboardAware = false,
+  // Kaydirilabilir form ekranlarinda klavye kapatma davranisi varsayilan
+  // olarak aciktir: aksi halde odaklanan alan klavyenin altinda kaliyor.
+  keyboardAware = scroll,
   background = 'background',
   contentContainerStyle,
   style,
@@ -47,12 +49,24 @@ export function Screen({
   const backgroundColor = background === 'transparent' ? 'transparent' : theme.colors[background];
   const padding = padded ? { paddingHorizontal: theme.layout.screenPadding } : null;
 
+  // iOS'ta kaydirilabilir ekranlarda native `automaticallyAdjustKeyboardInsets`
+  // kullanilir (icerik insetini ve odakli alani kendisi ayarlar). Android'de
+  // edge-to-edge yuzunden pencere kuculmedigi icin yuksekligi biz ayiririz.
+  //
+  // ONEMLI: Ekranin altina sabitlenen bir `footer` (yorum/mesaj yazma alani)
+  // varsa native inset yeterli degildir; o ayar yalnizca ScrollView icerigini
+  // kaydirir, footer'i yukari tasimaz. Bu durumda klavye yuksekligini her
+  // platformda biz ayiririz; aksi halde yazarken alan klavyenin altinda kalir.
+  const hasFooter = footer != null;
+  const iosScrollInsets = keyboardAware && scroll && Platform.OS === 'ios' && !hasFooter;
+  const reserveKeyboard = keyboardAware && !iosScrollInsets;
+
   // While the keyboard covers the bottom safe area we drop the inset edge so the
   // reserved space is exactly the keyboard height (no double padding).
   const safeEdges = keyboardAware && isVisible ? edges.filter((edge) => edge !== 'bottom') : edges;
 
   const keyboardStyle = useAnimatedStyle(() => ({
-    paddingBottom: keyboardAware ? height.value : 0,
+    paddingBottom: reserveKeyboard ? height.value : 0,
   }));
 
   const content = scroll ? (
@@ -64,6 +78,7 @@ export function Screen({
         { paddingBottom: insets.bottom + theme.spacing.xl },
         contentContainerStyle,
       ]}
+      automaticallyAdjustKeyboardInsets={iosScrollInsets}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
       showsVerticalScrollIndicator={false}
@@ -77,10 +92,19 @@ export function Screen({
 
   return (
     <SafeAreaView style={[styles.flex, { backgroundColor }, style]} edges={safeEdges}>
-      <Animated.View style={[styles.flex, keyboardStyle]}>
-        {content}
-        {footer}
-      </Animated.View>
+      {/* Klavye payi ayirmayan ekranlarda animasyonlu kapsayici kurulmaz:
+          her ekranda fazladan bir Reanimated gorunumu/UI-thread isi olusmaz. */}
+      {reserveKeyboard ? (
+        <Animated.View style={[styles.flex, keyboardStyle]}>
+          {content}
+          {footer}
+        </Animated.View>
+      ) : (
+        <View style={styles.flex}>
+          {content}
+          {footer}
+        </View>
+      )}
     </SafeAreaView>
   );
 }

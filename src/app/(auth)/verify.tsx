@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/utils/router';
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 

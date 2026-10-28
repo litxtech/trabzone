@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/utils/router';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -243,7 +244,7 @@ export default function TicketDetailScreen() {
   );
 
   return (
-    <Screen edges={['top', 'left', 'right']} padded footer={composer}>
+    <Screen edges={['top', 'left', 'right']} padded keyboardAware footer={composer}>
       <SafetyHeader
         title={ticket.ticket_no}
         subtitle={category?.label ?? 'Destek talebi'}

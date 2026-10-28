@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { useRouter } from '@/utils/router';
 import { useEffect } from 'react';
 import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
@@ -12,219 +12,254 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppText, Button, Logo } from '@/components/ui';
-import { env } from '@/config/env';
-import { useTheme } from '@/theme/ThemeProvider';
-
-const HIGHLIGHTS = [
-  { icon: 'people-outline', title: 'Yeni insanlarla tanış', body: 'Yakınındaki kişileri keşfet.' },
-  { icon: 'chatbubbles-outline', title: 'Anlık mesajlaş', body: 'Hızlı, güvenli birebir sohbet.' },
-  { icon: 'videocam-outline', title: 'Sesli ve görüntülü', body: 'Kaliteli görüşmeler, tek dokunuşla.' },
-] as const;
+import { AppText, Button, Logo, Wordmark } from '@/components/ui';
+import { AuthBackdrop } from '@/features/auth/components/AuthBackdrop';
+import { LobbyShowcase } from '@/features/auth/components/LobbyShowcase';
+import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons';
+import { ThemeScope } from '@/theme/ThemeProvider';
+import { haptics } from '@/utils/haptics';
 
 export default function LobbyScreen() {
-  const { theme } = useTheme();
+  return (
+    <ThemeScope scheme="dark">
+      <LobbyContent />
+    </ThemeScope>
+  );
+}
+
+function LobbyContent() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { height } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
 
-  const heroOpacity = useSharedValue(0);
-  const heroOffset = useSharedValue(18);
-  const cardOpacity = useSharedValue(0);
-  const cardOffset = useSharedValue(28);
+  const heroProgress = useSharedValue(0);
+  const actionsProgress = useSharedValue(0);
 
   useEffect(() => {
-    heroOpacity.value = withTiming(1, { duration: 520, easing: Easing.out(Easing.cubic) });
-    heroOffset.value = withTiming(0, { duration: 620, easing: Easing.out(Easing.cubic) });
-    cardOpacity.value = withDelay(180, withTiming(1, { duration: 520 }));
-    cardOffset.value = withDelay(180, withTiming(0, { duration: 620, easing: Easing.out(Easing.cubic) }));
-  }, [cardOffset, cardOpacity, heroOffset, heroOpacity]);
+    heroProgress.value = withTiming(1, {
+      duration: 620,
+      easing: Easing.out(Easing.cubic),
+    });
+    actionsProgress.value = withDelay(
+      120,
+      withTiming(1, { duration: 560, easing: Easing.out(Easing.cubic) }),
+    );
+  }, [actionsProgress, heroProgress]);
 
   const heroStyle = useAnimatedStyle(() => ({
-    opacity: heroOpacity.value,
-    transform: [{ translateY: heroOffset.value }],
+    opacity: heroProgress.value,
+    transform: [{ translateY: (1 - heroProgress.value) * 14 }],
   }));
 
-  const cardStyle = useAnimatedStyle(() => ({
-    opacity: cardOpacity.value,
-    transform: [{ translateY: cardOffset.value }],
+  const actionsStyle = useAnimatedStyle(() => ({
+    opacity: actionsProgress.value,
+    transform: [{ translateY: (1 - actionsProgress.value) * 18 }],
   }));
+
+  const compact = height < 760;
+  const heroSize = width < 360 ? 32 : compact ? 34 : 38;
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-      <LinearGradient
-        colors={theme.gradients.splash}
-        start={{ x: 0.05, y: 0 }}
-        end={{ x: 0.95, y: 1 }}
-        style={[styles.hero, { height: Math.max(380, height * 0.52) }]}
+    <View style={styles.root}>
+      <StatusBar style="light" />
+      <AuthBackdrop />
+
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingTop: insets.top + 14,
+            paddingBottom: insets.bottom + 20,
+          },
+        ]}
+        showsVerticalScrollIndicator={false}
+        bounces={false}
       >
-        <View style={styles.orbOne} pointerEvents="none" />
-        <View style={styles.orbTwo} pointerEvents="none" />
-
-        <ScrollView
-          contentContainerStyle={styles.heroContent}
-          showsVerticalScrollIndicator={false}
-          bounces={false}
-        >
-          <Animated.View style={[styles.brand, heroStyle]}>
-            <Logo size={92} />
-            <View style={styles.wordmark}>
-              <AppText variant="display" color="#FFFFFF" style={styles.title}>
-                TRABZONE
-              </AppText>
-              <AppText variant="caption" color="rgba(255,255,255,0.74)">
-                Trabzon&apos;un dijital buluşma noktası
-              </AppText>
-            </View>
-          </Animated.View>
-        </ScrollView>
-      </LinearGradient>
-
-      <Animated.View style={[styles.sheet, { backgroundColor: theme.colors.surface }, cardStyle]}>
-        <View style={[styles.handle, { backgroundColor: theme.colors.borderStrong }]} />
-        <ScrollView
-          contentContainerStyle={styles.sheetContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-
-        <View style={styles.sheetHeader}>
-          <AppText variant="h2">Trabzone&apos;a hoş geldin</AppText>
-          <AppText variant="body" color="textSecondary">
-            Şehrin nabzını tut, yeni bağlantılar kur. Hazırsan birkaç saniyede hesabını oluştur.
-          </AppText>
-        </View>
-
-        <View style={styles.highlights}>
-          {HIGHLIGHTS.map((item) => (
-            <View key={item.title} style={styles.highlightRow}>
-              <View style={[styles.highlightIcon, { backgroundColor: theme.colors.primarySoft }]}>
-                <Ionicons name={item.icon} size={18} color={theme.colors.primaryDeep} />
-              </View>
-              <View style={styles.highlightCopy}>
-                <AppText variant="label">{item.title}</AppText>
-                <AppText variant="caption" color="textTertiary">
-                  {item.body}
+        <Animated.View style={heroStyle}>
+          <View style={styles.brandRow}>
+            <View style={styles.brandLeft}>
+              <Logo size={42} />
+              <View style={styles.brandCopy}>
+                <Wordmark size={20} color="#FFFFFF" accentColor="#A78BFA" />
+                <AppText variant="overline" color="#7F8CA6" style={styles.brandTag}>
+                  SOSYAL KEŞİF
                 </AppText>
               </View>
             </View>
-          ))}
-        </View>
+            <View style={styles.cityChip}>
+              <Ionicons name="location" size={11} color="#9DB6FF" />
+              <AppText variant="overline" color="#9DB6FF" style={styles.cityText}>
+                TRABZON
+              </AppText>
+            </View>
+          </View>
 
-        <View style={styles.actions}>
-          <Button label="Hesap Oluştur" onPress={() => router.push('/register')} haptic="press" />
+          <View style={styles.heroCopy}>
+            <AppText
+              variant="displayXl"
+              color="#FFFFFF"
+              style={[styles.heroLine, { fontSize: heroSize, lineHeight: heroSize * 1.16 }]}
+            >
+              Yeni bağlantılar.
+            </AppText>
+            <AppText
+              variant="displayXl"
+              color="#9DB6FF"
+              style={[styles.heroLine, { fontSize: heroSize, lineHeight: heroSize * 1.16 }]}
+            >
+              Yeni keşifler.
+            </AppText>
+            <AppText variant="body" color="#96A3BD" style={styles.subcopy}>
+              Paylaş, keşfet, sohbet et ve kendi dünyanı oluştur.
+            </AppText>
+          </View>
+
+          <LobbyShowcase />
+        </Animated.View>
+
+        <Animated.View style={[styles.actions, actionsStyle]}>
           <Button
-            label="Giriş Yap"
-            variant="outline"
-            onPress={() => router.push('/login')}
-            leftIcon={<Ionicons name="log-in-outline" size={19} color={theme.colors.text} />}
+            label="Hesap Oluştur"
+            size="lg"
+            haptic="press"
+            onPress={() => router.push('/register')}
+            rightIcon={<Ionicons name="arrow-forward" size={18} color="#FFFFFF" />}
           />
 
-          {env.enableSocialAuth ? (
-            <View style={styles.social}>
-              <View style={styles.dividerRow}>
-                <View style={[styles.line, { backgroundColor: theme.colors.divider }]} />
-                <AppText variant="caption" color="textTertiary">
-                  veya
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Giriş Yap"
+            onPress={() => {
+              haptics.tap();
+              router.push('/login');
+            }}
+            style={({ pressed }) => [
+              styles.loginButton,
+              { opacity: pressed ? 0.78 : 1, transform: [{ scale: pressed ? 0.992 : 1 }] },
+            ]}
+          >
+            <Ionicons name="log-in-outline" size={19} color="#FFFFFF" />
+            <AppText variant="bodyStrong" color="#FFFFFF" style={styles.loginLabel}>
+              Giriş Yap
+            </AppText>
+          </Pressable>
+
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <AppText variant="caption" color="#6F7C96" style={styles.dividerText}>
+              veya sosyal hesabınla devam et
+            </AppText>
+            <View style={styles.dividerLine} />
+          </View>
+
+          <SocialAuthButtons />
+
+          <View style={styles.legal}>
+            <View style={styles.legalRow}>
+              <Pressable
+                accessibilityRole="link"
+                accessibilityLabel="Kullanım Koşulları"
+                hitSlop={8}
+                onPress={() =>
+                  router.push({ pathname: '/policy/[slug]', params: { slug: 'terms' } })
+                }
+              >
+                <AppText variant="caption" color="#8E9BB5">
+                  Kullanım Koşulları
                 </AppText>
-                <View style={[styles.line, { backgroundColor: theme.colors.divider }]} />
-              </View>
-              <Button
-                label="Google ile devam et"
-                variant="secondary"
-                leftIcon={<Ionicons name="logo-google" size={18} color={theme.colors.text} />}
-                onPress={() => router.push('/login')}
-              />
+              </Pressable>
+              <View style={styles.legalDot} />
+              <Pressable
+                accessibilityRole="link"
+                accessibilityLabel="Gizlilik Politikası"
+                hitSlop={8}
+                onPress={() =>
+                  router.push({ pathname: '/policy/[slug]', params: { slug: 'privacy' } })
+                }
+              >
+                <AppText variant="caption" color="#8E9BB5">
+                  Gizlilik Politikası
+                </AppText>
+              </Pressable>
             </View>
-          ) : null}
-        </View>
-
-        <Pressable
-          accessibilityRole="link"
-          onPress={() => router.push('/login')}
-          style={styles.terms}
-        >
-          <AppText variant="caption" color="textTertiary" align="center">
-            Devam ederek Kullanım Koşulları ve Gizlilik Politikası&apos;nı kabul etmiş olursun.
-          </AppText>
-        </Pressable>
-
-        <View style={{ height: insets.bottom + 8 }} />
-        </ScrollView>
-      </Animated.View>
+            <AppText variant="caption" color="#5E6A83" align="center" style={styles.consent}>
+              Devam ederek kullanım koşullarını ve gizlilik politikasını kabul etmiş olursun.
+            </AppText>
+          </View>
+        </Animated.View>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  hero: {
-    justifyContent: 'flex-end',
-    overflow: 'hidden',
-  },
-  heroContent: {
-    flexGrow: 1,
-    justifyContent: 'flex-end',
-    paddingHorizontal: 28,
-    paddingBottom: 96,
-  },
-  brand: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  root: { flex: 1, backgroundColor: '#05080F' },
+  content: {
+    paddingHorizontal: 22,
     gap: 16,
   },
-  wordmark: { gap: 4 },
-  title: { fontSize: 30, letterSpacing: 3.4 },
-  orbOne: {
-    position: 'absolute',
-    top: -90,
-    right: -70,
-    width: 260,
-    height: 260,
-    borderRadius: 130,
-    backgroundColor: 'rgba(255,255,255,0.14)',
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
   },
-  orbTwo: {
-    position: 'absolute',
-    bottom: 10,
-    left: -110,
-    width: 240,
-    height: 240,
-    borderRadius: 120,
-    backgroundColor: 'rgba(137,93,245,0.28)',
+  brandLeft: { flexDirection: 'row', alignItems: 'center', gap: 11, flex: 1 },
+  brandCopy: { gap: 1 },
+  brandTag: { fontSize: 9, letterSpacing: 2.2, lineHeight: 12 },
+  cityChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(65,105,245,0.13)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(110,154,255,0.28)',
   },
-  sheet: {
-    flex: 1,
-    marginTop: -36,
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
-    paddingTop: 10,
-  },
-  sheetContent: {
-    paddingHorizontal: 24,
-    gap: 20,
-  },
-  handle: {
-    width: 44,
-    height: 4,
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: 8,
-  },
-  sheetHeader: { gap: 6 },
-  highlights: { gap: 10 },
-  highlightRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  highlightIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 13,
+  cityText: { fontSize: 9, letterSpacing: 1.3, lineHeight: 12 },
+  heroCopy: { paddingTop: 24, gap: 1 },
+  heroLine: { letterSpacing: -1 },
+  subcopy: { marginTop: 10, maxWidth: 330, lineHeight: 22 },
+  actions: { gap: 10 },
+  loginButton: {
+    height: 54,
+    borderRadius: 16,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.16)',
   },
-  highlightCopy: { flex: 1, gap: 1 },
-  actions: { gap: 10, marginTop: 2 },
-  social: { gap: 10, marginTop: 2 },
-  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  line: { flex: 1, height: StyleSheet.hairlineWidth },
-  terms: { paddingVertical: 4 },
+  loginLabel: { fontSize: 15 },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingVertical: 3,
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255,255,255,0.11)',
+  },
+  dividerText: { fontSize: 10, letterSpacing: 0.2 },
+  legal: { gap: 7, paddingTop: 4 },
+  legalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  legalDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: '#4C5870',
+  },
+  consent: { fontSize: 10, lineHeight: 14, paddingHorizontal: 12 },
 });

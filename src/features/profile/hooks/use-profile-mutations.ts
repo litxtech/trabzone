@@ -3,12 +3,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from '@/stores/auth-store';
 
 import {
+  changeUsername,
   fetchMyPrivacySettings,
+  fetchUsernameChangeStatus,
   updateMyPrivacySettings,
   updateMyProfile,
   type PrivacySettings,
   type Profile,
   type ProfilePatch,
+  type UsernameChangeStatus,
 } from '../services/profile-service';
 import { deleteProfileMedia, uploadProfileMedia, type MediaKind } from '../services/media-service';
 import { blockUser, unblockUser } from '../services/social-service';
@@ -43,6 +46,39 @@ export function useUpdateProfile() {
       void queryClient.invalidateQueries({ queryKey: profileQueryKeys.me });
       void queryClient.invalidateQueries({ queryKey: ['profile-view'] });
       void queryClient.invalidateQueries({ queryKey: ['social', 'suggested'] });
+    },
+  });
+}
+
+export function useUsernameChangeStatus() {
+  return useQuery<UsernameChangeStatus>({
+    queryKey: ['username-change-status'],
+    queryFn: async () => {
+      const result = await fetchUsernameChangeStatus();
+      if (!result.ok) {
+        throw new Error(result.error.message);
+      }
+      return result.data;
+    },
+    staleTime: 30_000,
+  });
+}
+
+export function useChangeUsername() {
+  const queryClient = useQueryClient();
+  return useMutation<UsernameChangeStatus, Error, string>({
+    mutationFn: async (username) => {
+      const result = await changeUsername(username);
+      if (!result.ok) {
+        throw new Error(result.error.message);
+      }
+      return result.data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['username-change-status'] });
+      void queryClient.invalidateQueries({ queryKey: profileQueryKeys.me });
+      void queryClient.invalidateQueries({ queryKey: ['profile-view'] });
+      void queryClient.invalidateQueries({ queryKey: ['feed'] });
     },
   });
 }

@@ -114,6 +114,50 @@ export async function isUsernameAvailable(username: string): Promise<boolean> {
 }
 
 // -----------------------------------------------------------------------------
+// Username change quota (haftada 1 + kayıt için 1 ek hak)
+// -----------------------------------------------------------------------------
+
+export type UsernameChangeStatus = {
+  username: string;
+  credits: number;
+  last_changed_at: string | null;
+  next_change_at: string | null;
+  can_change: boolean;
+};
+
+export async function fetchUsernameChangeStatus(): Promise<Result<UsernameChangeStatus>> {
+  const { data, error } = await supabase.rpc('profile_username_change_status');
+  if (error) {
+    return fail(mapProfileError(error));
+  }
+  return ok(data as UsernameChangeStatus);
+}
+
+export async function changeUsername(username: string): Promise<Result<UsernameChangeStatus>> {
+  const { data, error } = await supabase.rpc('profile_change_username', {
+    p_username: username,
+  });
+
+  if (error) {
+    if (error.message.includes('username_cooldown')) {
+      return fail(
+        appError(
+          'forbidden',
+          'Kullanıcı adını haftada yalnızca bir kez değiştirebilirsin. Ek hakkın da doldu.',
+        ),
+      );
+    }
+    return fail(mapProfileError(error));
+  }
+
+  return ok({
+    ...(data as { username: string; credits: number; next_change_at: string | null }),
+    last_changed_at: new Date().toISOString(),
+    can_change: false,
+  });
+}
+
+// -----------------------------------------------------------------------------
 // Editing
 // -----------------------------------------------------------------------------
 

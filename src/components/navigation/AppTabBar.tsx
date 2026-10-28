@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { BottomTabBarProps } from 'expo-router/js-tabs';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { ShareSheet } from '@/components/navigation/ShareSheet';
 import { AppText } from '@/components/ui';
+import { useReduceMotion } from '@/perf/use-reduce-motion';
 import { useKeyboard } from '@/providers/keyboard';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
@@ -20,40 +21,61 @@ type TabConfig = {
   activeIcon: IconName;
 };
 
+/**
+ * Alt menunun tek kaynagi. Mesajlar artik sekme degil; ust basliktaki mesaj
+ * simgesi ve hamburger menuden acilir. Ortadaki + butonu yerinde kalir.
+ */
 export const TAB_CONFIG: TabConfig[] = [
   { name: 'feed', label: 'Akış', icon: 'home-outline', activeIcon: 'home' },
   { name: 'marketplace', label: 'Market', icon: 'storefront-outline', activeIcon: 'storefront' },
-  { name: 'messages', label: 'Mesajlar', icon: 'chatbubbles-outline', activeIcon: 'chatbubbles' },
+  { name: 'reels', label: 'Reels', icon: 'play-circle-outline', activeIcon: 'play-circle' },
   { name: 'profile', label: 'Profil', icon: 'person-outline', activeIcon: 'person' },
 ];
 
 export function AppTabBar({ state, emitter, navigateToTab, insets }: BottomTabBarProps) {
   const { theme } = useTheme();
   const { isVisible: keyboardVisible } = useKeyboard();
+  const reduceMotion = useReduceMotion();
   const [shareOpen, setShareOpen] = useState(false);
 
   const hidden = useSharedValue(0);
+  const focusedName = state.routes[state.index]?.name;
+  const reelsActive = focusedName === 'reels';
 
   useEffect(() => {
-    hidden.set(withTiming(keyboardVisible ? 1 : 0, { duration: 180 }));
-  }, [hidden, keyboardVisible]);
+    // Klavye acilip kapanirken cubuk hemen yerine otursun; 180ms'lik kayma
+    // "takilma" gibi algilaniyordu. Animasyon kapatilmissa aninda atanir.
+    hidden.set(
+      reduceMotion
+        ? keyboardVisible
+          ? 1
+          : 0
+        : withTiming(keyboardVisible ? 1 : 0, { duration: 110 }),
+    );
+  }, [hidden, keyboardVisible, reduceMotion]);
 
   const barStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: hidden.get() * 110 }],
     opacity: 1 - hidden.get(),
   }));
 
-  const items = state.routes
-    .map((route, index) => ({ route, index }))
-    .filter(({ route }) => TAB_CONFIG.some((tab) => tab.name === route.name));
+  // Rota sirasindan bagimsiz olarak her zaman istenen sirada cizilir.
+  const ordered = useMemo(
+    () =>
+      TAB_CONFIG.map((config) => {
+        const index = state.routes.findIndex((route) => route.name === config.name);
+        return index >= 0 ? { config, route: state.routes[index]!, index } : null;
+      }).filter((item): item is { config: TabConfig; route: (typeof state.routes)[number]; index: number } =>
+        Boolean(item),
+      ),
+    [state],
+  );
 
-  const renderTab = (route: (typeof state.routes)[number], index: number) => {
-    const config = TAB_CONFIG.find((tab) => tab.name === route.name);
-    if (!config) {
-      return null;
-    }
+  const activeColor = reelsActive ? '#FFFFFF' : theme.colors.primary;
+  const inactiveColor = reelsActive ? 'rgba(255,255,255,0.58)' : theme.colors.textTertiary;
+
+  const renderTab = (route: (typeof state.routes)[number], index: number, config: TabConfig) => {
     const focused = state.index === index;
-
     return (
       <Pressable
         key={route.key}
@@ -77,14 +99,11 @@ export function AppTabBar({ state, emitter, navigateToTab, insets }: BottomTabBa
         <Ionicons
           name={focused ? config.activeIcon : config.icon}
           size={23}
-          color={focused ? theme.colors.primary : theme.colors.textTertiary}
+          color={focused ? activeColor : inactiveColor}
         />
         <AppText
           variant="caption"
-          style={[
-            styles.tabLabel,
-            { color: focused ? theme.colors.primary : theme.colors.textTertiary },
-          ]}
+          style={[styles.tabLabel, { color: focused ? activeColor : inactiveColor }]}
           numberOfLines={1}
         >
           {config.label}
@@ -93,9 +112,8 @@ export function AppTabBar({ state, emitter, navigateToTab, insets }: BottomTabBa
     );
   };
 
-  const splitAt = Math.ceil(items.length / 2);
-  const left = items.slice(0, splitAt);
-  const right = items.slice(splitAt);
+  const left = ordered.slice(0, 2);
+  const right = ordered.slice(2);
 
   return (
     <>
@@ -103,26 +121,29 @@ export function AppTabBar({ state, emitter, navigateToTab, insets }: BottomTabBa
         style={[
           styles.bar,
           {
-            backgroundColor: theme.colors.tabBar,
-            borderTopColor: theme.colors.tabBarBorder,
+            backgroundColor: reelsActive ? 'rgba(6,9,18,0.94)' : theme.colors.tabBar,
+            borderTopColor: reelsActive ? 'rgba(255,255,255,0.08)' : theme.colors.tabBarBorder,
             paddingBottom: Math.max(insets.bottom, 10),
           },
           barStyle,
         ]}
       >
         <View style={styles.row}>
-          {left.map(({ route, index }) => renderTab(route, index))}
+          {left.map(({ route, index, config }) => renderTab(route, index, config))}
 
           <View style={styles.shareSlot}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Paylaş"
+              accessibilityLabel="İçerik oluştur"
               hitSlop={8}
               onPress={() => {
                 haptics.press();
                 setShareOpen(true);
               }}
-              style={({ pressed }) => [styles.shareButton, { transform: [{ scale: pressed ? 0.94 : 1 }] }]}
+              style={({ pressed }) => [
+                styles.shareButton,
+                { transform: [{ scale: pressed ? 0.93 : 1 }] },
+              ]}
             >
               <LinearGradient
                 colors={theme.gradients.primary}
@@ -130,11 +151,12 @@ export function AppTabBar({ state, emitter, navigateToTab, insets }: BottomTabBa
                 end={{ x: 1, y: 1 }}
                 style={StyleSheet.absoluteFill}
               />
-              <Ionicons name="add" size={28} color={theme.colors.onPrimary} />
+              <View style={styles.shareHighlight} pointerEvents="none" />
+              <Ionicons name="add" size={29} color={theme.colors.onPrimary} />
             </Pressable>
           </View>
 
-          {right.map(({ route, index }) => renderTab(route, index))}
+          {right.map(({ route, index, config }) => renderTab(route, index, config))}
         </View>
       </Animated.View>
 
@@ -148,11 +170,6 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingTop: 8,
     overflow: 'visible',
-    shadowColor: '#0B1220',
-    shadowOpacity: 0.06,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: -4 },
-    elevation: 12,
   },
   row: {
     flexDirection: 'row',
@@ -167,19 +184,23 @@ const styles = StyleSheet.create({
     minHeight: 46,
   },
   tabLabel: { fontSize: 10.5, lineHeight: 13 },
-  shareSlot: { width: 68, alignItems: 'center', justifyContent: 'center' },
+  shareSlot: { width: 70, alignItems: 'center', justifyContent: 'center' },
   shareButton: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    marginTop: -6,
-    shadowColor: '#1459E8',
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
+    marginTop: -8,
+  },
+  shareHighlight: {
+    position: 'absolute',
+    top: 1,
+    left: 10,
+    right: 10,
+    height: 20,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.2)',
   },
 });

@@ -1,0 +1,71 @@
+/**
+ * Derleme öncesi entitlement kontrolü.
+ *
+ * App Store imzalama, `com.apple.developer.applesignin` yetkisini provisioning
+ * profile'da istemiyorsa arşiv adımı başarısız olur:
+ *   "Provisioning Profile ... does not support the Sign In with Apple capability"
+ *
+ * Bu betik `expo config --type introspect` çıktısını okuyup Apple ile giriş
+ * yetkisinin yalnızca sosyal giriş açıkken üretildiğini doğrular. EAS build
+ * loglarında sürpriz imzalama hatası yerine burada erken uyarı verir.
+ *
+ * Kullanım: npm run check:entitlements
+ */
+import { execFileSync } from 'node:child_process';
+
+const socialAuthEnabled = process.env.EXPO_PUBLIC_ENABLE_SOCIAL_AUTH === 'true';
+
+/** Expo CLI bazı ortamlarda JSON'un önüne/sonuna uyarı yazabilir; güvenli ayrıştır. */
+function parseJsonOutput(output) {
+  const start = output.indexOf('{');
+  const end = output.lastIndexOf('}');
+  if (start < 0 || end <= start) {
+    throw new Error('expo config çıktısında JSON bulunamadı');
+  }
+  return JSON.parse(output.slice(start, end + 1));
+}
+
+let raw;
+try {
+  raw = execFileSync('npx', ['expo', 'config', '--type', 'introspect', '--json'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: process.platform === 'win32',
+  });
+} catch (cause) {
+  console.error('expo config okunamadı:', cause instanceof Error ? cause.message : cause);
+  process.exit(1);
+}
+
+const config = parseJsonOutput(raw);
+const entitlements = config?.mods?.ios?.entitlements ?? config?._internal?.modResults?.ios?.entitlements ?? {};
+const hasAppleSignIn = Object.prototype.hasOwnProperty.call(entitlements, 'com.apple.developer.applesignin');
+
+if (hasAppleSignIn && !socialAuthEnabled) {
+  console.error(
+    'HATA: Apple ile giriş yetkisi (com.apple.developer.applesignin) üretilmiş ama ' +
+      'EXPO_PUBLIC_ENABLE_SOCIAL_AUTH kapalı. Bu durumda Ad Hoc/App Store profili ' +
+      'yetkiyi içermediği için iOS arşivi başarısız olur.',
+  );
+  console.error(
+    'Çözüm: package.json > expo.autolinking.ios.exclude içinde expo-apple-authentication ' +
+      'kalsın veya Apple Developer portalında App ID için "Sign In with Apple" açıp ' +
+      'provisioning profile yeniden üretin.',
+  );
+  process.exit(1);
+}
+
+if (socialAuthEnabled && !hasAppleSignIn) {
+  console.error(
+    'HATA: EXPO_PUBLIC_ENABLE_SOCIAL_AUTH açık ama Apple ile giriş yetkisi üretilmemiş. ' +
+      'Apple girişi çalışmaz; package.json > expo.autolinking.ios.exclude listesinden ' +
+      'expo-apple-authentication çıkarılmalı ve profil yeniden üretilmeli.',
+  );
+  process.exit(1);
+}
+
+console.log(
+  hasAppleSignIn
+    ? 'OK: Apple ile giriş yetkisi üretildi (sosyal giriş açık). Profilin yetkiyi içerdiğinden emin olun.'
+    : 'OK: Apple ile giriş yetkisi üretilmedi (sosyal giriş kapalı) — mevcut imzalama profiliyle uyumlu.',
+);

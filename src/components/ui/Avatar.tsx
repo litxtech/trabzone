@@ -1,8 +1,8 @@
-import { Image } from 'expo-image';
 import { StyleSheet, View } from 'react-native';
 
 import { useTheme } from '@/theme/ThemeProvider';
 
+import { AppImage } from './AppImage';
 import { AppText } from './AppText';
 
 export type AvatarProps = {
@@ -11,6 +11,8 @@ export type AvatarProps = {
   size?: number;
   ring?: boolean;
   borderColor?: string;
+  /** Liste geri dönüşümünde eski avatarn görünmesini engeller (ör. kullanıcı id). */
+  recycleKey?: string | null;
 };
 
 const initialsOf = (name?: string | null) => {
@@ -25,7 +27,7 @@ const initialsOf = (name?: string | null) => {
     .join('');
 };
 
-export function Avatar({ uri, name, size = 44, ring = false, borderColor }: AvatarProps) {
+export function Avatar({ uri, name, size = 44, ring = false, borderColor, recycleKey }: AvatarProps) {
   const { theme } = useTheme();
   const radius = size / 2;
 
@@ -45,12 +47,11 @@ export function Avatar({ uri, name, size = 44, ring = false, borderColor }: Avat
       ]}
     >
       {uri ? (
-        <Image
+        <AppImage
           source={{ uri }}
           style={{ width: size, height: size, borderRadius: radius }}
           contentFit="cover"
-          transition={180}
-          cachePolicy="memory-disk"
+          recycleKey={recycleKey ?? uri}
           accessibilityIgnoresInvertColors
         />
       ) : (

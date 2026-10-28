@@ -12,13 +12,16 @@ export default function TabsLayout() {
       screenOptions={{
         headerShown: false,
         sceneStyle: { backgroundColor: theme.colors.background },
-        animation: 'shift',
+        // Sekmeler arasi gecis beklemesiz olmali: fade/shift yerine dogrudan
+        // degistir. Ekranlar `lazy` ile bir kez kurulur ve bagli kalir, boylece
+        // sekmeye geri donuste yeniden yukleme/istek olmaz.
+        animation: 'none',
         lazy: true,
       }}
     >
       <Tabs.Screen name="feed" options={{ title: 'Akış' }} />
-      <Tabs.Screen name="marketplace" options={{ title: 'Marketplace' }} />
-      <Tabs.Screen name="messages" options={{ title: 'Mesajlar' }} />
+      <Tabs.Screen name="marketplace" options={{ title: 'Market' }} />
+      <Tabs.Screen name="reels" options={{ title: 'Reels' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profil' }} />
     </Tabs>
   );

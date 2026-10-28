@@ -3,6 +3,19 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
 const APP_SCHEME = 'trabzone';
 const BUNDLE_ID = 'com.litxtech.trabzone';
 
+/**
+ * Apple ile giriş yalnızca sosyal giriş açıkken derlemeye dahil edilir.
+ *
+ * `com.apple.developer.applesignin` yetkisi, Apple Developer portalındaki
+ * App ID'de "Sign In with Apple" açılmadan ve provisioning profile yeniden
+ * üretilmeden imzalanamaz; profile yetkiyi içermezse arşiv adımı başarısız
+ * olur. Sosyal giriş kapalıyken (EXPO_PUBLIC_ENABLE_SOCIAL_AUTH=false)
+ * yetki ve config plugin hiç eklenmez, böylece imzalama mevcut profille uyumlu
+ * kalır. Uygulama tarafında da Apple girişi aynı bayrakla kapatılmıştır
+ * (src/config/env.ts, src/services/supabase/auth.ts).
+ */
+const SOCIAL_AUTH_ENABLED = process.env.EXPO_PUBLIC_ENABLE_SOCIAL_AUTH === 'true';
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'Trabzone',
@@ -17,6 +30,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     bundleIdentifier: BUNDLE_ID,
     supportsTablet: false,
+    usesAppleSignIn: SOCIAL_AUTH_ENABLED,
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
       NSCameraUsageDescription:
@@ -41,7 +55,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       backgroundColor: '#0B2A6B',
       monochromeImage: './assets/brand/icons/themed-monochrome.png',
     },
-    permissions: ['android.permission.CAMERA', 'android.permission.RECORD_AUDIO'],
+    permissions: [
+      'android.permission.CAMERA',
+      'android.permission.RECORD_AUDIO',
+      'android.permission.ACCESS_COARSE_LOCATION',
+      'android.permission.ACCESS_FINE_LOCATION',
+    ],
   },
   web: {
     bundler: 'metro',
@@ -50,6 +69,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     'expo-router',
+    'expo-web-browser',
+    // Yetki (entitlement) eklediği için yalnızca sosyal giriş açıkken eklenir.
+    ...(SOCIAL_AUTH_ENABLED ? ['expo-apple-authentication' as const] : []),
     [
       'expo-splash-screen',
       {
@@ -64,7 +86,39 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     'expo-secure-store',
+    [
+      'expo-location',
+      {
+        locationWhenInUsePermission:
+          'Trabzone, yolculuk sırasında canlı konum paylaşımı ve güvenlik uyarıları için konumunu kullanır.',
+      },
+    ],
+    [
+      // iOS'ta native Apple Maps (MapKit), Android'de native Mapbox kullanılır.
+      'expo-maps',
+      {
+        requestLocationPermission: true,
+        locationPermission:
+          'Trabzone, Etkileşim Haritası\'nda çevrendeki arkadaşları, yolculukları ve mekânları gösterebilmek için konumunu kullanır.',
+      },
+    ],
+    './plugins/with-mapbox-android',
+    // LiveKit (sesli/görüntülü arama). WebRTC çekirdeği native derleme gerektirir;
+    // Expo Go yerine development build kullanılır.
+    '@livekit/react-native-expo-plugin',
+    '@config-plugins/react-native-webrtc',
     'expo-font',
+    'expo-sharing',
+    'expo-mail-composer',
+    [
+      'expo-video',
+      {
+        // Reels arka planda duymaya devam etmemeli: sekme degisince veya
+        // uygulama arkaya gidince ses tamamen kesilir.
+        supportsBackgroundPlayback: false,
+        supportsPictureInPicture: false,
+      },
+    ],
     [
       'expo-alternate-app-icons',
       [
@@ -91,11 +145,19 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       {
         android: {
           minSdkVersion: 26,
-          enableProguardInReleaseBuilds: true,
+          // R8: release derlemesinde kod küçültme + kullanılmayan kaynak budama.
+          // Daha küçük APK daha hızlı kurulur ve uygulama daha hızlı açılır.
+          // (SDK 58'de eski `enableProguardInReleaseBuilds` adının yerini aldı.)
+          enableMinifyInReleaseBuilds: true,
           enableShrinkResourcesInReleaseBuilds: true,
+          // PNG'leri release'te optimize et (varsayılan açık, açıkça sabitlendi).
+          enablePngCrunchInReleaseBuilds: true,
+          // Hermes V1: daha hızlı açılış, daha az bellek (RN 0.84+ varsayılanı).
+          useHermesV1: true,
         },
         ios: {
-          deploymentTarget: '16.4',
+          // expo-maps (Apple Maps) iOS 18+ gerektirir.
+          deploymentTarget: '18.0',
         },
       },
     ],

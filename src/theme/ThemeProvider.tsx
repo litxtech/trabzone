@@ -46,6 +46,27 @@ export function useTheme(): ThemeContextValue {
   return context;
 }
 
+/**
+ * Belirli bir ekran agacini sabit bir renk semasina kilitler. Auth ekranlari
+ * sistem temasindan bagimsiz olarak her zaman koyu premium yuzeyde calisir.
+ */
+export function ThemeScope({
+  scheme = 'dark',
+  children,
+}: PropsWithChildren<{ scheme?: ColorScheme }>) {
+  const value = useMemo<ThemeContextValue>(
+    () => ({
+      theme: themes[scheme],
+      scheme,
+      mode: scheme,
+      setMode: () => undefined,
+    }),
+    [scheme],
+  );
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+}
+
 /** Convenience hook used by components that only need the raw tokens. */
 export function useThemeTokens(): Theme {
   return useTheme().theme;

@@ -22,8 +22,8 @@ const createShadow = (
 export const lightShadows = {
   none: {},
   xs: createShadow('#172238', 0.04, 6, 2, 1),
-  sm: createShadow('#172238', 0.06, 12, 4, 2),
-  card: createShadow('#1E3A8A', 0.08, 20, 8, 4),
+  sm: createShadow('#172238', 0.06, 10, 3, 2),
+  card: createShadow('#1E3A8A', 0.06, 12, 5, 2),
   floating: createShadow('#1E3A8A', 0.14, 28, 12, 10),
   sheet: createShadow('#0B1220', 0.18, 36, -6, 18),
   button: createShadow('#1459E8', 0.28, 16, 8, 6),
@@ -33,8 +33,8 @@ export const lightShadows = {
 export const darkShadows = {
   none: {},
   xs: createShadow('#000000', 0.2, 6, 2, 1),
-  sm: createShadow('#000000', 0.24, 12, 4, 2),
-  card: createShadow('#000000', 0.3, 20, 8, 4),
+  sm: createShadow('#000000', 0.24, 10, 3, 2),
+  card: createShadow('#000000', 0.24, 12, 5, 2),
   floating: createShadow('#000000', 0.36, 28, 12, 10),
   sheet: createShadow('#000000', 0.45, 36, -6, 18),
   button: createShadow('#1459E8', 0.24, 16, 8, 6),

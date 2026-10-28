@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/utils/router';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
-import { AppText, Button, Card } from '@/components/ui';
+import { AppText, Button, Card, Skeleton } from '@/components/ui';
 import { Screen } from '@/components/ui/Screen';
+import { PolicyBody } from '@/features/safety/components/PolicyBody';
 import { SafetyHeader } from '@/features/safety/components/SafetyHeader';
 import {
   CHILD_REASONS,
@@ -12,6 +13,7 @@ import {
   SUPPORT_EMAIL,
 } from '@/features/safety/constants';
 import { useSafetyFaqs, useSafetyPolicy } from '@/features/safety/hooks/use-safety';
+import { parsePolicyMarkdown } from '@/features/safety/utils/policy-markdown';
 import { contactSupportByEmail } from '@/features/safety/utils/contact';
 import { useAuthStatus } from '@/stores/auth-store';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -37,7 +39,7 @@ export default function ChildSafetyPolicyScreen() {
     [faqs],
   );
 
-  const sections = useMemo(() => parseMarkdown(policy?.body_md ?? ''), [policy?.body_md]);
+  const sections = useMemo(() => parsePolicyMarkdown(policy?.body_md ?? ''), [policy?.body_md]);
 
   return (
     <Screen edges={['top', 'left', 'right']} scroll padded>
@@ -74,8 +76,10 @@ export default function ChildSafetyPolicyScreen() {
       </View>
 
       {isLoading && !policy ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={theme.colors.primary} />
+        <View style={styles.skeletonBlock}>
+          <Skeleton height={15} width="92%" radius={5} />
+          <Skeleton height={15} width="86%" radius={5} />
+          <Skeleton height={15} width="72%" radius={5} />
         </View>
       ) : null}
 
@@ -88,34 +92,7 @@ export default function ChildSafetyPolicyScreen() {
         </Card>
       ) : null}
 
-      {sections.length > 0 ? (
-        <View style={styles.sections}>
-          {sections.map((section, index) => (
-            <View key={`${section.title}-${index}`} style={styles.section}>
-              {section.title ? (
-                <AppText variant="h3">{section.title}</AppText>
-              ) : null}
-              {section.paragraphs.map((paragraph, paragraphIndex) => {
-                if (paragraph.startsWith('- ')) {
-                  return (
-                    <View key={paragraphIndex} style={styles.bulletRow}>
-                      <View style={[styles.bullet, { backgroundColor: theme.colors.primary }]} />
-                      <AppText variant="body" color="textSecondary" style={styles.flex}>
-                        {paragraph.slice(2)}
-                      </AppText>
-                    </View>
-                  );
-                }
-                return (
-                  <AppText key={paragraphIndex} variant="body" color="textSecondary">
-                    {paragraph}
-                  </AppText>
-                );
-              })}
-            </View>
-          ))}
-        </View>
-      ) : null}
+      <PolicyBody sections={sections} />
 
       <View style={styles.section}>
         <AppText variant="h3">Neleri bildirebilirsin?</AppText>
@@ -280,60 +257,10 @@ export default function ChildSafetyPolicyScreen() {
   );
 }
 
-type Section = { title: string | null; paragraphs: string[] };
-
-/**
- * Politika metni Markdown olarak saklanir. Tam bir Markdown motoru eklemek
- * yerine baslik ve paragraf seviyesinde sade bir cozumleyici kullaniyoruz;
- * boylece bagimlilik eklemeden tutarli bir gorunum elde ediyoruz.
- */
-function parseMarkdown(markdown: string): Section[] {
-  if (!markdown.trim()) {
-    return [];
-  }
-
-  const sections: Section[] = [];
-  let current: Section = { title: null, paragraphs: [] };
-
-  for (const rawLine of markdown.split(/\r?\n/)) {
-    const line = rawLine.trim();
-
-    if (!line) {
-      continue;
-    }
-    if (line.startsWith('### ')) {
-      if (current.paragraphs.length > 0 || current.title) {
-        sections.push(current);
-      }
-      current = { title: line.slice(4), paragraphs: [] };
-      continue;
-    }
-    if (line.startsWith('## ')) {
-      if (current.paragraphs.length > 0 || current.title) {
-        sections.push(current);
-      }
-      current = { title: line.slice(3), paragraphs: [] };
-      continue;
-    }
-    if (line.startsWith('# ')) {
-      continue;
-    }
-    if (line.startsWith('- ') || line.startsWith('* ')) {
-      current.paragraphs.push(`- ${line.slice(2)}`);
-      continue;
-    }
-    current.paragraphs.push(line.replace(/\*\*/g, ''));
-  }
-
-  if (current.paragraphs.length > 0 || current.title) {
-    sections.push(current);
-  }
-  return sections;
-}
-
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { alignItems: 'center', paddingVertical: 30 },
+  skeletonBlock: { gap: 10, paddingTop: 8 },
   hero: { padding: 18, gap: 8, marginBottom: 4 },
   heroIcon: {
     width: 52,
@@ -344,10 +271,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   summary: { gap: 6, marginTop: 12 },
-  sections: { gap: 18, marginTop: 18 },
   section: { gap: 10, marginTop: 10 },
-  bulletRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  bullet: { width: 5, height: 5, borderRadius: 3, marginTop: 8 },
   reasonList: { gap: 7 },
   reasonRow: { flexDirection: 'row', gap: 10, padding: 11, borderWidth: StyleSheet.hairlineWidth, alignItems: 'flex-start' },
   timeline: { gap: 0 },

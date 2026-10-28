@@ -15,6 +15,8 @@ export type AppErrorCode =
   | 'not_found'
   | 'invalid_input'
   | 'ticket_closed'
+  | 'oauth_cancelled'
+  | 'oauth_unavailable'
   | 'unknown';
 
 export type AppError = {
@@ -37,6 +39,8 @@ const MESSAGES: Record<AppErrorCode, string> = {
   not_found: 'Kayıt bulunamadı. Sayfayı yenileyip tekrar dene.',
   invalid_input: 'Girdiğin bilgiler geçersiz. Kontrol edip tekrar dene.',
   ticket_closed: 'Bu talep kapatılmış. Yeni bir talep oluşturabilirsin.',
+  oauth_cancelled: 'Giriş iptal edildi.',
+  oauth_unavailable: 'Sosyal giriş henüz yapılandırılmadı. E-posta ile devam edebilirsin.',
   unknown: 'Bir şeyler ters gitti. Tekrar dene.',
 };
 
@@ -84,4 +88,18 @@ export function isAppError(value: unknown): value is AppError {
     'message' in value &&
     typeof (value as AppError).message === 'string'
   );
+}
+
+/**
+ * `unwrap` AppError nesnesi fırlatır (Error değil). Bu yardımcı, ekranlarda
+ * kullanıcıya her zaman anlaşılır Türkçe mesajı göstermeyi garanti eder.
+ */
+export function errorMessage(value: unknown, fallback: string): string {
+  if (isAppError(value) && value.message) {
+    return value.message;
+  }
+  if (value instanceof Error && value.message) {
+    return value.message;
+  }
+  return fallback;
 }

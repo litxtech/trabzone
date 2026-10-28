@@ -1,13 +1,14 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/utils/router';
 import { useState } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText, Button, TextField } from '@/components/ui';
 import { AuthScreen, InlineLink } from '@/features/auth/components/AuthScreen';
+import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons';
 import { FormError } from '@/features/auth/components/FormError';
 import {
   passwordStrength,
@@ -278,9 +279,32 @@ export default function RegisterScreen() {
                   {field.value ? <Ionicons name="checkmark" size={14} color="#FFFFFF" /> : null}
                 </View>
                 <AppText variant="caption" color="textSecondary" style={styles.termsText}>
-                  Kullanım Koşulları&apos;nı ve Gizlilik Politikası&apos;nı okudum, kabul ediyorum.
+                  Kullanım koşullarını ve gizlilik politikasını okudum, kabul ediyorum.
                 </AppText>
               </Pressable>
+              <View style={styles.legalRow}>
+                <Pressable
+                  accessibilityRole="link"
+                  hitSlop={6}
+                  onPress={() => router.push({ pathname: '/policy/[slug]', params: { slug: 'terms' } })}
+                >
+                  <AppText variant="caption" color="primary">
+                    Kullanım Koşulları
+                  </AppText>
+                </Pressable>
+                <AppText variant="caption" color="textTertiary">
+                  ·
+                </AppText>
+                <Pressable
+                  accessibilityRole="link"
+                  hitSlop={6}
+                  onPress={() => router.push({ pathname: '/policy/[slug]', params: { slug: 'privacy' } })}
+                >
+                  <AppText variant="caption" color="primary">
+                    Gizlilik Politikası
+                  </AppText>
+                </Pressable>
+              </View>
               {fieldState.error ? (
                 <AppText variant="caption" color="danger">
                   {fieldState.error.message}
@@ -292,6 +316,16 @@ export default function RegisterScreen() {
       </View>
 
       <Button label="Devam et" loading={formState.isSubmitting} onPress={() => void onSubmit()} />
+
+      <View style={styles.divider}>
+        <View style={styles.dividerLine} />
+        <AppText variant="caption" color="#6F7C96">
+          veya
+        </AppText>
+        <View style={styles.dividerLine} />
+      </View>
+
+      <SocialAuthButtons />
 
       <View style={styles.footer}>
         <AppText variant="caption" color="textSecondary">
@@ -318,5 +352,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   termsText: { flex: 1 },
+  legalRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 32 },
+  divider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: -2 },
+  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.1)' },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
 });

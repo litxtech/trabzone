@@ -1,0 +1,157 @@
+import { env } from '@/config/env';
+
+export type LatLng = { lat: number; lng: number };
+
+export type DrivingRoute = {
+  distanceMeters: number;
+  durationMinutes: number;
+  geometry: { lat: number; lng: number }[];
+};
+
+export type MapResult<T> = { ok: true; data: T } | { ok: false; reason: string };
+
+/**
+ * Mapbox Directions API. Anahtar yoksa ağ isteği yapılmaz ve çağıran taraf
+ * "harita yapılandırılmadı" durumunu gerçek mesafe uydurmadan gösterir.
+ */
+export async function fetchDrivingRoute(
+  origin: LatLng,
+  dest: LatLng,
+  waypoints: LatLng[] = [],
+): Promise<MapResult<DrivingRoute>> {
+  if (!env.mapboxToken) {
+    return { ok: false, reason: 'map_token_missing' };
+  }
+  const points = [origin, ...waypoints, dest]
+    .map((point) => `${point.lng},${point.lat}`)
+    .join(';');
+  const url =
+    `https://api.mapbox.com/directions/v5/mapbox/driving/${points}` +
+    `?geometries=geojson&overview=full&steps=false&language=tr&access_token=${env.mapboxToken}`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      return { ok: false, reason: `map_http_${response.status}` };
+    }
+    const body = (await response.json()) as {
+      routes?: {
+        distance?: number;
+        duration?: number;
+        geometry?: { coordinates?: [number, number][] };
+      }[];
+    };
+    const route = body.routes?.[0];
+    if (!route || typeof route.distance !== 'number') {
+      return { ok: false, reason: 'route_not_found' };
+    }
+    return {
+      ok: true,
+      data: {
+        distanceMeters: Math.round(route.distance),
+        durationMinutes: Math.round((route.duration ?? 0) / 60),
+        geometry: (route.geometry?.coordinates ?? []).map(([lng, lat]) => ({ lat, lng })),
+      },
+    };
+  } catch {
+    return { ok: false, reason: 'network' };
+  }
+}
+
+export type GeocodeResult = {
+  label: string;
+  lat: number;
+  lng: number;
+  placeType: string | null;
+};
+
+/**
+ * Mapbox Geocoding. Yalnızca Türkiye sonuçları döner; token yoksa çağrı
+ * yapılmaz ve çağıran taraf koordinatı boş bırakır (uydurma konum yazılmaz).
+ */
+export async function geocodePlace(query: string): Promise<MapResult<GeocodeResult>> {
+  if (!env.mapboxToken) {
+    return { ok: false, reason: 'map_token_missing' };
+  }
+  const trimmed = query.trim();
+  if (trimmed.length < 2) {
+    return { ok: false, reason: 'query_too_short' };
+  }
+  const url =
+    `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(trimmed)}.json` +
+    `?country=tr&language=tr&limit=1&access_token=${env.mapboxToken}`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      return { ok: false, reason: `geocode_http_${response.status}` };
+    }
+    const body = (await response.json()) as {
+      features?: {
+        place_name?: string;
+        center?: [number, number];
+        place_type?: string[];
+      }[];
+    };
+    const feature = body.features?.[0];
+    if (!feature?.center) {
+      return { ok: false, reason: 'place_not_found' };
+    }
+    return {
+      ok: true,
+      data: {
+        label: feature.place_name ?? trimmed,
+        lat: feature.center[1],
+        lng: feature.center[0],
+        placeType: feature.place_type?.[0] ?? null,
+      },
+    };
+  } catch {
+    return { ok: false, reason: 'network' };
+  }
+}
+
+/**
+ * Statik harita önizlemesi. Gerçek yol geometrisi varsa path olarak çizilir.
+ * Token yoksa null döner; istemci sahte harita göstermez.
+ */
+export function staticMapUrl(input: {
+  origin: LatLng;
+  dest: LatLng;
+  geometry?: { lat: number; lng: number }[];
+  width?: number;
+  height?: number;
+}): string | null {
+  if (!env.mapboxToken) {
+    return null;
+  }
+  const width = Math.min(Math.max(input.width ?? 720, 200), 1280);
+  const height = Math.min(Math.max(input.height ?? 360, 160), 720);
+  const line = simplify(input.geometry?.length ? input.geometry : [input.origin, input.dest], 40)
+    .map((point) => `${point.lng.toFixed(5)},${point.lat.toFixed(5)}`)
+    .join(',');
+  const encoded = encodeURIComponent(line).replace(/%2C/g, ',');
+  const overlay = `path-4+4169F5-0.9(${encoded})`;
+  const center = `${((input.origin.lng + input.dest.lng) / 2).toFixed(4)},${(
+    (input.origin.lat + input.dest.lat) / 2
+  ).toFixed(4)}`;
+  return (
+    `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${overlay}/` +
+    `geojson(${encodeURIComponent(JSON.stringify({ type: 'Point', coordinates: [input.origin.lng, input.origin.lat] }))})/` +
+    `${center},9,0/${width}x${height}@2x?padding=40&access_token=${env.mapboxToken}`
+  );
+}
+
+function simplify(points: LatLng[], max: number): LatLng[] {
+  if (points.length <= max) {
+    return points;
+  }
+  const step = Math.ceil(points.length / max);
+  return points.filter((_, index) => index % step === 0 || index === points.length - 1);
+}
+
+export function coordinatesLabel(lat: number | null, lng: number | null): string | null {
+  if (lat == null || lng == null) {
+    return null;
+  }
+  return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+}

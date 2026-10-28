@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/utils/router';
 import { Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText, Avatar, Card, IconButton, Screen } from '@/components/ui';
@@ -82,6 +82,13 @@ export default function SettingsScreen() {
           />
           <Divider />
           <SettingRow
+            icon="key-outline"
+            label="Hesap ve güvenlik"
+            value="Giriş yöntemleri"
+            onPress={() => router.push('/settings/account')}
+          />
+          <Divider />
+          <SettingRow
             icon="lock-closed-outline"
             label="Gizlilik"
             onPress={() => router.push('/settings/privacy')}
@@ -117,7 +124,7 @@ export default function SettingsScreen() {
         <Card padding={0}>
           <SettingRow
             icon="shield-checkmark-outline"
-            label="Güvenlik ve gizlilik"
+            label="Çocuk güvenliği ayarları"
             onPress={() => router.push('/settings/child-safety')}
           />
           <Divider />
@@ -141,12 +148,42 @@ export default function SettingsScreen() {
           />
           <Divider />
           <SettingRow
+            icon="reader-outline"
+            label="Kullanım koşulları"
+            onPress={() => router.push({ pathname: '/policy/[slug]', params: { slug: 'terms' } })}
+          />
+          <Divider />
+          <SettingRow
+            icon="lock-closed-outline"
+            label="Gizlilik politikası"
+            onPress={() => router.push({ pathname: '/policy/[slug]', params: { slug: 'privacy' } })}
+          />
+          <Divider />
+          <SettingRow
             icon="mail-outline"
             label="Destek e-postası"
             value={SUPPORT_EMAIL}
             onPress={() => router.push('/support')}
           />
         </Card>
+      </View>
+
+      <View style={styles.section}>
+        <AppText variant="overline" color="textTertiary" style={styles.sectionTitle}>
+          HESAP
+        </AppText>
+        <Card padding={0}>
+          <SettingRow
+            icon="trash-outline"
+            label="Hesabımı sil"
+            value="Kalıcı"
+            danger
+            onPress={() => router.push('/settings/delete-account')}
+          />
+        </Card>
+        <AppText variant="caption" color="textTertiary" style={styles.sectionNote}>
+          Hesabını ve tüm içeriklerini kalıcı olarak siler. Bu işlem geri alınamaz.
+        </AppText>
       </View>
 
       <Pressable
@@ -175,11 +212,13 @@ function SettingRow({
   icon,
   label,
   value,
+  danger = false,
   onPress,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
   value?: string;
+  danger?: boolean;
   onPress: () => void;
 }) {
   const { theme } = useTheme();
@@ -194,9 +233,13 @@ function SettingRow({
       ]}
     >
       <View style={[styles.rowIcon, { backgroundColor: theme.colors.surfaceMuted }]}>
-        <Ionicons name={icon} size={18} color={theme.colors.primaryDeep} />
+        <Ionicons
+          name={icon}
+          size={18}
+          color={danger ? theme.colors.danger : theme.colors.primaryDeep}
+        />
       </View>
-      <AppText variant="bodyStrong" style={styles.rowLabel}>
+      <AppText variant="bodyStrong" style={styles.rowLabel} color={danger ? 'danger' : 'text'}>
         {label}
       </AppText>
       {value ? (
@@ -204,7 +247,11 @@ function SettingRow({
           {value}
         </AppText>
       ) : null}
-      <Ionicons name="chevron-forward" size={16} color={theme.colors.textTertiary} />
+      <Ionicons
+        name="chevron-forward"
+        size={16}
+        color={danger ? theme.colors.danger : theme.colors.textTertiary}
+      />
     </Pressable>
   );
 }
@@ -235,6 +282,7 @@ const styles = StyleSheet.create({
   accountText: { flex: 1, gap: 2 },
   section: { marginTop: 20, gap: 8 },
   sectionTitle: { paddingHorizontal: 4 },
+  sectionNote: { paddingHorizontal: 4, lineHeight: 16 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/utils/router';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, Share, StyleSheet, View } from 'react-native';
 
@@ -15,7 +16,9 @@ import {
   ScreenHeader,
   Skeleton,
 } from '@/components/ui';
+import { useCanMessage, useStartDirectConversation } from '@/features/messaging/hooks/use-chat';
 import { ConnectionsSheet } from '@/features/profile/components/ConnectionsSheet';
+import { ProfileContentTabs } from '@/features/profile/components/ProfileContentTabs';
 import { useToggleFollow } from '@/features/profile/hooks/use-follow';
 import {
   useCancelFriendRequest,
@@ -47,6 +50,10 @@ export default function PublicProfileScreen() {
   const cancelRequest = useCancelFriendRequest();
   const blockUser = useBlockUser();
   const unblockUser = useUnblockUser();
+  const startChat = useStartDirectConversation();
+  const canMessage = useCanMessage(
+    profile && !profile.is_me && !profile.blocked ? profile.id : null,
+  );
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [connections, setConnections] = useState<ConnectionKind | null>(null);
@@ -112,8 +119,23 @@ export default function PublicProfileScreen() {
     );
   };
 
+  const messageProfile = () => {
+    if (!profile) {
+      return;
+    }
+    setActionError(null);
+    startChat.mutate(profile.id, {
+      onSuccess: ({ id }) => {
+        haptics.success();
+        router.push(`/chat/${id}` as never);
+      },
+      onError: (error) => setActionError(error.message),
+    });
+  };
+
   const busy =
     toggleFollow.isPending ||
+    startChat.isPending ||
     sendRequest.isPending ||
     respondRequest.isPending ||
     cancelRequest.isPending ||
@@ -220,7 +242,7 @@ export default function PublicProfileScreen() {
             <Avatar
               uri={mediaPublicUrl('avatar', profile.avatar_path)}
               name={fullName}
-              size={88}
+              size={92}
               ring
             />
             {profile.follows_me ? (
@@ -378,6 +400,28 @@ export default function PublicProfileScreen() {
                   )}
                 </View>
 
+                <Button
+                  label="Mesaj gönder"
+                  variant="outline"
+                  onPress={messageProfile}
+                  loading={startChat.isPending}
+                  disabled={canMessage.data === false || (busy && !startChat.isPending)}
+                  leftIcon={
+                    <Ionicons
+                      name="chatbubble-outline"
+                      size={17}
+                      color={canMessage.data === false ? theme.colors.textTertiary : theme.colors.text}
+                    />
+                  }
+                  style={styles.messageButton}
+                />
+
+                {canMessage.data === false ? (
+                  <AppText variant="caption" color="textTertiary" style={styles.requestNote}>
+                    Bu kullanıcı gizlilik ayarları nedeniyle doğrudan mesaj kabul etmiyor.
+                  </AppText>
+                ) : null}
+
                 {!profile.accepts_friend_requests && !profile.is_friend ? (
                   <AppText variant="caption" color="textTertiary" style={styles.requestNote}>
                     Bu kullanıcı arkadaşlık isteklerini kapatmış.
@@ -408,7 +452,7 @@ export default function PublicProfileScreen() {
             )}
           </View>
 
-          <Card padding={0} style={styles.statsCard}>
+          <View style={[styles.statsRow, { borderColor: theme.colors.divider }]}>
             <Stat value={profile.posts_count} label="Gönderi" />
             <View style={[styles.statDivider, { backgroundColor: theme.colors.divider }]} />
             <Stat
@@ -422,7 +466,7 @@ export default function PublicProfileScreen() {
               label="Takip"
               onPress={() => setConnections('following')}
             />
-          </Card>
+          </View>
 
           {actionError ? (
             <View
@@ -438,23 +482,23 @@ export default function PublicProfileScreen() {
             </View>
           ) : null}
 
-          <View style={styles.sectionHead}>
-            <AppText variant="h3">Gönderiler</AppText>
-          </View>
-
-          <Card tone="muted" elevated={false} style={styles.emptyCard}>
-            <View style={[styles.emptyIcon, { backgroundColor: theme.colors.primarySoft }]}>
-              <Ionicons name="camera-outline" size={24} color={theme.colors.primaryDeep} />
-            </View>
-            <AppText variant="bodyStrong">
-              {profile.restricted ? 'Gönderiler gizli' : 'Henüz gönderi yok'}
-            </AppText>
-            <AppText variant="body" color="textSecondary" align="center">
-              {profile.restricted
-                ? 'Bu hesabın paylaşımlarını görmek için erişim gerekiyor.'
-                : 'Bu profilin paylaşımları burada listelenecek.'}
-            </AppText>
-          </Card>
+          {profile.restricted ? (
+            <Card tone="muted" elevated={false} style={styles.emptyCard}>
+              <View style={[styles.emptyIcon, { backgroundColor: theme.colors.primarySoft }]}>
+                <Ionicons name="lock-closed-outline" size={24} color={theme.colors.primaryDeep} />
+              </View>
+              <AppText variant="bodyStrong">Gönderiler gizli</AppText>
+              <AppText variant="body" color="textSecondary" align="center">
+                Bu hesabın paylaşımlarını görmek için erişim gerekiyor.
+              </AppText>
+            </Card>
+          ) : (
+            <ProfileContentTabs
+              username={profile.username}
+              userId={profile.id}
+              isOwner={Boolean(profile.is_me)}
+            />
+          )}
 
           {busy ? (
             <View style={styles.busy}>
@@ -553,13 +597,13 @@ const styles = StyleSheet.create({
   skeleton: { gap: 12 },
   stateCard: { alignItems: 'center', gap: 10, paddingVertical: 28 },
   stateIcon: { width: 56, height: 56, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  cover: { height: 140, borderRadius: 22, overflow: 'hidden' },
+  cover: { height: 152, borderRadius: 26, overflow: 'hidden' },
   avatarRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 10,
     paddingHorizontal: 18,
-    marginTop: -46,
+    marginTop: -50,
     zIndex: 2,
   },
   followsMeBadge: {
@@ -586,6 +630,7 @@ const styles = StyleSheet.create({
   websiteRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 },
   actions: { flexDirection: 'row', gap: 10, marginTop: 16 },
   actionButton: { flex: 1 },
+  messageButton: { marginTop: 10 },
   friendBadge: {
     flex: 1,
     flexDirection: 'row',
@@ -599,11 +644,13 @@ const styles = StyleSheet.create({
   selfButton: { marginTop: 16 },
   requestNote: { marginTop: 6 },
   rejectLink: { alignSelf: 'center', paddingVertical: 8 },
-  statsCard: {
+  statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 16,
+    paddingVertical: 15,
     marginTop: 18,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   stat: { flex: 1, alignItems: 'center', gap: 2 },
   statDivider: { width: StyleSheet.hairlineWidth, height: 30 },

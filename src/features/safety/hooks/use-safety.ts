@@ -18,6 +18,7 @@ import type {
   SafetyPolicy,
   SafetyState,
   StaffInfo,
+  SupportReplyTemplate,
   TicketDetail,
   TicketSummary,
 } from '../types';
@@ -39,6 +40,7 @@ export const safetyKeys = {
   ageOverview: ['safety', 'admin', 'age-overview'] as const,
   consents: (status: string) => ['safety', 'admin', 'consents', status] as const,
   audit: (entityType: string | null) => ['safety', 'admin', 'audit', entityType] as const,
+  supportTemplates: ['safety', 'admin', 'support-templates'] as const,
 };
 
 const unwrap = <T>(result: Result<T>): T => {
@@ -185,6 +187,17 @@ export function useAuditLogs(entityType: string | null = null) {
     queryKey: safetyKeys.audit(entityType),
     queryFn: async () => {
       const result = await safety.fetchAuditLogs(entityType);
+      return unwrap(result).items ?? [];
+    },
+    staleTime: 60_000,
+  });
+}
+
+export function useSupportTemplates() {
+  return useQuery<SupportReplyTemplate[], Error>({
+    queryKey: safetyKeys.supportTemplates,
+    queryFn: async () => {
+      const result = await safety.fetchSupportTemplates();
       return unwrap(result).items ?? [];
     },
     staleTime: 60_000,

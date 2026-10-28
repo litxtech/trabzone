@@ -142,6 +142,7 @@ export const REPORT_TARGET_LABEL: Record<ReportTargetType, string> = {
   call: 'Arama',
   room: 'Sesli oda',
   story: 'Hikâye',
+  listing: 'Marketplace ilanı',
   other: 'İçerik',
 };
 
@@ -157,6 +158,7 @@ export const REPORT_TARGET_ICON: Record<ReportTargetType, IoniconName> = {
   call: 'call-outline',
   room: 'mic-outline',
   story: 'albums-outline',
+  listing: 'pricetag-outline',
   other: 'flag-outline',
 };
 

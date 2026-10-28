@@ -35,3 +35,14 @@ yarn-error.*
 
 # Tests / coverage
 coverage/
+
+# Local scratch artifacts (QA accounts, admin probes, build caches)
+.cache-web-export/
+.prompt-dump/
+.qa-*.sql
+.qa-session.tmp
+remote-admin-*
+tmp-admin-check.sql
+tmp-*.json
+scripts/.cache/
+supabase/_conflicting_parallel_work/

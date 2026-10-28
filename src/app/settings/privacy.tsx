@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/utils/router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Switch, View } from 'react-native';
 
@@ -106,6 +106,27 @@ export default function PrivacySettingsScreen() {
             <AppText variant="caption" color="textTertiary">
               Profil fotoğrafın ve kullanıcı adın her durumda görünür kalır.
             </AppText>
+          </View>
+
+          <View style={styles.section}>
+            <AppText variant="h3">Harita konum gizliliği</AppText>
+            <Card style={styles.card}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Etkileşim haritasında konum gizliliğini yönet"
+                onPress={() => router.push('/map' as never)}
+                style={({ pressed }) => [styles.mapRow, { opacity: pressed ? 0.7 : 1 }]}
+              >
+                <Ionicons name="map-outline" size={20} color={theme.colors.primaryDeep} />
+                <View style={styles.mapRowText}>
+                  <AppText variant="bodyStrong">Hayalet modu ve konum paylaşımı</AppText>
+                  <AppText variant="caption" color="textTertiary">
+                    Görünürlük, süre ve hassasiyet harita güvenlik merkezinde yönetilir.
+                  </AppText>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
+              </Pressable>
+            </Card>
           </View>
 
           <View style={styles.section}>
@@ -328,6 +349,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 2 },
+  mapRow: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 2 },
+  mapRowText: { flex: 1, gap: 2 },
   toggleIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   errorBox: {
     flexDirection: 'row',

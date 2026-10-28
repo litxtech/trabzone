@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/utils/router';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -28,9 +28,11 @@ import {
 import { PROVINCES } from '@/features/profile/constants/regions';
 import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
 import {
+  useChangeUsername,
   useRemoveProfileMedia,
   useUpdateProfile,
   useUploadProfileMedia,
+  useUsernameChangeStatus,
 } from '@/features/profile/hooks/use-profile-mutations';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -58,6 +60,23 @@ const EMPTY: Draft = {
   website: '',
 };
 
+function formatCooldown(nextChangeAt: string | null): string {
+  if (!nextChangeAt) {
+    return 'Kullanıcı adı şu anda değiştirilemez.';
+  }
+  const date = new Date(nextChangeAt);
+  if (Number.isNaN(date.getTime())) {
+    return 'Kullanıcı adı şu anda değiştirilemez.';
+  }
+  const formatted = date.toLocaleDateString('tr-TR', {
+    day: 'numeric',
+    month: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return `Haftada 1 kez değiştirilebilir · ${formatted} sonrasında tekrar dene`;
+}
+
 export default function EditProfileScreen() {
   const { theme } = useTheme();
   const router = useRouter();
@@ -66,12 +85,16 @@ export default function EditProfileScreen() {
   const updateProfile = useUpdateProfile();
   const uploadMedia = useUploadProfileMedia();
   const removeMedia = useRemoveProfileMedia();
+  const { data: usernameStatus } = useUsernameChangeStatus();
+  const changeUsername = useChangeUsername();
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [actionError, setActionError] = useState<string | null>(null);
   const [mediaSheet, setMediaSheet] = useState<'avatar' | 'cover' | null>(null);
   const [cityOpen, setCityOpen] = useState(false);
+  const [usernameDraft, setUsernameDraft] = useState<string | null>(null);
+  const [usernameError, setUsernameError] = useState<string | null>(null);
 
   const base = useMemo<Draft>(
     () =>
@@ -163,6 +186,39 @@ export default function EditProfileScreen() {
       haptics.error();
       setActionError(error instanceof Error ? error.message : 'Profil kaydedilemedi.');
     }
+  };
+
+  const applyUsername = async (next: string) => {
+    try {
+      await changeUsername.mutateAsync(next);
+      haptics.success();
+      setUsernameDraft(null);
+      setUsernameError(null);
+    } catch (error) {
+      haptics.error();
+      setUsernameError(error instanceof Error ? error.message : 'Kullanıcı adı değiştirilemedi.');
+    }
+  };
+
+  const submitUsername = () => {
+    const next = (usernameDraft ?? '').trim().toLowerCase();
+    if (!/^[a-z0-9_.]{3,24}$/.test(next)) {
+      setUsernameError('3-24 karakter; küçük harf, rakam, nokta ve alt çizgi kullan.');
+      return;
+    }
+    if (next === profile?.username) {
+      setUsernameError('Bu zaten mevcut kullanıcı adın.');
+      return;
+    }
+    setUsernameError(null);
+    Alert.alert(
+      'Kullanıcı adını değiştir',
+      `@${next} adresini kullanmak istediğine emin misin? Kullanıcı adı haftada yalnızca bir kez değiştirilebilir.`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        { text: 'Değiştir', onPress: () => void applyUsername(next) },
+      ],
+    );
   };
 
   const pickImage = async (kind: 'avatar' | 'cover', source: 'library' | 'camera') => {
@@ -345,20 +401,77 @@ export default function EditProfileScreen() {
             autoCapitalize="words"
             textContentType="familyName"
           />
-          <View
-            style={[
-              styles.lockedRow,
-              { backgroundColor: theme.colors.surfaceMuted, borderRadius: theme.radius.sm },
-            ]}
-          >
-            <Ionicons name="at" size={16} color={theme.colors.textTertiary} />
-            <View style={styles.lockedText}>
-              <AppText variant="bodyStrong">@{profile.username}</AppText>
-              <AppText variant="caption" color="textTertiary">
-                Kullanıcı adı değiştirilemez.
-              </AppText>
+          {usernameDraft === null ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Kullanıcı adını değiştir"
+              disabled={!usernameStatus?.can_change}
+              onPress={() => {
+                setUsernameError(null);
+                setUsernameDraft(profile.username);
+              }}
+              style={[
+                styles.lockedRow,
+                {
+                  backgroundColor: theme.colors.surfaceMuted,
+                  borderRadius: theme.radius.sm,
+                },
+              ]}
+            >
+              <Ionicons name="at" size={16} color={theme.colors.textTertiary} />
+              <View style={styles.lockedText}>
+                <AppText variant="bodyStrong">@{profile.username}</AppText>
+                <AppText variant="caption" color="textTertiary">
+                  {usernameStatus?.can_change
+                    ? usernameStatus.credits > 0 && usernameStatus.last_changed_at
+                      ? `Haftalık süre dolmadı · ${usernameStatus.credits} ek hakkın var`
+                      : 'Kullanıcı adını değiştirebilirsin'
+                    : formatCooldown(usernameStatus?.next_change_at ?? null)}
+                </AppText>
+              </View>
+              {usernameStatus?.can_change ? (
+                <AppText variant="label" color="primaryDeep">
+                  Değiştir
+                </AppText>
+              ) : (
+                <Ionicons name="lock-closed-outline" size={15} color={theme.colors.textTertiary} />
+              )}
+            </Pressable>
+          ) : (
+            <View style={styles.usernameEditor}>
+              <TextField
+                label="Yeni kullanıcı adı"
+                value={usernameDraft}
+                onChangeText={(text) => {
+                  setUsernameDraft(text.toLowerCase());
+                  setUsernameError(null);
+                }}
+                error={usernameError}
+                hint="3-24 karakter · küçük harf, rakam, nokta ve alt çizgi"
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={24}
+                leftIcon="at"
+              />
+              <View style={styles.usernameActions}>
+                <Button
+                  label="Vazgeç"
+                  variant="secondary"
+                  onPress={() => {
+                    setUsernameDraft(null);
+                    setUsernameError(null);
+                  }}
+                  style={styles.flex}
+                />
+                <Button
+                  label="Kaydet"
+                  onPress={submitUsername}
+                  loading={changeUsername.isPending}
+                  style={styles.flex}
+                />
+              </View>
             </View>
-          </View>
+          )}
         </Card>
       </View>
 
@@ -574,6 +687,8 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   lockedText: { flex: 1, gap: 1 },
+  usernameEditor: { gap: 10 },
+  usernameActions: { flexDirection: 'row', gap: 8 },
   selectRow: {
     flexDirection: 'row',
     alignItems: 'center',

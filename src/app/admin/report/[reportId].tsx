@@ -9,11 +9,7 @@ import { SafetyEmptyState } from '@/features/safety/components/SafetyEmptyState'
 import { SafetyHeader } from '@/features/safety/components/SafetyHeader';
 import { SafetySheet } from '@/features/safety/components/SafetySheet';
 import { PriorityPill, ReportStatusPill } from '@/features/safety/components/StatusPill';
-import {
-  CHILD_REASON_MAP,
-  REPORT_REASONS,
-  REPORT_TARGET_LABEL,
-} from '@/features/safety/constants';
+import { CHILD_REASON_MAP, REPORT_REASONS, REPORT_TARGET_LABEL } from '@/features/safety/constants';
 import { useAdminReport } from '@/features/safety/hooks/use-safety';
 import {
   useAdminAssignReport,
@@ -139,6 +135,7 @@ export default function AdminReportDetailScreen() {
       />
 
       <ScrollView
+        keyboardShouldPersistTaps="handled"
         style={styles.flex}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -156,8 +153,9 @@ export default function AdminReportDetailScreen() {
                 Çocuk güvenliği bildirimi
               </AppText>
               <AppText variant="caption" color="textSecondary">
-                Yalnızca `safety.child.view` yetkisi olan ekip erişebilir. Görsel içerikler varsayılan
-                olarak bulanık gösterilir; içeriği açmadan önce kimlik ve yaş bağlamını doğrula.
+                Yalnızca `safety.child.view` yetkisi olan ekip erişebilir. Görsel içerikler
+                varsayılan olarak bulanık gösterilir; içeriği açmadan önce kimlik ve yaş bağlamını
+                doğrula.
               </AppText>
             </View>
           </View>
@@ -186,7 +184,10 @@ export default function AdminReportDetailScreen() {
                 tone={sla?.expired ? 'danger' : 'default'}
               />
             ) : null}
-            <Meta label="Bildiren" value={report.reporter_id ? `#${report.reporter_id.slice(0, 8)}` : '—'} />
+            <Meta
+              label="Bildiren"
+              value={report.reporter_id ? `#${report.reporter_id.slice(0, 8)}` : '—'}
+            />
             <Meta
               label="Atanan"
               value={report.assigned_to ? report.assigned_to.slice(0, 8) : 'Atanmamış'}
@@ -296,7 +297,9 @@ export default function AdminReportDetailScreen() {
                 variant="secondary"
                 loading={action.isPending}
                 onPress={startReview}
-                leftIcon={<Ionicons name="search-outline" size={17} color={theme.colors.primaryDeep} />}
+                leftIcon={
+                  <Ionicons name="search-outline" size={17} color={theme.colors.primaryDeep} />
+                }
               />
             ) : null}
             <Button
@@ -425,7 +428,13 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scrollContent: { paddingBottom: 28, gap: 12 },
-  iconButton: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   childBanner: {
     flexDirection: 'row',
     gap: 10,

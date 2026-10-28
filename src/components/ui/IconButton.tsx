@@ -60,7 +60,8 @@ export function IconButton({
         {
           backgroundColor: background,
           borderRadius: theme.radius.pill,
-          opacity: disabled ? 0.45 : pressed ? 0.7 : 1,
+          opacity: disabled ? 0.45 : 1,
+          transform: [{ scale: pressed && !disabled ? 0.94 : 1 }],
           borderWidth: variant === 'surface' ? StyleSheet.hairlineWidth : 0,
           borderColor: theme.colors.border,
         },

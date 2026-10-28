@@ -1,16 +1,16 @@
 import type { ReactNode } from 'react';
 import {
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppText, IconButton } from '@/components/ui';
+import { useKeyboard } from '@/providers/keyboard';
 import { useTheme } from '@/theme/ThemeProvider';
 
 type Props = {
@@ -42,6 +42,13 @@ export function SafetySheet({
 }: Props) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboard = useKeyboard();
+  const keyboardHeight = keyboard.height;
+  // Modal ayri pencerede açıldığı için Android'de pencere küçülmüyor; klavye
+  // yüksekliğini kendimiz ayırıyoruz ki alt yorum alanı görünür kalsın.
+  // Klavye acikken alt guvenli alan zaten klavyenin altinda kaldigi icin
+  // inset'i ayrica eklemeyiz; aksi halde alan gereksiz yere yukari kayar.
+  const keyboardStyle = useAnimatedStyle(() => ({ paddingBottom: keyboardHeight.value }));
 
   return (
     <Modal
@@ -59,10 +66,7 @@ export function SafetySheet({
           style={[styles.backdrop, { backgroundColor: theme.colors.overlay }]}
           onPress={onClose}
         />
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.keyboard}
-        >
+        <Animated.View style={[styles.keyboard, keyboardStyle]}>
           <View
             style={[
               styles.sheet,
@@ -70,7 +74,7 @@ export function SafetySheet({
                 backgroundColor: theme.colors.background,
                 borderTopLeftRadius: theme.radius.xxl,
                 borderTopRightRadius: theme.radius.xxl,
-                paddingBottom: Math.max(insets.bottom, 14),
+                paddingBottom: keyboard.isVisible ? 12 : Math.max(insets.bottom, 14),
                 maxHeight: `${Math.round(maxHeightRatio * 100)}%`,
               },
             ]}
@@ -101,6 +105,7 @@ export function SafetySheet({
 
             {scrollable ? (
               <ScrollView
+                style={styles.body}
                 contentContainerStyle={styles.scrollContent}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
@@ -108,12 +113,12 @@ export function SafetySheet({
                 {children}
               </ScrollView>
             ) : (
-              <View style={styles.scrollContent}>{children}</View>
+              <View style={[styles.scrollContent, styles.body]}>{children}</View>
             )}
 
             {footer ? <View style={styles.footer}>{footer}</View> : null}
           </View>
-        </KeyboardAvoidingView>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -122,8 +127,14 @@ export function SafetySheet({
 const styles = StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFill },
-  keyboard: { justifyContent: 'flex-end' },
-  sheet: { overflow: 'hidden' },
+  // flex: 1 olmadan `maxHeight` yuzdesi cozulemiyor (ust bilesen icerige gore
+  // boyutlandigi icin sinir uygulanmiyordu) ve klavye boslugu eklendiginde
+  // alt sayfa ekranin disina tasabiliyordu.
+  keyboard: { flex: 1, justifyContent: 'flex-end' },
+  // Icerik sinirlaninca once govde kuculur; boylece alt yorum alani
+  // (footer) her zaman klavyenin ustunde kalir.
+  sheet: { overflow: 'hidden', flexShrink: 1 },
+  body: { flexShrink: 1 },
   grabberWrap: { alignItems: 'center', paddingTop: 8, paddingBottom: 4 },
   grabber: { width: 42, height: 5, borderRadius: 3 },
   header: {

@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/utils/router';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 
-import { AppText, Card, IconButton, Screen } from '@/components/ui';
+import { AppText, Card, IconButton, Screen, Wordmark } from '@/components/ui';
 import { APP_ICON_OPTIONS } from '@/features/appearance/constants/app-icons';
 import { useAppIcon } from '@/features/appearance/hooks/use-app-icon';
 import { useSettingsStore, type ThemeMode } from '@/stores/settings-store';
@@ -85,7 +85,7 @@ export default function AppearanceScreen() {
           </AppText>
         </View>
 
-        <AppText variant="h2">Trabzone</AppText>
+        <Wordmark size={18} />
         <AppText variant="body" color="textSecondary">
           Renkler, yazı tipleri ve yüzeyler tema ile birlikte anında güncellenir.
         </AppText>

@@ -1,7 +1,8 @@
+import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/utils/router';
 import { useCallback, useMemo } from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DrawerIdentity } from '@/components/navigation/DrawerIdentity';
@@ -10,22 +11,16 @@ import { AppText } from '@/components/ui';
 import { useMyRoles } from '@/features/profile/hooks/use-my-profile';
 import { useSafetyState } from '@/features/safety/hooks/use-safety';
 import { useAuthStore } from '@/stores/auth-store';
-import { useSettingsStore, type ThemeMode } from '@/stores/settings-store';
-
-const THEME_LABEL: Record<ThemeMode, string> = {
-  system: 'Sistem',
-  light: 'Açık',
-  dark: 'Koyu',
-};
+import { useTheme } from '@/theme/ThemeProvider';
 
 const STAFF_ROLES = ['admin', 'super_admin', 'moderator', 'support_agent'];
 
 export function DrawerMenu({ onClose }: { onClose: () => void }) {
   const router = useRouter();
+  const { theme } = useTheme();
   const insets = useSafeAreaInsets();
 
   const signOut = useAuthStore((state) => state.signOut);
-  const themeMode = useSettingsStore((state) => state.themeMode);
   const { data: roles } = useMyRoles();
   const { data: safety } = useSafetyState();
 
@@ -59,31 +54,95 @@ export function DrawerMenu({ onClose }: { onClose: () => void }) {
 
   return (
     <ScrollView
+      keyboardShouldPersistTaps="handled"
       style={styles.flex}
       contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 20 }]}
       showsVerticalScrollIndicator={false}
     >
+      {/* Ana sayfa artik metin satiri degil, en ustte tek bir simge. */}
+      <View style={styles.topBar}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Ana sayfaya git"
+          onPress={() => go('/feed')}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.homeButton,
+            {
+              backgroundColor: pressed ? theme.colors.primarySoft : theme.colors.surfaceMuted,
+              borderColor: theme.colors.border,
+            },
+          ]}
+        >
+          <Ionicons name="home" size={20} color={theme.colors.primaryDeep} />
+        </Pressable>
+      </View>
+
       <DrawerIdentity onPress={() => go('/profile')} caption="Profilini görüntüle" />
 
-      <DrawerSection title="Hesap">
-        <DrawerRow icon="person-outline" label="Profilim" onPress={() => go('/profile')} />
-        <DrawerDivider />
-        <DrawerRow icon="settings-outline" label="Ayarlar" onPress={() => go('/settings')} />
+      <DrawerSection title="Keşfet">
+        <DrawerRow
+          icon="compass"
+          label="Trabzon Keşfet"
+          hint="İşletmeler · Emlak · Alan arama"
+          tone="primary"
+          onPress={() => go('/explore')}
+        />
         <DrawerDivider />
         <DrawerRow
-          icon="contrast-outline"
-          label="Görünüm"
-          hint={`Tema: ${THEME_LABEL[themeMode]}`}
-          onPress={() => go('/settings/appearance')}
+          icon="map"
+          label="Etkileşim Haritası"
+          hint="Arkadaşlar · Yolculuk · Mekân"
+          onPress={() => go('/map')}
+        />
+        <DrawerDivider />
+        <DrawerRow
+          icon="home-outline"
+          label="Trabzone Emlak"
+          onPress={() => go('/marketplace/real-estate')}
+        />
+        <DrawerDivider />
+        <DrawerRow
+          icon="storefront-outline"
+          label="Marketplace"
+          onPress={() => go('/marketplace')}
+        />
+        <DrawerDivider />
+        <DrawerRow
+          icon="receipt-outline"
+          label="Siparişlerim"
+          onPress={() => go('/marketplace/orders')}
         />
       </DrawerSection>
 
-      <DrawerSection title="Keşfet">
-        <DrawerRow icon="home-outline" label="Ana Sayfa" onPress={() => go('/feed')} />
+      <DrawerSection title="Yolculuk">
+        <DrawerRow
+          icon="car-sport"
+          label="Yolculuk Paylaşımı"
+          hint="Ara · Paylaş · Rezervasyon"
+          tone="primary"
+          onPress={() => go('/ride')}
+        />
         <DrawerDivider />
-        <DrawerRow icon="storefront-outline" label="Marketplace" onPress={() => go('/marketplace')} />
+        <DrawerRow
+          icon="navigate-outline"
+          label="Yolculuk ara"
+          onPress={() => go('/ride/search')}
+        />
         <DrawerDivider />
-        <DrawerRow icon="chatbubbles-outline" label="Mesajlarım" onPress={() => go('/messages')} />
+        <DrawerRow icon="albums-outline" label="Yolculuklarım" onPress={() => go('/ride/trips')} />
+        <DrawerDivider />
+        <DrawerRow
+          icon="repeat-outline"
+          label="Düzenli yolculuklar"
+          onPress={() => go('/ride/recurring')}
+        />
+        <DrawerDivider />
+        <DrawerRow
+          icon="shield-half-outline"
+          label="Güvenlik merkezi"
+          onPress={() => go('/ride/safety')}
+        />
       </DrawerSection>
 
       <DrawerSection title="Destek ve güvenlik">
@@ -104,6 +163,12 @@ export function DrawerMenu({ onClose }: { onClose: () => void }) {
         <DrawerRow
           icon="shield-checkmark-outline"
           label="Güvenlik ve gizlilik"
+          onPress={() => go('/settings/privacy')}
+        />
+        <DrawerDivider />
+        <DrawerRow
+          icon="lock-closed-outline"
+          label="Çocuk güvenliği ayarları"
           onPress={() => go('/settings/child-safety')}
         />
         <DrawerDivider />
@@ -127,7 +192,12 @@ export function DrawerMenu({ onClose }: { onClose: () => void }) {
       ) : null}
 
       <View style={styles.bottom}>
-        <DrawerRow icon="log-out-outline" label="Çıkış Yap" tone="danger" onPress={confirmSignOut} />
+        <DrawerRow
+          icon="log-out-outline"
+          label="Çıkış Yap"
+          tone="danger"
+          onPress={confirmSignOut}
+        />
         <AppText variant="caption" color="textTertiary" align="center">
           Trabzone v{version}
         </AppText>
@@ -141,7 +211,16 @@ export function DrawerMenu({ onClose }: { onClose: () => void }) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  content: { paddingHorizontal: 12, paddingTop: 12, gap: 18 },
+  content: { paddingHorizontal: 12, paddingTop: 10, gap: 18 },
+  topBar: { flexDirection: 'row', alignItems: 'center' },
+  homeButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   bottom: { gap: 10, paddingTop: 4 },
   legal: { opacity: 0.8 },
 });

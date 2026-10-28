@@ -1,11 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/utils/router';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { StyleSheet, View } from 'react-native';
 
 import { AppText, Button, TextField } from '@/components/ui';
 import { AuthScreen, InlineLink } from '@/features/auth/components/AuthScreen';
+import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons';
 import { FormError } from '@/features/auth/components/FormError';
 import { loginSchema, type LoginValues } from '@/features/auth/validators';
 import { fetchMyProfile } from '@/features/profile/services/profile-service';
@@ -91,6 +92,16 @@ export default function LoginScreen() {
 
       <Button label="Giriş Yap" loading={formState.isSubmitting} onPress={() => void onSubmit()} />
 
+      <View style={styles.divider}>
+        <View style={styles.dividerLine} />
+        <AppText variant="caption" color="#6F7C96">
+          veya
+        </AppText>
+        <View style={styles.dividerLine} />
+      </View>
+
+      <SocialAuthButtons />
+
       <View style={styles.footer}>
         <AppText variant="caption" color="textSecondary">
           Henüz hesabın yok mu?
@@ -103,5 +114,7 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   form: { gap: 16 },
+  divider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: -2 },
+  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.1)' },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
 });

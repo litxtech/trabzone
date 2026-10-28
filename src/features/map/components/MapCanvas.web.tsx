@@ -1,0 +1,233 @@
+import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
+import { useMemo, useState } from 'react';
+import { Linking, Pressable, StyleSheet, View } from 'react-native';
+import Svg, { Polygon } from 'react-native-svg';
+
+import { AppText } from '@/components/ui';
+import { useTheme } from '@/theme/ThemeProvider';
+
+import { hasMapboxToken, staticMapUrl } from '../services/map-service';
+import { clamp, projectToPixels } from '../utils/geo';
+import { markerTone, toneColor } from '../utils/map-theme';
+import { MapCanvasFallback } from './MapCanvasFallback';
+import type { MapCanvasProps } from './map-canvas-types';
+
+/**
+ * Web: native harita motoru yok. Mapbox Static Images API ile gerçek harita
+ * karoları gösterilir; işaretler mercator projeksiyonuyla yerleştirilir.
+ * Yakınlaştırma düğmeleri çalışır, serbest kaydırma yoktur — bu sınırlama
+ * arayüzde açıkça belirtilir.
+ */
+export function MapCanvas({
+  initialCamera,
+  markers,
+  polygon,
+  userLocation,
+  dark,
+  onMarkerPress,
+  onCameraChange,
+}: MapCanvasProps) {
+  const { theme } = useTheme();
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  // Web'de kamera kontrol edilen state'tir: odak, arama ve zoom aynı kaynaktan gelir.
+  const camera = initialCamera;
+
+  const url = useMemo(() => {
+    if (!hasMapboxToken() || size.width < 20) {
+      return null;
+    }
+    return staticMapUrl({
+      center: { lat: camera.lat, lng: camera.lng },
+      zoom: camera.zoom,
+      width: size.width,
+      height: Math.max(size.height, 240),
+      dark,
+    });
+  }, [camera.lat, camera.lng, camera.zoom, dark, size.height, size.width]);
+
+  if (!hasMapboxToken()) {
+    return (
+      <MapCanvasFallback
+        camera={camera}
+        markers={markers}
+        message="Web haritası için Mapbox anahtarı gerekli."
+        onMarkerPress={onMarkerPress}
+      />
+    );
+  }
+
+  const zoomBy = (delta: number) => {
+    onCameraChange({
+      lat: camera.lat,
+      lng: camera.lng,
+      zoom: clamp(camera.zoom + delta, 3, 18),
+    });
+  };
+
+  const polygonPoints =
+    polygon && polygon.length >= 3 && size.width > 20
+      ? polygon
+          .map((point) => {
+            const position = projectToPixels(point, camera, size);
+            return `${position.x},${position.y}`;
+          })
+          .join(' ')
+      : null;
+
+  return (
+    <View
+      style={StyleSheet.absoluteFill}
+      onLayout={(event) =>
+        setSize({
+          width: event.nativeEvent.layout.width,
+          height: event.nativeEvent.layout.height,
+        })
+      }
+    >
+      {url ? (
+        <Image source={{ uri: url }} style={StyleSheet.absoluteFill} contentFit="cover" transition={180} />
+      ) : null}
+
+      {polygonPoints ? (
+        <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+          <Polygon
+            points={polygonPoints}
+            fill={theme.colors.primary}
+            fillOpacity={0.16}
+            stroke={theme.colors.primary}
+            strokeWidth={2.5}
+            strokeDasharray="6 5"
+          />
+        </Svg>
+      ) : null}
+
+      <Pressable
+        accessibilityRole="link"
+        accessibilityLabel="Mapbox ve OpenStreetMap telif bilgisi"
+        onPress={() => void Linking.openURL('https://www.mapbox.com/about/maps/')}
+        style={styles.attribution}
+      >
+        <AppText variant="caption" style={styles.attributionText}>
+          © Mapbox © OpenStreetMap
+        </AppText>
+      </Pressable>
+
+      {markers.slice(0, 60).map((point) => {
+        if (size.width < 20) {
+          return null;
+        }
+        const position = projectToPixels(point, camera, size);
+        if (
+          position.x < -24 ||
+          position.y < -24 ||
+          position.x > size.width + 24 ||
+          position.y > size.height + 24
+        ) {
+          return null;
+        }
+        return (
+          <Pressable
+            key={point.id}
+            accessibilityRole="button"
+            accessibilityLabel={point.title}
+            onPress={() => onMarkerPress(point)}
+            style={[styles.pin, { left: position.x - 15, top: position.y - 30 }]}
+          >
+            <View
+              style={[
+                styles.pinBody,
+                point.label ? styles.pinBodyWide : null,
+                {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: toneColor(theme, markerTone(point.kind)),
+                },
+              ]}
+            >
+              <AppText
+                variant="caption"
+                style={{ color: toneColor(theme, markerTone(point.kind)), fontSize: 9 }}
+                numberOfLines={1}
+              >
+                {point.kind === 'cluster' ? String(point.count ?? '') : (point.label ?? '•')}
+              </AppText>
+            </View>
+          </Pressable>
+        );
+      })}
+
+      {userLocation ? (
+        <View
+          style={[
+            styles.self,
+            {
+              left: projectToPixels(userLocation, camera, size).x - 8,
+              top: projectToPixels(userLocation, camera, size).y - 8,
+              backgroundColor: theme.colors.info,
+            },
+          ]}
+        />
+      ) : null}
+
+      <View style={styles.controls}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Yakınlaştır"
+          onPress={() => zoomBy(1)}
+          style={[styles.control, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+        >
+          <Ionicons name="add" size={18} color={theme.colors.text} />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Uzaklaştır"
+          onPress={() => zoomBy(-1)}
+          style={[styles.control, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+        >
+          <Ionicons name="remove" size={18} color={theme.colors.text} />
+        </Pressable>
+      </View>
+
+      <View style={styles.noteWrap} pointerEvents="none">
+        <AppText variant="caption" style={styles.note}>
+          Web önizleme · Mapbox · Serbest kaydırma mobil uygulamada
+        </AppText>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  pin: { position: 'absolute' },
+  pinBody: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pinBodyWide: { width: 54, height: 26, borderRadius: 8 },
+  self: { position: 'absolute', width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: '#FFFFFF' },
+  controls: { position: 'absolute', right: 12, top: 64, gap: 8 },
+  control: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noteWrap: { position: 'absolute', left: 12, top: 10 },
+  note: { color: 'rgba(255,255,255,0.72)', fontSize: 9 },
+  attribution: {
+    position: 'absolute',
+    left: 10,
+    bottom: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: 'rgba(15,23,42,0.62)',
+  },
+  attributionText: { color: '#FFFFFF', fontSize: 9 },
+});

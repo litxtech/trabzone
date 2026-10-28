@@ -26,7 +26,11 @@ export const springs = {
   drawer: { damping: 26, stiffness: 240, mass: 0.9 },
 } as const;
 
+/**
+ * Yigin gecis ayarlari: native push hizi. Fade/blur yok, kullaniciyi bekletmez.
+ * Alt sekmelerde gecis tamamen kapali (`animation: 'none'`).
+ */
 export const navigationTransition = {
-  animation: 'fade_from_bottom',
-  animationDuration: durations.slow,
+  animation: 'slide_from_right',
+  animationDuration: durations.fast,
 } as const;

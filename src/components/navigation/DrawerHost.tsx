@@ -1,3 +1,4 @@
+import { usePathname } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type PropsWithChildren } from 'react';
 import { BackHandler, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -8,7 +9,6 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,18 +23,39 @@ import {
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 
-const PANEL_MAX_WIDTH = 360;
-const PANEL_WIDTH_RATIO = 0.86;
-const EDGE_WIDTH = 18;
+const PANEL_MAX_WIDTH = 380;
+const PANEL_WIDTH_RATIO = 0.84;
+const EDGE_WIDTH = 22;
 
-/** X uygulamasindaki gibi: hizli, kisa ve hafif yayli bir acilis. */
-const OPEN_SPRING = { damping: 28, stiffness: 320, mass: 0.9, overshootClamping: true };
-const CLOSE_TIMING = { duration: 200, easing: Easing.out(Easing.cubic) };
+/**
+ * X uygulamasindaki gibi: hizli, kisa ve hafif yayli bir acilis. 200 ms
+ * araliginda tutuluyor; daha uzunu gecikme, daha kisasi "ziplama" hissi verir.
+ */
+const OPEN_TIMING = { duration: 205, easing: Easing.out(Easing.cubic) };
+const CLOSE_TIMING = { duration: 175, easing: Easing.in(Easing.cubic) };
+
+/**
+ * Jest guncellemeleri UI runtime'da calisir. Bu yardimci fonksiyon `worklet`
+ * olarak isaretlenmezse React Native Worklets onu "remote function" sayar ve
+ * UI thread'inden senkron cagrilamaz (bkz. DrawerHost clamp hatasi).
+ */
+function clamp(value: number, min: number, max: number): number {
+  'worklet';
+  return Math.min(Math.max(value, min), max);
+}
 
 export function DrawerHost({ children }: PropsWithChildren) {
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const pathname = usePathname();
+
+  /**
+   * Kenardan kaydirarak menu acmak yalnizca akista calisir. Diger ekranlarda
+   * ayni hareket isletim sisteminin "geri" jestine aittir; burada yakalanirsa
+   * kullanici geri donemez ve hamburger beklenmedik sekilde acilir.
+   */
+  const edgeEnabled = pathname === '/feed';
 
   const panelWidth = Math.round(Math.min(width * PANEL_WIDTH_RATIO, PANEL_MAX_WIDTH));
   const closedX = -panelWidth;
@@ -65,7 +86,7 @@ export function DrawerHost({ children }: PropsWithChildren) {
       setVariant(next);
       setMounted(true);
       setIsOpen(true);
-      translateX.set(withSpring(0, OPEN_SPRING));
+      translateX.set(withTiming(0, OPEN_TIMING));
     },
     [cancelUnmount, translateX],
   );
@@ -125,11 +146,11 @@ export function DrawerHost({ children }: PropsWithChildren) {
           runOnJS(prepareDrag)('main');
         })
         .onUpdate((event) => {
-          translateX.set(Math.max(closedX, Math.min(0, startX.get() + event.translationX)));
+          translateX.set(clamp(startX.get() + event.translationX, closedX, 0));
         })
         // eslint-disable-next-line react-hooks/refs
         .onEnd((event) => {
-          const shouldOpen = event.translationX > panelWidth * 0.28 || event.velocityX > 650;
+          const shouldOpen = event.translationX > panelWidth * 0.26 || event.velocityX > 620;
           if (shouldOpen) {
             runOnJS(openPanel)('main');
           } else {
@@ -148,15 +169,41 @@ export function DrawerHost({ children }: PropsWithChildren) {
           startX.set(translateX.get());
         })
         .onUpdate((event) => {
-          translateX.set(Math.max(closedX, Math.min(0, startX.get() + event.translationX)));
+          translateX.set(clamp(startX.get() + event.translationX, closedX, 0));
         })
         // eslint-disable-next-line react-hooks/refs
         .onEnd((event) => {
-          const shouldClose = event.translationX < -panelWidth * 0.22 || event.velocityX < -550;
+          const shouldClose = event.translationX < -panelWidth * 0.2 || event.velocityX < -520;
           if (shouldClose) {
             runOnJS(close)();
           } else {
-            translateX.set(withSpring(0, OPEN_SPRING));
+            translateX.set(withTiming(0, OPEN_TIMING));
+          }
+        }),
+    [closedX, close, panelWidth, startX, translateX],
+  );
+
+  // Acikken karartmanin uzerinden sola kaydirma: panel + ana icerik birlikte
+  // kapanir. Boylece kullanici sadece menunun kenarindan degil, ekranin her
+  // yerinden dogal bir jestle menuyu kapatabilir.
+  const backdropGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-12, 12])
+        .failOffsetY([-16, 16])
+        .onBegin(() => {
+          startX.set(translateX.get());
+        })
+        .onUpdate((event) => {
+          translateX.set(clamp(startX.get() + event.translationX, closedX, 0));
+        })
+        // eslint-disable-next-line react-hooks/refs
+        .onEnd((event) => {
+          const shouldClose = event.translationX < -panelWidth * 0.16 || event.velocityX < -480;
+          if (shouldClose) {
+            runOnJS(close)();
+          } else {
+            translateX.set(withTiming(0, OPEN_TIMING));
           }
         }),
     [closedX, close, panelWidth, startX, translateX],
@@ -166,8 +213,14 @@ export function DrawerHost({ children }: PropsWithChildren) {
     transform: [{ translateX: translateX.get() }],
   }));
 
+  // X'te oldugu gibi ana sayfa menunun altinda kalmaz: panel genisligi kadar
+  // saga kayar. Donusum native thread'de calisir, JS thread'i bloklanmaz.
+  const contentStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.get() + panelWidth }],
+  }));
+
   const backdropStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(translateX.get(), [closedX, 0], [0, 1], Extrapolation.CLAMP),
+    opacity: interpolate(translateX.get(), [closedX, 0], [0, 0.34], Extrapolation.CLAMP),
   }));
 
   const context = useMemo<DrawerContextValue>(
@@ -177,10 +230,17 @@ export function DrawerHost({ children }: PropsWithChildren) {
 
   return (
     <DrawerContext.Provider value={context}>
-      <View style={styles.root}>
-        {children}
+      <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
+        <Animated.View
+          style={[styles.content, contentStyle]}
+          pointerEvents={isOpen ? 'none' : 'auto'}
+          accessibilityElementsHidden={isOpen}
+          importantForAccessibility={isOpen ? 'no-hide-descendants' : 'auto'}
+        >
+          {children}
+        </Animated.View>
 
-        {!isOpen ? (
+        {!isOpen && edgeEnabled ? (
           <GestureDetector gesture={edgeGesture}>
             <View
               accessibilityElementsHidden
@@ -192,20 +252,26 @@ export function DrawerHost({ children }: PropsWithChildren) {
 
         {mounted ? (
           <View style={StyleSheet.absoluteFill} pointerEvents={isOpen ? 'auto' : 'none'}>
-            <Animated.View
-              style={[
-                StyleSheet.absoluteFill,
-                { backgroundColor: theme.colors.overlay },
-                backdropStyle,
-              ]}
-            >
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Menüyü kapat"
-                onPress={close}
-                style={StyleSheet.absoluteFill}
-              />
-            </Animated.View>
+            <GestureDetector gesture={backdropGesture}>
+              <Animated.View
+                style={[
+                  StyleSheet.absoluteFill,
+                  {
+                    // Menude yalnizca gerekli karartma: agir scrim yok.
+                    backgroundColor: theme.scheme === 'dark' ? '#03070E' : '#0B1220',
+                    opacity: 0,
+                  },
+                  backdropStyle,
+                ]}
+              >
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Menüyü kapat"
+                  onPress={close}
+                  style={StyleSheet.absoluteFill}
+                />
+              </Animated.View>
+            </GestureDetector>
 
             <GestureDetector gesture={panelGesture}>
               <Animated.View
@@ -218,7 +284,6 @@ export function DrawerHost({ children }: PropsWithChildren) {
                     borderTopRightRadius: theme.radius.xl,
                     borderBottomRightRadius: theme.radius.xl,
                     paddingTop: insets.top,
-                    shadowColor: theme.scheme === 'dark' ? '#000000' : '#0B1220',
                   },
                   panelStyle,
                 ]}
@@ -238,7 +303,8 @@ export function DrawerHost({ children }: PropsWithChildren) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { flex: 1, overflow: 'hidden' },
+  content: { flex: 1 },
   edge: {
     position: 'absolute',
     left: 0,
@@ -252,9 +318,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     zIndex: 50,
-    elevation: 24,
-    shadowOpacity: 0.22,
-    shadowRadius: 24,
-    shadowOffset: { width: 6, height: 0 },
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: 'rgba(120, 140, 180, 0.25)',
   },
 });

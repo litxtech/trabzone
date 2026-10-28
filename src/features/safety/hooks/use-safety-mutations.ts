@@ -198,6 +198,18 @@ export function useAdminReplyTicket(ticketId: string) {
   });
 }
 
+export function useSaveSupportTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: Parameters<typeof safety.adminSaveSupportTemplate>[0]) =>
+      unwrap(await safety.adminSaveSupportTemplate(input)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: safetyKeys.supportTemplates });
+      void queryClient.invalidateQueries({ queryKey: ['safety', 'admin', 'audit'] });
+    },
+  });
+}
+
 export function useAdminReportAction() {
   const queryClient = useQueryClient();
   return useMutation({

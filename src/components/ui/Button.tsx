@@ -8,12 +8,6 @@ import {
   type PressableProps,
   type ViewStyle,
 } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-  withTiming,
-} from 'react-native-reanimated';
 
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
@@ -36,11 +30,17 @@ export type ButtonProps = Omit<PressableProps, 'children'> & {
   style?: ViewStyle;
 };
 
-const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
-
 const HEIGHTS: Record<ButtonSize, number> = { sm: 42, md: 50, lg: 56 };
 const FONT_SIZE: Record<ButtonSize, number> = { sm: 13, md: 15, lg: 16 };
 
+/**
+ * Birincil eylem butonu.
+ *
+ * Dokunus geri bildirimi animasyonsuzdur: parmak degdigi anda hafif olcek +
+ * opaklik degisir, birakildiginda ayni karede eski haline doner. Yay/timing
+ * animasyonu bilincli olarak kaldirildi; birakma sonrasi "karanlik kalma"
+ * veya gecikmeli toparlanma yasanmaz.
+ */
 export function Button({
   label,
   variant = 'primary',
@@ -58,17 +58,16 @@ export function Button({
   ...rest
 }: ButtonProps) {
   const { theme } = useTheme();
-  const scale = useSharedValue(1);
   const isDisabled = disabled || loading;
-
-  const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
   const palette = {
     primary: {
       background: theme.colors.primaryDeep,
       foreground: theme.colors.onPrimary,
       border: 'transparent',
-      shadow: theme.shadows.button,
+      // Buton golgesi kaldirildi: her CTA icin ek offscreen render ve
+      // "shadow cannot be calculated efficiently" uyarisi ortadan kalkti.
+      shadow: theme.shadows.none,
     },
     secondary: {
       background: theme.colors.primarySoft,
@@ -97,19 +96,13 @@ export function Button({
   }[variant];
 
   return (
-    <AnimatedPressable
+    <Pressable
       accessibilityRole="button"
       accessibilityState={{ disabled: isDisabled, busy: loading }}
       accessibilityLabel={rest.accessibilityLabel ?? label}
       disabled={isDisabled}
-      onPressIn={(event) => {
-        scale.set(withTiming(0.97, { duration: 90 }));
-        onPressIn?.(event);
-      }}
-      onPressOut={(event) => {
-        scale.set(withSpring(1, theme.animations.springs.snappy));
-        onPressOut?.(event);
-      }}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
       onPress={(event) => {
         if (haptic === 'tap') {
           haptics.tap();
@@ -118,22 +111,29 @@ export function Button({
         }
         onPress?.(event);
       }}
-      style={[
+      style={({ pressed }) => [
         styles.base,
         {
           height: HEIGHTS[size],
-          opacity: isDisabled ? 0.55 : 1,
           borderRadius: theme.radius.md,
           borderColor: palette.border,
           borderWidth: variant === 'outline' ? 1.5 : 0,
           alignSelf: fullWidth ? 'stretch' : 'flex-start',
+          opacity: isDisabled ? 0.55 : pressed ? 0.9 : 1,
+          transform: [{ scale: pressed && !isDisabled ? 0.985 : 1 }],
         },
         palette.shadow,
         style,
       ]}
       {...rest}
     >
-      <Animated.View style={[StyleSheet.absoluteFill, animatedStyle, { borderRadius: theme.radius.md, overflow: 'hidden' }]}>
+      <View
+        style={[
+          StyleSheet.absoluteFill,
+          { borderRadius: theme.radius.md, overflow: 'hidden' },
+        ]}
+        pointerEvents="none"
+      >
         {variant === 'primary' ? (
           <LinearGradient
             colors={theme.gradients.primary}
@@ -144,7 +144,7 @@ export function Button({
         ) : (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: palette.background }]} />
         )}
-      </Animated.View>
+      </View>
 
       <View style={styles.content} pointerEvents="none">
         {loading ? (
@@ -164,7 +164,7 @@ export function Button({
           </View>
         )}
       </View>
-    </AnimatedPressable>
+    </Pressable>
   );
 }
 

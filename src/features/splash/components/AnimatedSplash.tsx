@@ -7,11 +7,12 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withDelay,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 
 import { Logo, Wordmark } from '@/components/ui';
+import { perf } from '@/perf';
+import { useReduceMotion } from '@/perf/use-reduce-motion';
 import { useTheme } from '@/theme/ThemeProvider';
 
 type AnimatedSplashProps = {
@@ -20,81 +21,111 @@ type AnimatedSplashProps = {
   onFinish: () => void;
 };
 
-const INTRO_DURATION = 820;
-
 /**
  * Brand intro played once, on top of the first rendered route.
- * It never blocks the app for more than ~1.1s: the exit starts as soon as the
- * intro finished *and* the bootstrap is ready.
+ * Total blocking time is kept under ~450ms: the intro never waits for the
+ * network and hands over as soon as fonts + session are restored.
+ *
+ * Android'de intro daha kisa (perf.splashIntroMs) tutulur; animasyonlari
+ * kaldiran kullanicilarda hic oynatilmaz.
  */
 export function AnimatedSplash({ ready, onFinish }: AnimatedSplashProps) {
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
-  const [introDone, setIntroDone] = useState(false);
+  const reduceMotion = useReduceMotion();
+  const [introFinished, setIntroFinished] = useState(false);
+  // Animasyonlari kaldiran kullanicilarda intro tamamlanmis sayilir; ekstra
+  // state gecisi (effect icinde setState) olusmaz.
+  const introDone = introFinished || reduceMotion;
 
-  const logoScale = useSharedValue(0.82);
+  const logoScale = useSharedValue(0.94);
   const logoOpacity = useSharedValue(0);
-  const glow = useSharedValue(0.25);
+  const glow = useSharedValue(0.3);
   const textOpacity = useSharedValue(0);
-  const textOffset = useSharedValue(14);
   const progress = useSharedValue(0);
   const overlayOpacity = useSharedValue(1);
   const overlayScale = useSharedValue(1);
 
   useEffect(() => {
-    logoOpacity.value = withTiming(1, { duration: 260, easing: Easing.out(Easing.quad) });
-    logoScale.value = withSpring(1, theme.animations.springs.soft);
-    glow.value = withTiming(0.5, { duration: 900, easing: Easing.inOut(Easing.quad) });
-    textOpacity.value = withDelay(160, withTiming(1, { duration: 420 }));
-    textOffset.value = withDelay(160, withTiming(0, { duration: 520, easing: Easing.out(Easing.cubic) }));
-    progress.value = withTiming(1, { duration: INTRO_DURATION, easing: Easing.inOut(Easing.quad) }, (finished) => {
-      if (finished) {
-        runOnJS(setIntroDone)(true);
-      }
-    });
+    if (reduceMotion) {
+      // Animasyonlar kapali: intro bekletmeden tamamlanir.
+      logoOpacity.set(1);
+      logoScale.set(1);
+      glow.set(0.5);
+      textOpacity.set(1);
+      progress.set(1);
+      return;
+    }
+
+    logoOpacity.set(withTiming(1, { duration: 140, easing: Easing.out(Easing.quad) }));
+    logoScale.set(withTiming(1, { duration: 260, easing: Easing.out(Easing.cubic) }));
+    glow.set(withTiming(0.5, { duration: perf.splashIntroMs, easing: Easing.out(Easing.quad) }));
+    textOpacity.set(withDelay(70, withTiming(1, { duration: 190 })));
+    progress.set(
+      withTiming(1, { duration: perf.splashIntroMs, easing: Easing.out(Easing.quad) }, (finished) => {
+        if (finished) {
+          runOnJS(setIntroFinished)(true);
+        }
+      }),
+    );
     // Brand intro intentionally runs once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [reduceMotion]);
 
   useEffect(() => {
     if (!ready || !introDone) {
       return;
     }
-    overlayScale.value = withTiming(1.04, { duration: 280, easing: Easing.in(Easing.cubic) });
-    overlayOpacity.value = withTiming(0, { duration: 300, easing: Easing.in(Easing.quad) }, (finished) => {
-      if (finished) {
-        runOnJS(onFinish)();
-      }
-    });
-  }, [ready, introDone, overlayOpacity, overlayScale, onFinish]);
+    if (reduceMotion) {
+      onFinish();
+      return;
+    }
+    overlayScale.set(withTiming(1.02, { duration: perf.splashExitMs, easing: Easing.in(Easing.cubic) }));
+    overlayOpacity.set(
+      withTiming(0, { duration: perf.splashExitMs, easing: Easing.in(Easing.quad) }, (finished) => {
+        if (finished) {
+          runOnJS(onFinish)();
+        }
+      }),
+    );
+    // Emniyet: animasyon geri cagrisi (arka plana gecis, JS is parcacigi
+    // yogunlugu) kaybolursa tam ekran katman gorunmez sekilde ustte kalip
+    // tum dokunuslari yutabilirdi. Kisa bir zaman asimi katmanin kapanmasini
+    // garanti eder.
+    const safety = setTimeout(onFinish, 400);
+    return () => clearTimeout(safety);
+  }, [ready, introDone, overlayOpacity, overlayScale, onFinish, reduceMotion]);
+
+  // Giris biter bitmez katman dokunuslara kapanir: kapanis animasyonu veya
+  // sokum gecikse bile parmak artik dogrudan uygulamaya ulasir.
+  const blocking = !ready || !introDone;
 
   const overlayStyle = useAnimatedStyle(() => ({
-    opacity: overlayOpacity.value,
-    transform: [{ scale: overlayScale.value }],
+    opacity: overlayOpacity.get(),
+    transform: [{ scale: overlayScale.get() }],
   }));
 
   const logoStyle = useAnimatedStyle(() => ({
-    opacity: logoOpacity.value,
-    transform: [{ scale: logoScale.value }],
+    opacity: logoOpacity.get(),
+    transform: [{ scale: logoScale.get() }],
   }));
 
   const glowStyle = useAnimatedStyle(() => ({
-    opacity: glow.value,
-    transform: [{ scale: 0.9 + glow.value * 0.35 }],
+    opacity: glow.get(),
+    transform: [{ scale: 0.9 + glow.get() * 0.35 }],
   }));
 
   const textStyle = useAnimatedStyle(() => ({
-    opacity: textOpacity.value,
-    transform: [{ translateY: textOffset.value }],
+    opacity: textOpacity.get(),
   }));
 
   const progressStyle = useAnimatedStyle(() => ({
-    width: progress.value * 132,
+    width: progress.get() * 132,
   }));
 
   return (
     <Animated.View
-      pointerEvents="auto"
+      pointerEvents={blocking ? 'auto' : 'none'}
       style={[StyleSheet.absoluteFill, styles.container, overlayStyle]}
     >
       <LinearGradient
@@ -123,8 +154,10 @@ export function AnimatedSplash({ ready, onFinish }: AnimatedSplashProps) {
         </Animated.View>
 
         <Animated.View style={[styles.copy, textStyle]}>
-          <Wordmark color="#FFFFFF" size={24} />
-          <Animated.Text style={[styles.tagline, { fontFamily: theme.typography.caption.fontFamily }]}>
+          <Wordmark color="#FFFFFF" accentColor="#A78BFA" size={24} />
+          <Animated.Text
+            style={[styles.tagline, { fontFamily: theme.typography.caption.fontFamily }]}
+          >
             Trabzon&apos;un dijital buluşma noktası
           </Animated.Text>
         </Animated.View>
@@ -153,10 +186,7 @@ const styles = StyleSheet.create({
     gap: 22,
   },
   logoWrap: {
-    shadowColor: '#020B22',
-    shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.35,
-    shadowRadius: 26,
+    // Agir golge kaldirildi: acilista ekstra offscreen render maliyeti yok.
   },
   copy: {
     alignItems: 'center',

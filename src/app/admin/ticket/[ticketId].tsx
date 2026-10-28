@@ -1,7 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Linking,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { AppText, Button, Card, IconButton } from '@/components/ui';
 import { Screen } from '@/components/ui/Screen';
@@ -9,8 +18,11 @@ import { SafetyEmptyState } from '@/features/safety/components/SafetyEmptyState'
 import { SafetyHeader } from '@/features/safety/components/SafetyHeader';
 import { TicketStatusPill } from '@/features/safety/components/StatusPill';
 import { SUPPORT_CATEGORY_MAP, TICKET_STATUS } from '@/features/safety/constants';
-import { useTicket } from '@/features/safety/hooks/use-safety';
-import { useAdminReplyTicket, useAdminUpdateTicket } from '@/features/safety/hooks/use-safety-mutations';
+import { useSupportTemplates, useTicket } from '@/features/safety/hooks/use-safety';
+import {
+  useAdminReplyTicket,
+  useAdminUpdateTicket,
+} from '@/features/safety/hooks/use-safety-mutations';
 import { getAttachmentUrl } from '@/features/safety/services/safety-service';
 import type { Attachment, TicketMessage, TicketStatusCode } from '@/features/safety/types';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -18,7 +30,11 @@ import { formatDateTimeTr, formatSlaRemaining, formatTimeTr } from '@/utils/date
 import { toMessage } from '@/utils/error-message';
 import { haptics } from '@/utils/haptics';
 
-const STATUS_ACTIONS: { key: TicketStatusCode; label: string; tone: 'primary' | 'accent' | 'success' }[] = [
+const STATUS_ACTIONS: {
+  key: TicketStatusCode;
+  label: string;
+  tone: 'primary' | 'accent' | 'success';
+}[] = [
   { key: 'under_review', label: 'İncelemeye al', tone: 'primary' },
   { key: 'awaiting_user', label: 'Kullanıcıdan bilgi bekle', tone: 'accent' },
   { key: 'info_required', label: 'Bilgi gerekli', tone: 'accent' },
@@ -34,10 +50,14 @@ export default function AdminTicketDetailScreen() {
   const { data: ticket, isLoading, isError, refetch } = useTicket(ticketId);
   const reply = useAdminReplyTicket(ticketId);
   const update = useAdminUpdateTicket();
+  const templatesQuery = useSupportTemplates();
 
   const [draft, setDraft] = useState('');
   const [internal, setInternal] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+
+  const activeTemplates = (templatesQuery.data ?? []).filter((template) => template.is_active);
 
   const send = async (nextStatus?: TicketStatusCode) => {
     if (!draft.trim()) {
@@ -153,7 +173,9 @@ export default function AdminTicketDetailScreen() {
               style={[
                 styles.slaRow,
                 {
-                  backgroundColor: sla.expired ? theme.colors.dangerSoft : theme.colors.surfaceMuted,
+                  backgroundColor: sla.expired
+                    ? theme.colors.dangerSoft
+                    : theme.colors.surfaceMuted,
                 },
               ]}
             >
@@ -241,27 +263,46 @@ export default function AdminTicketDetailScreen() {
           { backgroundColor: theme.colors.surface, borderTopColor: theme.colors.divider },
         ]}
       >
-        <Pressable
-          accessibilityRole="switch"
-          accessibilityState={{ checked: internal }}
-          accessibilityLabel="Yalnızca ekip görebilsin"
-          onPress={() => setInternal((value) => !value)}
-          style={[
-            styles.internalToggle,
-            {
-              backgroundColor: internal ? theme.colors.warningSoft : theme.colors.surfaceMuted,
-            },
-          ]}
-        >
-          <Ionicons
-            name={internal ? 'lock-closed' : 'lock-open-outline'}
-            size={13}
-            color={internal ? theme.colors.warning : theme.colors.textTertiary}
-          />
-          <AppText variant="caption" color={internal ? 'warning' : 'textTertiary'}>
-            {internal ? 'İç not (kullanıcı görmez)' : 'Kullanıcıya yanıt'}
-          </AppText>
-        </Pressable>
+        <View style={styles.composerTools}>
+          <Pressable
+            accessibilityRole="switch"
+            accessibilityState={{ checked: internal }}
+            accessibilityLabel="Yalnızca ekip görebilsin"
+            onPress={() => setInternal((value) => !value)}
+            style={[
+              styles.internalToggle,
+              {
+                backgroundColor: internal ? theme.colors.warningSoft : theme.colors.surfaceMuted,
+              },
+            ]}
+          >
+            <Ionicons
+              name={internal ? 'lock-closed' : 'lock-open-outline'}
+              size={13}
+              color={internal ? theme.colors.warning : theme.colors.textTertiary}
+            />
+            <AppText variant="caption" color={internal ? 'warning' : 'textTertiary'}>
+              {internal ? 'İç not (kullanıcı görmez)' : 'Kullanıcıya yanıt'}
+            </AppText>
+          </Pressable>
+          {!internal ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Hazır yanıt şablonu seç"
+              onPress={() => setTemplatesOpen(true)}
+              style={[styles.internalToggle, { backgroundColor: theme.colors.primarySoft }]}
+            >
+              <Ionicons
+                name="chatbox-ellipses-outline"
+                size={13}
+                color={theme.colors.primaryDeep}
+              />
+              <AppText variant="caption" color="primaryDeep">
+                Şablon
+              </AppText>
+            </Pressable>
+          ) : null}
+        </View>
 
         <View style={styles.composerRow}>
           <TextInput
@@ -320,6 +361,92 @@ export default function AdminTicketDetailScreen() {
           />
         </View>
       </View>
+
+      <Modal
+        visible={templatesOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setTemplatesOpen(false)}
+      >
+        <View style={styles.modalRoot}>
+          <Pressable
+            accessibilityLabel="Şablon seçimini kapat"
+            style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.overlay }]}
+            onPress={() => setTemplatesOpen(false)}
+          />
+          <View
+            style={[
+              styles.templateSheet,
+              {
+                backgroundColor: theme.colors.surfaceElevated,
+                borderColor: theme.colors.border,
+                borderRadius: theme.radius.lg,
+              },
+            ]}
+          >
+            <View style={styles.templateHead}>
+              <View style={{ flex: 1 }}>
+                <AppText variant="h3">Hazır yanıtlar</AppText>
+                <AppText variant="caption" color="textTertiary">
+                  Seçilen metin yanıt kutusuna eklenir; göndermeden önce düzenleyebilirsin.
+                </AppText>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Kapat"
+                onPress={() => setTemplatesOpen(false)}
+                style={[styles.templateClose, { backgroundColor: theme.colors.surfaceMuted }]}
+              >
+                <Ionicons name="close" size={17} color={theme.colors.textSecondary} />
+              </Pressable>
+            </View>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              style={{ maxHeight: 420 }}
+              contentContainerStyle={{ gap: 7 }}
+            >
+              {templatesQuery.isLoading ? (
+                <ActivityIndicator color={theme.colors.primary} style={{ paddingVertical: 24 }} />
+              ) : activeTemplates.length === 0 ? (
+                <AppText variant="caption" color="textSecondary" style={{ paddingVertical: 20 }}>
+                  Aktif şablon yok. Yönetim panelindeki Yanıt Şablonları ekranından ekleyebilirsin.
+                </AppText>
+              ) : (
+                activeTemplates.map((template) => (
+                  <Pressable
+                    key={template.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${template.title} şablonunu kullan`}
+                    onPress={() => {
+                      setDraft((current) =>
+                        current ? `${current}\n\n${template.body}` : template.body,
+                      );
+                      setTemplatesOpen(false);
+                    }}
+                    style={({ pressed }) => [
+                      styles.templateRow,
+                      {
+                        backgroundColor: pressed ? theme.colors.primarySoft : theme.colors.surface,
+                        borderColor: theme.colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <AppText variant="caption" style={{ fontWeight: '700' }}>
+                        {template.title}
+                      </AppText>
+                      <AppText variant="caption" color="textSecondary" numberOfLines={2}>
+                        {template.body}
+                      </AppText>
+                    </View>
+                    <Ionicons name="add-circle-outline" size={18} color={theme.colors.primary} />
+                  </Pressable>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </Screen>
   );
 }
@@ -351,7 +478,10 @@ function AdminMessage({
       ]}
     >
       <View style={styles.messageHead}>
-        <AppText variant="caption" color={internal ? 'warning' : isUser ? 'textSecondary' : 'primaryDeep'}>
+        <AppText
+          variant="caption"
+          color={internal ? 'warning' : isUser ? 'textSecondary' : 'primaryDeep'}
+        >
           {internal ? 'İÇ NOT' : isUser ? 'Kullanıcı' : 'Destek ekibi'}
         </AppText>
         <AppText variant="caption" color="textTertiary">
@@ -400,6 +530,7 @@ const styles = StyleSheet.create({
     gap: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
+  composerTools: { flexDirection: 'row', alignItems: 'center', gap: 7, flexWrap: 'wrap' },
   internalToggle: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -410,8 +541,39 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   composerRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
-  input: { flex: 1, minHeight: 42, maxHeight: 110, paddingHorizontal: 13, paddingTop: 11, paddingBottom: 11 },
+  input: {
+    flex: 1,
+    minHeight: 42,
+    maxHeight: 110,
+    paddingHorizontal: 13,
+    paddingTop: 11,
+    paddingBottom: 11,
+  },
   send: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   quickActions: { flexDirection: 'row', gap: 7 },
   quickButton: { flex: 1, paddingHorizontal: 10 },
+  modalRoot: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16 },
+  templateSheet: {
+    width: '100%',
+    maxWidth: 560,
+    padding: 16,
+    gap: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  templateHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  templateClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  templateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    padding: 11,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+  },
 });

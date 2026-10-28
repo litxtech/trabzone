@@ -1,20 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { useRouter } from '@/utils/router';
+import { useMemo, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 
-import { AppText, Badge, Card, TextField } from '@/components/ui';
-import { Screen } from '@/components/ui/Screen';
-import { SafetyEmptyState } from '@/features/safety/components/SafetyEmptyState';
-import { SafetyHeader } from '@/features/safety/components/SafetyHeader';
-import { TicketStatusPill } from '@/features/safety/components/StatusPill';
+import { AppText, Badge, Button, TextField } from '@/components/ui';
 import {
-  SUPPORT_CATEGORIES,
-  SUPPORT_CATEGORY_MAP,
-  TICKET_STATUS,
-} from '@/features/safety/constants';
+  AdminPage,
+  AdminSection,
+  AdminToolbar,
+  FilterChips,
+} from '@/features/admin/components/AdminPage';
+import { DataTable, type Column } from '@/features/admin/components/DataTable';
+import { StatCard, StatGrid } from '@/features/admin/components/StatCard';
+import { SUPPORT_CATEGORIES, SUPPORT_CATEGORY_MAP, TICKET_STATUS } from '@/features/safety/constants';
 import { useAdminTickets } from '@/features/safety/hooks/use-safety';
-import type { TicketStatusCode } from '@/features/safety/types';
+import type { AdminTicket, TicketStatusCode } from '@/features/safety/types';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatRelativeTr, formatSlaRemaining } from '@/utils/date';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
@@ -26,9 +26,14 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'received', label: 'Alındı' },
   { key: 'under_review', label: 'İnceleniyor' },
   { key: 'awaiting_user', label: 'Yanıt bekleniyor' },
-  { key: 'info_required', label: 'Bilgi gerekli' },
   { key: 'priority_review', label: 'Öncelikli' },
   { key: 'resolved', label: 'Çözüldü' },
+];
+
+const ASSIGN_OPTIONS: { key: 'all' | 'me' | 'unassigned'; label: string }[] = [
+  { key: 'all', label: 'Tüm atamalar' },
+  { key: 'me', label: 'Bende' },
+  { key: 'unassigned', label: 'Atanmamış' },
 ];
 
 export default function AdminSupportQueueScreen() {
@@ -50,295 +55,237 @@ export default function AdminSupportQueueScreen() {
   });
 
   const tickets = data?.items ?? [];
-  const overdue = tickets.filter((ticket) => ticket.overdue).length;
+  const stats = useMemo(() => {
+    const overdue = tickets.filter((ticket) => ticket.overdue).length;
+    const unread = tickets.reduce((sum, ticket) => sum + (ticket.unread ?? 0), 0);
+    const child = tickets.filter((ticket) => ticket.category_code === 'child_safety').length;
+    const unassigned = tickets.filter((ticket) => !ticket.assignee_name).length;
+    return { overdue, unread, child, unassigned };
+  }, [tickets]);
 
-  return (
-    <Screen edges={['top', 'left', 'right']} scroll padded>
-      <SafetyHeader
-        title="Destek talepleri"
-        subtitle={`${data?.total ?? 0} kayıt${overdue > 0 ? ` · ${overdue} gecikmiş` : ''}`}
-        right={
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Yenile"
-            onPress={() => void refetch()}
-            style={styles.refresh}
-          >
-            {isRefetching ? (
-              <ActivityIndicator size="small" color={theme.colors.primary} />
-            ) : (
-              <Ionicons name="refresh-outline" size={19} color={theme.colors.textSecondary} />
-            )}
-          </Pressable>
-        }
-      />
-
-      <TextField
-        placeholder="Talep no, konu veya kullanıcı ara"
-        value={search}
-        onChangeText={setSearch}
-        leftIcon="search-outline"
-        autoCorrect={false}
-        autoCapitalize="none"
-      />
-
-      <View style={styles.filters}>
-        {FILTERS.map((item) => {
-          const active = filter === item.key;
-          return (
-            <Pressable
-              key={item.key}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-              onPress={() => setFilter(item.key)}
+  const columns: Column<AdminTicket>[] = [
+    {
+      key: 'ticket',
+      label: 'Talep',
+      width: 2,
+      render: (row) => {
+        const categoryMeta = SUPPORT_CATEGORY_MAP[row.category_code];
+        return (
+          <View style={styles.ticketCell}>
+            <View
               style={[
-                styles.chip,
+                styles.ticketIcon,
                 {
-                  backgroundColor: active ? theme.colors.primaryDeep : theme.colors.surface,
-                  borderColor: active ? theme.colors.primaryDeep : theme.colors.border,
+                  backgroundColor:
+                    row.category_code === 'child_safety'
+                      ? theme.colors.dangerSoft
+                      : theme.colors.primarySoft,
                 },
               ]}
             >
-              <AppText variant="caption" color={active ? 'onPrimary' : 'textSecondary'}>
-                {item.label}
+              <Ionicons
+                name={categoryMeta?.icon ?? 'help-circle-outline'}
+                size={15}
+                color={row.category_code === 'child_safety' ? theme.colors.danger : theme.colors.primaryDeep}
+              />
+            </View>
+            <View style={{ gap: 1, flex: 1 }}>
+              <AppText variant="caption" style={{ fontWeight: '700' }} numberOfLines={1}>
+                {row.subject}
               </AppText>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      <View style={styles.filters}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ selected: assigned === 'all' }}
-          onPress={() => setAssigned('all')}
-          style={[
-            styles.chip,
-            {
-              backgroundColor: assigned === 'all' ? theme.colors.accentSoft : theme.colors.surface,
-              borderColor: assigned === 'all' ? theme.colors.accent : theme.colors.border,
-            },
-          ]}
-        >
-          <AppText variant="caption" color={assigned === 'all' ? 'accent' : 'textSecondary'}>
-            Atama: Tümü
-          </AppText>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ selected: assigned === 'me' }}
-          onPress={() => setAssigned('me')}
-          style={[
-            styles.chip,
-            {
-              backgroundColor: assigned === 'me' ? theme.colors.accentSoft : theme.colors.surface,
-              borderColor: assigned === 'me' ? theme.colors.accent : theme.colors.border,
-            },
-          ]}
-        >
-          <AppText variant="caption" color={assigned === 'me' ? 'accent' : 'textSecondary'}>
-            Bende
-          </AppText>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ selected: assigned === 'unassigned' }}
-          onPress={() => setAssigned('unassigned')}
-          style={[
-            styles.chip,
-            {
-              backgroundColor:
-                assigned === 'unassigned' ? theme.colors.accentSoft : theme.colors.surface,
-              borderColor: assigned === 'unassigned' ? theme.colors.accent : theme.colors.border,
-            },
-          ]}
-        >
-          <AppText variant="caption" color={assigned === 'unassigned' ? 'accent' : 'textSecondary'}>
-            Atanmamış
-          </AppText>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Kategori filtresini temizle"
-          onPress={() => setCategory(null)}
-          style={[
-            styles.chip,
-            {
-              backgroundColor: category ? theme.colors.primarySoft : theme.colors.surface,
-              borderColor: category ? theme.colors.primary : theme.colors.border,
-            },
-          ]}
-        >
-          <AppText variant="caption" color={category ? 'primaryDeep' : 'textSecondary'}>
-            {category ? SUPPORT_CATEGORY_MAP[category as keyof typeof SUPPORT_CATEGORY_MAP]?.label : 'Kategori'}
-          </AppText>
-          {category ? <Ionicons name="close" size={12} color={theme.colors.primaryDeep} /> : null}
-        </Pressable>
-      </View>
-
-      <View style={styles.categoryRow}>
-        {SUPPORT_CATEGORIES.filter((item) =>
-          filter === 'all' ? ['child_safety', 'account_access', 'technical'].includes(item.code) : true,
-        )
-          .slice(0, 6)
-          .map((item) => {
-            const active = category === item.code;
-            return (
-              <Pressable
-                key={item.code}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                onPress={() => setCategory(active ? null : item.code)}
-                style={[
-                  styles.miniChip,
-                  {
-                    backgroundColor: active ? theme.colors.primaryDeep : theme.colors.surfaceMuted,
-                  },
-                ]}
-              >
-                <AppText variant="caption" color={active ? 'onPrimary' : 'textSecondary'}>
-                  {item.label}
-                </AppText>
-              </Pressable>
-            );
-          })}
-      </View>
-
-      {isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={theme.colors.primary} />
-        </View>
-      ) : isError ? (
-        <SafetyEmptyState
-          icon="cloud-offline-outline"
-          title="Kuyruk yüklenemedi"
-          body="Yetkin olduğundan emin ol ve tekrar dene."
-          actionLabel="Tekrar dene"
-          onAction={() => void refetch()}
-        />
-      ) : tickets.length === 0 ? (
-        <SafetyEmptyState
-          icon="checkmark-done-outline"
-          title="Bu filtrede talep yok"
-          body="Farklı bir durum veya kategori seçebilirsin."
-        />
-      ) : (
-        <View style={styles.list}>
-          {tickets.map((ticket) => {
-            const sla = formatSlaRemaining(ticket.sla_due_at);
-            const categoryMeta = SUPPORT_CATEGORY_MAP[ticket.category_code];
-            const isChild = ticket.category_code === 'child_safety';
-            return (
-              <Pressable
-                key={ticket.id}
-                accessibilityRole="button"
-                accessibilityLabel={`${ticket.ticket_no} ${ticket.subject}`}
-                onPress={() => router.push(`/admin/ticket/${ticket.id}`)}
-                style={({ pressed }) => [
-                  styles.ticket,
-                  {
-                    backgroundColor: theme.colors.surface,
-                    borderColor: ticket.overdue
-                      ? theme.colors.danger
-                      : isChild
-                        ? theme.colors.warning
-                        : theme.colors.border,
-                    borderRadius: theme.radius.md,
-                    opacity: pressed ? 0.8 : 1,
-                  },
-                ]}
-              >
-                <View style={styles.ticketHead}>
-                  <View
-                    style={[
-                      styles.ticketIcon,
-                      {
-                        backgroundColor: isChild ? theme.colors.dangerSoft : theme.colors.primarySoft,
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name={categoryMeta?.icon ?? 'help-circle-outline'}
-                      size={17}
-                      color={isChild ? theme.colors.danger : theme.colors.primaryDeep}
-                    />
-                  </View>
-                  <View style={styles.flex}>
-                    <AppText variant="bodyStrong" numberOfLines={1}>
-                      {ticket.subject}
-                    </AppText>
-                    <AppText variant="caption" color="textTertiary" numberOfLines={1}>
-                      {ticket.ticket_no} · {ticket.user_name ?? 'Kullanıcı'} ·{' '}
-                      {formatRelativeTr(ticket.created_at)}
-                    </AppText>
-                  </View>
-                  <TicketStatusPill status={ticket.status_code} />
-                </View>
-
-                <View style={styles.ticketFoot}>
-                  <View style={styles.badgeRow}>
-                    {ticket.priority !== 'normal' ? (
-                      <Badge
-                        label={ticket.priority === 'urgent' ? 'Acil' : 'Yüksek'}
-                        tone={ticket.priority === 'urgent' ? 'danger' : 'warning'}
-                      />
-                    ) : null}
-                    {ticket.assignee_name ? (
-                      <Badge label={ticket.assignee_name} tone="neutral" />
-                    ) : (
-                      <Badge label="Atanmamış" tone="neutral" />
-                    )}
-                  </View>
-                  {sla ? (
-                    <AppText
-                      variant="caption"
-                      color={sla.expired ? 'danger' : sla.urgent ? 'warning' : 'textTertiary'}
-                    >
-                      {sla.label}
-                    </AppText>
-                  ) : null}
-                </View>
-
-                <AppText variant="caption" color="textTertiary">
-                  {TICKET_STATUS[ticket.status_code]?.hint ?? ''}
-                </AppText>
-              </Pressable>
-            );
-          })}
-        </View>
-      )}
-
-      <Card tone="muted" elevated={false} style={styles.legend}>
-        <AppText variant="caption" color="textSecondary">
-          Destek hedefi: normal talepler 24 saat, çocuk güvenliği talepleri 30 dakika. Gecikmiş
-          talepler kırmızı çerçeveyle işaretlenir.
+              <AppText variant="caption" color="textTertiary" style={{ fontFamily: 'monospace' }} numberOfLines={1}>
+                {row.ticket_no} · {formatRelativeTr(row.created_at)}
+              </AppText>
+            </View>
+          </View>
+        );
+      },
+    },
+    {
+      key: 'category',
+      label: 'Kategori',
+      width: 0.9,
+      hideOnMobile: true,
+      render: (row) => (
+        <Badge label={SUPPORT_CATEGORY_MAP[row.category_code]?.label ?? row.category_code} tone="neutral" />
+      ),
+    },
+    {
+      key: 'requester',
+      label: 'Kullanıcı',
+      width: 1,
+      hideOnMobile: true,
+      render: (row) => (
+        <AppText variant="caption" color="textSecondary" numberOfLines={1}>
+          {row.user_name ?? 'Kullanıcı'}
         </AppText>
-      </Card>
-    </Screen>
+      ),
+    },
+    {
+      key: 'assignee',
+      label: 'Atanan',
+      width: 0.9,
+      render: (row) => (
+        <View style={{ gap: 2 }}>
+          <AppText variant="caption" color={row.assignee_name ? 'textSecondary' : 'textTertiary'} numberOfLines={1}>
+            {row.assignee_name ?? 'Atanmamış'}
+          </AppText>
+          {row.unread > 0 ? <Badge label={`${row.unread} yeni`} tone="primary" /> : null}
+        </View>
+      ),
+    },
+    {
+      key: 'status',
+      label: 'Durum',
+      width: 1,
+      render: (row) => {
+        const meta = TICKET_STATUS[row.status_code];
+        return (
+          <View style={{ gap: 2, alignItems: 'flex-start' }}>
+            <Badge label={meta?.label ?? row.status_code} tone={meta?.tone ?? 'neutral'} />
+            {row.priority !== 'normal' ? (
+              <Badge
+                label={row.priority === 'urgent' ? 'Acil' : 'Yüksek'}
+                tone={row.priority === 'urgent' ? 'danger' : 'warning'}
+              />
+            ) : null}
+          </View>
+        );
+      },
+    },
+    {
+      key: 'sla',
+      label: 'SLA',
+      width: 0.8,
+      hideOnMobile: true,
+      render: (row) => {
+        const sla = formatSlaRemaining(row.sla_due_at);
+        return (
+          <AppText
+            variant="caption"
+            color={sla?.expired ? 'danger' : sla?.urgent ? 'warning' : 'textSecondary'}
+          >
+            {sla?.label ?? 'Süre yok'}
+          </AppText>
+        );
+      },
+    },
+    {
+      key: 'action',
+      label: '',
+      width: 0.7,
+      render: (row) => (
+        <Button
+          label="Yanıtla"
+          size="sm"
+          variant="secondary"
+          fullWidth={false}
+          onPress={() => router.push(`/admin/ticket/${row.id}`)}
+        />
+      ),
+    },
+  ];
+
+  return (
+    <AdminPage
+      title="Destek talepleri"
+      subtitle="Destek kuyruğu. SLA hedefi normal taleplerde 24 saat, çocuk güvenliği taleplerinde 30 dakikadır."
+      refreshing={isRefetching}
+      onRefresh={() => void refetch()}
+      actions={
+        <Button
+          label="Yanıt şablonları"
+          size="sm"
+          variant="secondary"
+          fullWidth={false}
+          leftIcon={<Ionicons name="chatbox-ellipses-outline" size={15} color={theme.colors.textSecondary} />}
+          onPress={() => router.push('/admin/support-templates')}
+        />
+      }
+    >
+      <StatGrid>
+        <StatCard label="Kuyruk" value={String(data?.total ?? 0)} icon="headset-outline" hint="Seçili filtre" />
+        <StatCard label="Gecikmiş" value={String(stats.overdue)} icon="time-outline" tone={stats.overdue ? 'danger' : 'success'} hint={`${stats.unassigned} atanmamış`} />
+        <StatCard label="Okunmamış" value={String(stats.unread)} icon="mail-unread-outline" tone={stats.unread ? 'warning' : 'success'} hint="Yeni kullanıcı mesajı" />
+        <StatCard label="Çocuk güvenliği" value={String(stats.child)} icon="shield-half-outline" tone={stats.child ? 'danger' : 'success'} hint="30 dk SLA" />
+      </StatGrid>
+
+      <AdminSection
+        title="Kuyruk"
+        subtitle="Talep numarası, konu veya kullanıcı adıyla arayabilirsin."
+        action={<Badge label={`${tickets.length} kayıt`} tone="primary" />}
+      >
+        <AdminToolbar>
+          <View style={styles.searchWrap}>
+            <TextField
+              placeholder="Talep no, konu veya kullanıcı ara"
+              value={search}
+              onChangeText={setSearch}
+              leftIcon="search-outline"
+              autoCorrect={false}
+              autoCapitalize="none"
+            />
+          </View>
+        </AdminToolbar>
+        <FilterChips options={FILTERS} value={filter} onChange={setFilter} />
+        <FilterChips options={ASSIGN_OPTIONS} value={assigned} onChange={setAssigned} />
+        <View style={styles.categoryRow}>
+          <Button
+            label="Kategori: tümü"
+            size="sm"
+            variant={category === null ? 'primary' : 'outline'}
+            fullWidth={false}
+            onPress={() => setCategory(null)}
+          />
+          {SUPPORT_CATEGORIES.slice(0, 6).map((item) => (
+            <Button
+              key={item.code}
+              label={item.label}
+              size="sm"
+              variant={category === item.code ? 'primary' : 'outline'}
+              fullWidth={false}
+              onPress={() => setCategory(category === item.code ? null : item.code)}
+            />
+          ))}
+        </View>
+        <DataTable
+          columns={columns}
+          rows={tickets}
+          keyExtractor={(row) => row.id}
+          loading={isLoading}
+          empty={
+            <View style={styles.empty}>
+              <Ionicons
+                name={isError ? 'cloud-offline-outline' : 'checkmark-done-outline'}
+                size={22}
+                color={isError ? theme.colors.danger : theme.colors.success}
+              />
+              <AppText variant="caption" color="textSecondary">
+                {isError
+                  ? 'Kuyruk yüklenemedi. Yetkin olduğundan emin ol ve tekrar dene.'
+                  : 'Bu filtrede talep yok.'}
+              </AppText>
+              {isError ? (
+                <Button label="Tekrar dene" size="sm" variant="secondary" fullWidth={false} onPress={() => void refetch()} />
+              ) : null}
+            </View>
+          }
+        />
+      </AdminSection>
+    </AdminPage>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  refresh: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
-  chip: {
-    flexDirection: 'row',
+  searchWrap: { flex: 1, minWidth: 240, maxWidth: 440 },
+  categoryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  ticketCell: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  ticketIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 11,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
+    justifyContent: 'center',
   },
-  categoryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
-  miniChip: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999 },
-  list: { gap: 9, marginTop: 14 },
-  ticket: { padding: 12, gap: 8, borderWidth: 1 },
-  ticketHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  ticketIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  ticketFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, flex: 1 },
-  center: { alignItems: 'center', paddingVertical: 40 },
-  legend: { marginTop: 16, padding: 12 },
+  empty: { alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 30 },
 });

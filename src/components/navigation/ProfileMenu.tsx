@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/utils/router';
 import { useCallback } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -52,6 +52,7 @@ export function ProfileMenu({ onClose }: { onClose: () => void }) {
 
   return (
     <ScrollView
+      keyboardShouldPersistTaps="handled"
       style={styles.flex}
       contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 20 }]}
       showsVerticalScrollIndicator={false}
@@ -112,7 +113,12 @@ export function ProfileMenu({ onClose }: { onClose: () => void }) {
       </DrawerSection>
 
       <View style={styles.bottom}>
-        <DrawerRow icon="log-out-outline" label="Çıkış Yap" tone="danger" onPress={confirmSignOut} />
+        <DrawerRow
+          icon="log-out-outline"
+          label="Çıkış Yap"
+          tone="danger"
+          onPress={confirmSignOut}
+        />
         <AppText variant="caption" color="textTertiary" align="center">
           Trabzone
         </AppText>

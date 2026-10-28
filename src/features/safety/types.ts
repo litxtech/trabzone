@@ -57,6 +57,7 @@ export type ReportTargetType =
   | 'call'
   | 'room'
   | 'story'
+  | 'listing'
   | 'other';
 
 export type ChildReasonCode =
@@ -239,6 +240,16 @@ export type StaffInfo = {
   user_id: string | null;
   is_staff: boolean;
   permissions: string[];
+};
+
+export type SupportReplyTemplate = {
+  id: string;
+  title: string;
+  category: string | null;
+  body: string;
+  is_active: boolean;
+  updated_at: string;
+  created_by_name: string | null;
 };
 
 export type AdminTicket = TicketSummary & {

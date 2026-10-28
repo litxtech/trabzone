@@ -1,217 +1,229 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { useRouter } from '@/utils/router';
+import { useMemo, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 
-import { AppText, Badge, Card } from '@/components/ui';
-import { Screen } from '@/components/ui/Screen';
-import { SafetyEmptyState } from '@/features/safety/components/SafetyEmptyState';
-import { SafetyHeader } from '@/features/safety/components/SafetyHeader';
-import { ReportStatusPill } from '@/features/safety/components/StatusPill';
+import { AppText, Badge, Button } from '@/components/ui';
+import { AdminPage, AdminSection, FilterChips } from '@/features/admin/components/AdminPage';
+import { DataTable, type Column } from '@/features/admin/components/DataTable';
+import { StatCard, StatGrid } from '@/features/admin/components/StatCard';
 import { CHILD_REASON_MAP, REPORT_REASONS, REPORT_TARGET_LABEL } from '@/features/safety/constants';
 import { useAdminReports } from '@/features/safety/hooks/use-safety';
+import type { AdminReport } from '@/features/safety/types';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatRelativeTr, formatSlaRemaining } from '@/utils/date';
 
-type Queue = 'all' | 'new' | 'critical' | 'unassigned' | 'resolved';
+type Queue = 'all' | 'new' | 'critical' | 'unassigned' | 'resolved' | 'child';
 
 const QUEUES: { key: Queue; label: string }[] = [
-  { key: 'all', label: 'Tümü' },
   { key: 'new', label: 'Yeni' },
   { key: 'critical', label: 'Kritik' },
   { key: 'unassigned', label: 'Atanmamış' },
+  { key: 'child', label: 'Çocuk güvenliği' },
   { key: 'resolved', label: 'Sonuçlanan' },
+  { key: 'all', label: 'Tümü' },
 ];
+
+const reasonLabel = (report: AdminReport) =>
+  report.is_child_safety
+    ? CHILD_REASON_MAP[report.child_reason_code ?? 'child_other']?.label ?? 'Çocuk güvenliği'
+    : REPORT_REASONS.find((item) => item.code === report.reason_code)?.label ?? 'Bildirim';
+
+const statusTone = (status: string): 'success' | 'warning' | 'danger' | 'neutral' => {
+  if (['resolved', 'action_taken', 'closed'].includes(status)) return 'success';
+  if (['dismissed'].includes(status)) return 'neutral';
+  if (['under_review', 'received'].includes(status)) return 'warning';
+  return 'neutral';
+};
+
+const statusLabel = (status: string) => {
+  const map: Record<string, string> = {
+    received: 'Alındı',
+    under_review: 'İnceleniyor',
+    action_taken: 'İşlem yapıldı',
+    resolved: 'Çözüldü',
+    dismissed: 'Reddedildi',
+    closed: 'Kapandı',
+  };
+  return map[status] ?? status;
+};
 
 export default function AdminReportsQueueScreen() {
   const { theme } = useTheme();
   const router = useRouter();
   const [queue, setQueue] = useState<Queue>('new');
+  const reportsQuery = useAdminReports({ queue });
 
-  const { data, isLoading, isError, refetch, isRefetching } = useAdminReports({ queue });
+  const reports = reportsQuery.data?.items ?? [];
+  const stats = useMemo(() => {
+    const critical = reports.filter((report) => report.priority === 'critical').length;
+    const child = reports.filter((report) => report.is_child_safety).length;
+    const overdue = reports.filter((report) => report.overdue).length;
+    const unassigned = reports.filter((report) => !report.assigned_to).length;
+    return { critical, child, overdue, unassigned };
+  }, [reports]);
 
-  const reports = data?.items ?? [];
-  const overdue = reports.filter((report) => report.overdue).length;
-  const critical = reports.filter((report) => report.priority === 'critical').length;
-
-  return (
-    <Screen edges={['top', 'left', 'right']} scroll padded>
-      <SafetyHeader
-        title="Bildirim moderasyonu"
-        subtitle={`${data?.total ?? 0} kayıt${critical > 0 ? ` · ${critical} kritik` : ''}${
-          overdue > 0 ? ` · ${overdue} gecikmiş` : ''
-        }`}
-        right={
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Yenile"
-            onPress={() => void refetch()}
-            style={styles.refresh}
-          >
-            {isRefetching ? (
-              <ActivityIndicator size="small" color={theme.colors.primary} />
-            ) : (
-              <Ionicons name="refresh-outline" size={19} color={theme.colors.textSecondary} />
-            )}
-          </Pressable>
-        }
-      />
-
-      <View style={styles.queues}>
-        {QUEUES.map((item) => {
-          const active = queue === item.key;
-          return (
-            <Pressable
-              key={item.key}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-              onPress={() => setQueue(item.key)}
-              style={[
-                styles.chip,
-                {
-                  backgroundColor: active ? theme.colors.primaryDeep : theme.colors.surface,
-                  borderColor: active ? theme.colors.primaryDeep : theme.colors.border,
-                },
-              ]}
-            >
-              <AppText variant="caption" color={active ? 'onPrimary' : 'textSecondary'}>
-                {item.label}
-              </AppText>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      <Card tone="muted" elevated={false} style={styles.slaCard}>
-        <View style={styles.slaRow}>
-          <Ionicons name="time-outline" size={15} color={theme.colors.textSecondary} />
-          <AppText variant="caption" color="textSecondary" style={styles.flex}>
-            Standart bildirimlerde inceleme hedefi 24 saat, çocuk güvenliği bildirimlerinde 30
-            dakikadır (kritik) veya 4 saattir.
+  const columns: Column<AdminReport>[] = [
+    {
+      key: 'report',
+      label: 'Şikâyet',
+      width: 1.7,
+      render: (row) => (
+        <View style={{ gap: 2 }}>
+          <View style={styles.rowWrap}>
+            <AppText variant="caption" style={{ fontWeight: '700' }} numberOfLines={1}>
+              {reasonLabel(row)}
+            </AppText>
+            {row.is_child_safety ? <Badge label="Çocuk güvenliği" tone="danger" /> : null}
+          </View>
+          <AppText variant="caption" color="textTertiary" style={{ fontFamily: 'monospace' }} numberOfLines={1}>
+            {row.report_no}
           </AppText>
         </View>
-      </Card>
-
-      {isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={theme.colors.primary} />
+      ),
+    },
+    {
+      key: 'target',
+      label: 'Hedef',
+      width: 1.1,
+      render: (row) => (
+        <View style={{ gap: 2 }}>
+          <Badge label={REPORT_TARGET_LABEL[row.target_type] ?? row.target_type} tone="neutral" />
+          <AppText variant="caption" color="textTertiary" style={{ fontFamily: 'monospace' }} numberOfLines={1}>
+            {row.target_id}
+          </AppText>
         </View>
-      ) : isError ? (
-        <SafetyEmptyState
-          icon="cloud-offline-outline"
-          title="Kuyruk yüklenemedi"
-          body="Yetkin olduğundan emin ol ve tekrar dene."
-          actionLabel="Tekrar dene"
-          onAction={() => void refetch()}
+      ),
+    },
+    {
+      key: 'reporter',
+      label: 'Şikâyet eden',
+      width: 0.9,
+      hideOnMobile: true,
+      render: (row) => (
+        <AppText variant="caption" color="textSecondary" style={{ fontFamily: 'monospace' }}>
+          #{row.reporter_ref}
+        </AppText>
+      ),
+    },
+    {
+      key: 'priority',
+      label: 'Öncelik',
+      width: 0.8,
+      render: (row) => (
+        <Badge
+          label={row.priority === 'critical' ? 'Kritik' : row.priority === 'high' ? 'Yüksek' : 'Normal'}
+          tone={row.priority === 'critical' ? 'danger' : row.priority === 'high' ? 'warning' : 'neutral'}
         />
-      ) : reports.length === 0 ? (
-        <SafetyEmptyState
-          icon="checkmark-done-outline"
-          title="Bu kuyrukta bildirim yok"
-          body="Yeni bildirimler geldiğinde burada görünecek."
-        />
-      ) : (
-        <View style={styles.list}>
-          {reports.map((report) => {
-            const sla = formatSlaRemaining(report.sla_due_at);
-            const reason = report.is_child_safety
-              ? CHILD_REASON_MAP[report.child_reason_code ?? 'child_other']?.label
-              : (REPORT_REASONS.find((item) => item.code === report.reason_code)?.label ?? 'Bildirim');
-            return (
-              <Pressable
-                key={report.id}
-                accessibilityRole="button"
-                accessibilityLabel={`${report.report_no} ${reason ?? ''}`}
-                onPress={() => router.push(`/admin/report/${report.id}`)}
-                style={({ pressed }) => [
-                  styles.report,
-                  {
-                    backgroundColor: report.is_child_safety
-                      ? theme.colors.dangerSoft
-                      : theme.colors.surface,
-                    borderColor: report.overdue
-                      ? theme.colors.danger
-                      : report.is_child_safety
-                        ? theme.colors.danger
-                        : theme.colors.border,
-                    borderRadius: theme.radius.md,
-                    opacity: pressed ? 0.8 : 1,
-                  },
-                ]}
-              >
-                <View style={styles.reportHead}>
-                  <View
-                    style={[
-                      styles.reportIcon,
-                      {
-                        backgroundColor: theme.colors.surface,
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name={report.is_child_safety ? 'shield-half-outline' : 'flag-outline'}
-                      size={17}
-                      color={report.is_child_safety ? theme.colors.danger : theme.colors.primaryDeep}
-                    />
-                  </View>
-                  <View style={styles.flex}>
-                    <AppText variant="bodyStrong" numberOfLines={1}>
-                      {reason}
-                    </AppText>
-                    <AppText variant="caption" color="textTertiary" numberOfLines={1}>
-                      {report.report_no} · {REPORT_TARGET_LABEL[report.target_type]} ·{' '}
-                      {formatRelativeTr(report.created_at)}
-                    </AppText>
-                  </View>
-                  <ReportStatusPill status={report.status_code} />
-                </View>
-
-                <View style={styles.reportFoot}>
-                  <View style={styles.badgeRow}>
-                    {report.priority === 'critical' ? (
-                      <Badge label="Kritik" tone="danger" />
-                    ) : report.priority === 'high' ? (
-                      <Badge label="Yüksek" tone="warning" />
-                    ) : (
-                      <Badge label="Normal" tone="neutral" />
-                    )}
-                    {report.assignee_name ? (
-                      <Badge label={report.assignee_name} tone="neutral" />
-                    ) : (
-                      <Badge label="Atanmamış" tone="neutral" />
-                    )}
-                    <Badge label={`#${report.reporter_ref}`} tone="neutral" />
-                  </View>
-                  {sla ? (
-                    <AppText
-                      variant="caption"
-                      color={sla.expired ? 'danger' : sla.urgent ? 'warning' : 'textTertiary'}
-                    >
-                      {sla.label}
-                    </AppText>
-                  ) : null}
-                </View>
-              </Pressable>
-            );
-          })}
+      ),
+    },
+    {
+      key: 'status',
+      label: 'Durum',
+      width: 0.9,
+      render: (row) => (
+        <View style={{ gap: 2 }}>
+          <Badge label={statusLabel(row.status_code)} tone={statusTone(row.status_code)} />
+          <AppText variant="caption" color="textTertiary" numberOfLines={1}>
+            {row.assigned_to ? row.assignee_name ?? 'Atanmış' : 'Atanmamış'}
+          </AppText>
         </View>
-      )}
-    </Screen>
+      ),
+    },
+    {
+      key: 'sla',
+      label: 'SLA',
+      width: 0.9,
+      hideOnMobile: true,
+      render: (row) => {
+        const sla = formatSlaRemaining(row.sla_due_at);
+        return (
+          <View style={{ gap: 2 }}>
+            <AppText
+              variant="caption"
+              color={sla?.expired ? 'danger' : sla?.urgent ? 'warning' : 'textSecondary'}
+            >
+              {sla?.label ?? 'Süre yok'}
+            </AppText>
+            <AppText variant="caption" color="textTertiary">
+              {formatRelativeTr(row.created_at)}
+            </AppText>
+          </View>
+        );
+      },
+    },
+    {
+      key: 'action',
+      label: '',
+      width: 0.7,
+      render: (row) => (
+        <Button
+          label="İncele"
+          size="sm"
+          variant="secondary"
+          fullWidth={false}
+          onPress={() => router.push(`/admin/report/${row.id}`)}
+        />
+      ),
+    },
+  ];
+
+  return (
+    <AdminPage
+      title="Şikâyet ve Moderasyon"
+      subtitle="Birleşik şikâyet kuyruğu. Çocuk güvenliği ve acil bildirimler önceliklidir."
+      refreshing={reportsQuery.isRefetching}
+      onRefresh={() => void reportsQuery.refetch()}
+      actions={
+        <Button
+          label="Çocuk güvenliği"
+          size="sm"
+          variant="danger"
+          fullWidth={false}
+          leftIcon={<Ionicons name="shield-half-outline" size={15} color="#FFFFFF" />}
+          onPress={() => router.push('/admin/child-safety')}
+        />
+      }
+    >
+      <StatGrid>
+        <StatCard label="Kuyruk toplamı" value={String(reportsQuery.data?.total ?? 0)} icon="flag-outline" hint="Seçili kuyruk" />
+        <StatCard label="Kritik" value={String(stats.critical)} icon="alert-circle-outline" tone={stats.critical ? 'danger' : 'success'} hint="Öncelikli inceleme" />
+        <StatCard label="Çocuk güvenliği" value={String(stats.child)} icon="shield-half-outline" tone={stats.child ? 'danger' : 'success'} hint="30 dk / 4 sa SLA" />
+        <StatCard label="Gecikmiş" value={String(stats.overdue)} icon="time-outline" tone={stats.overdue ? 'warning' : 'success'} hint={`${stats.unassigned} atanmamış`} />
+      </StatGrid>
+
+      <AdminSection
+        title="Moderasyon kuyruğu"
+        subtitle="Standart bildirimlerde inceleme hedefi 24 saat, kritik çocuk güvenliği bildirimlerinde 30 dakikadır."
+        action={<Badge label={`${reports.length} kayıt`} tone="primary" />}
+      >
+        <FilterChips options={QUEUES} value={queue} onChange={setQueue} />
+        <DataTable
+          columns={columns}
+          rows={reports}
+          keyExtractor={(row) => row.id}
+          loading={reportsQuery.isLoading}
+          empty={
+            <View style={styles.empty}>
+              <Ionicons
+                name={reportsQuery.isError ? 'cloud-offline-outline' : 'checkmark-done-outline'}
+                size={22}
+                color={reportsQuery.isError ? theme.colors.danger : theme.colors.success}
+              />
+              <AppText variant="caption" color="textSecondary">
+                {reportsQuery.isError
+                  ? 'Kuyruk yüklenemedi. Yetkin olduğundan emin ol ve tekrar dene.'
+                  : 'Bu kuyrukta bekleyen bildirim yok.'}
+              </AppText>
+            </View>
+          }
+        />
+      </AdminSection>
+    </AdminPage>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  refresh: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  queues: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  chip: { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 999, borderWidth: 1 },
-  slaCard: { marginTop: 12, padding: 12 },
-  slaRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
-  list: { gap: 9, marginTop: 14 },
-  report: { padding: 12, gap: 8, borderWidth: 1 },
-  reportHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  reportIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  reportFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, flex: 1 },
-  center: { alignItems: 'center', paddingVertical: 40 },
+  rowWrap: { flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' },
+  empty: { alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 30 },
 });

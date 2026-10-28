@@ -1,3 +1,4 @@
+export { AppImage, type AppImageProps } from './AppImage';
 export { AppText, type AppTextProps } from './AppText';
 export { Avatar } from './Avatar';
 export { Badge, Dot } from './Badge';

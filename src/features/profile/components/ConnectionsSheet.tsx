@@ -1,13 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import {
-  ActivityIndicator,
-  FlatList,
-  Modal,
-  Pressable,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { useRouter } from '@/utils/router';
+import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppText, Avatar } from '@/components/ui';
@@ -96,21 +89,16 @@ export function ConnectionsSheet({ visible, userId, kind, onClose }: Props) {
             </View>
           ) : (
             <FlatList
+              keyboardShouldPersistTaps="handled"
               data={data ?? []}
               keyExtractor={(item) => item.id}
               style={styles.list}
               contentContainerStyle={styles.listContent}
               ListEmptyComponent={
                 <View style={styles.center}>
-                  <Ionicons
-                    name="people-outline"
-                    size={26}
-                    color={theme.colors.textTertiary}
-                  />
+                  <Ionicons name="people-outline" size={26} color={theme.colors.textTertiary} />
                   <AppText variant="caption" color="textTertiary" align="center">
-                    {kind === 'followers'
-                      ? 'Henüz takipçi yok.'
-                      : 'Henüz kimse takip edilmiyor.'}
+                    {kind === 'followers' ? 'Henüz takipçi yok.' : 'Henüz kimse takip edilmiyor.'}
                   </AppText>
                 </View>
               }
@@ -129,7 +117,11 @@ export function ConnectionsSheet({ visible, userId, kind, onClose }: Props) {
                       { backgroundColor: pressed ? theme.colors.surfaceMuted : 'transparent' },
                     ]}
                   >
-                    <Avatar uri={mediaPublicUrl('avatar', item.avatar_path)} name={name} size={44} />
+                    <Avatar
+                      uri={mediaPublicUrl('avatar', item.avatar_path)}
+                      name={name}
+                      size={44}
+                    />
                     <View style={styles.rowText}>
                       <View style={styles.nameRow}>
                         <AppText variant="bodyStrong" numberOfLines={1} style={styles.name}>

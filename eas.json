@@ -5,7 +5,7 @@
   },
   "build": {
     "development": {
-      "node": "22.11.0",
+      "node": "22.20.0",
       "developmentClient": true,
       "distribution": "internal",
       "credentialsSource": "remote",
@@ -15,9 +15,10 @@
         "EXPO_NO_CAPABILITY_SYNC": "1",
         "EXPO_PUBLIC_SUPABASE_URL": "https://nzvoufcywppavaioirac.supabase.co",
         "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_ZYQM1T9P20NsEIDcoZTQdw_fWG69C96",
-        "EXPO_PUBLIC_APP_URL": "https://trabzone.app",
+        "EXPO_PUBLIC_APP_URL": "https://trabzoneapp.com",
         "EXPO_PUBLIC_LIVEKIT_URL": "wss://trabzone-pvll6x7f.livekit.cloud",
-        "EXPO_PUBLIC_ENABLE_SOCIAL_AUTH": "false"
+        "EXPO_PUBLIC_ENABLE_SOCIAL_AUTH": "false",
+        "EXPO_PUBLIC_R2_PUBLIC_URL": "https://media.trabzoneapp.com"
       },
       "ios": {
         "simulator": false,
@@ -34,16 +35,17 @@
       }
     },
     "preview": {
-      "node": "22.11.0",
+      "node": "22.20.0",
       "distribution": "internal",
       "env": {
         "NODE_OPTIONS": "--max-old-space-size=4096",
         "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
         "EXPO_PUBLIC_SUPABASE_URL": "https://nzvoufcywppavaioirac.supabase.co",
         "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_ZYQM1T9P20NsEIDcoZTQdw_fWG69C96",
-        "EXPO_PUBLIC_APP_URL": "https://trabzone.app",
+        "EXPO_PUBLIC_APP_URL": "https://trabzoneapp.com",
         "EXPO_PUBLIC_LIVEKIT_URL": "wss://trabzone-pvll6x7f.livekit.cloud",
-        "EXPO_PUBLIC_ENABLE_SOCIAL_AUTH": "false"
+        "EXPO_PUBLIC_ENABLE_SOCIAL_AUTH": "false",
+        "EXPO_PUBLIC_R2_PUBLIC_URL": "https://media.trabzoneapp.com"
       },
       "ios": {
         "simulator": false,
@@ -60,15 +62,16 @@
       }
     },
     "production": {
-      "node": "22.11.0",
+      "node": "22.20.0",
       "env": {
         "NODE_OPTIONS": "--max-old-space-size=4096",
         "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
         "EXPO_PUBLIC_SUPABASE_URL": "https://nzvoufcywppavaioirac.supabase.co",
         "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_ZYQM1T9P20NsEIDcoZTQdw_fWG69C96",
-        "EXPO_PUBLIC_APP_URL": "https://trabzone.app",
+        "EXPO_PUBLIC_APP_URL": "https://trabzoneapp.com",
         "EXPO_PUBLIC_LIVEKIT_URL": "wss://trabzone-pvll6x7f.livekit.cloud",
-        "EXPO_PUBLIC_ENABLE_SOCIAL_AUTH": "false"
+        "EXPO_PUBLIC_ENABLE_SOCIAL_AUTH": "false",
+        "EXPO_PUBLIC_R2_PUBLIC_URL": "https://media.trabzoneapp.com"
       },
       "ios": {
         "simulator": false,

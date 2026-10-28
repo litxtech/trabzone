@@ -381,6 +381,18 @@ const main = async () => {
   const policy = await rpc(tokens.child, 'safety_get_policy', { p_slug: 'child-safety' });
   check('child safety policy is published', policy.ok && policy.data?.version === 1);
 
+  for (const [slug, title] of [
+    ['terms', 'Kullanım Koşulları'],
+    ['privacy', 'Gizlilik Politikası'],
+  ]) {
+    const legal = await rpc(tokens.child, 'safety_get_policy', { p_slug: slug });
+    check(
+      `${slug} policy is published and complete`,
+      legal.ok && legal.data?.title === title && (legal.data?.body_md?.length ?? 0) > 800,
+      `${legal.data?.body_md?.length ?? 0} chars`,
+    );
+  }
+
   console.log(`\n${results.length - failures}/${results.length} checks passed.`);
   return failures === 0;
 };
