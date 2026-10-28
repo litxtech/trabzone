@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { useDraftStore } from '@/features/messaging/drafts/draft-store';
 import { startAutoRefresh } from '@/services/supabase/client';
 import { useAuthStatus, useAuthStore } from '@/stores/auth-store';
 import { useBrandFonts } from '@/theme/fonts';
@@ -29,6 +30,9 @@ export function useAppBootstrap(): { ready: boolean } {
       });
 
     const stopAutoRefresh = startAutoRefresh();
+
+    // Yazılmış ama gönderilmemiş mesajlar açılışta hazır olsun.
+    void useDraftStore.getState().hydrate();
 
     return () => {
       cancelled = true;

@@ -4,10 +4,15 @@ import type { PropsWithChildren } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { AppText, Logo, Wordmark } from '@/components/ui';
+import { useTheme } from '@/theme/ThemeProvider';
 
 /**
  * Web giriş/kayıt sayfalarının ortak iki sütunlu çerçevesi. Mobilde tek
  * sütuna iner; sol taraftaki tanıtım paneli küçük ekranlarda gizlenir.
+ *
+ * Form paneli tema renklerini kullanır: sistem koyu temadaysa metin/input
+ * renkleri de koyu temadan gelir, böylece açık zemin üzerinde okunamayan
+ * beyaz yazı oluşmaz.
  */
 export function WebAuthLayout({
   children,
@@ -22,6 +27,7 @@ export function WebAuthLayout({
   footer?: React.ReactNode;
 }>) {
   const { width } = useWindowDimensions();
+  const { theme } = useTheme();
   const desktop = width >= 980;
 
   return (
@@ -121,13 +127,23 @@ export function WebAuthLayout({
         </View>
       ) : null}
 
-      <View style={[styles.formPanel, !desktop ? styles.formPanelMobile : null]}>
+      <View
+        style={[
+          styles.formPanel,
+          !desktop ? styles.formPanelMobile : null,
+          { backgroundColor: theme.colors.background },
+        ]}
+      >
         <View style={[styles.formInner, desktop ? styles.formInnerDesktop : null]}>
           {!desktop ? (
             <Link href={'/' as Href} asChild>
               <View accessibilityRole="link" style={styles.mobileBrand}>
                 <Logo size={38} />
-                <Wordmark size={19} color="#0B2A6B" accentColor="#7C3AED" />
+                <Wordmark
+                  size={19}
+                  color={theme.colors.text}
+                  accentColor={theme.colors.accentBright}
+                />
               </View>
             </Link>
           ) : null}

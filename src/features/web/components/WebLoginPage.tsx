@@ -1,16 +1,23 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Link, type Href, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useEffect, useRef, useState, type ComponentRef } from 'react';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { AppText, Button, TextField } from '@/components/ui';
 import { env } from '@/config/env';
 import { safeNextPath } from '@/features/auth/next-path';
+import { SavedAccountsPicker } from '@/features/auth/components/SavedAccountsPicker';
 import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons';
+import {
+  rememberAccount,
+  useSavedAccounts,
+  useSavedAccountsStore,
+  type SavedAccount,
+} from '@/features/auth/saved-accounts';
 import { fetchPendingAcceptances } from '@/features/legal/services/legal-service';
 import { fetchMyProfile } from '@/features/profile/services/profile-service';
 import { signInWithPassword } from '@/services/supabase/auth';
-import { useAuthStatus } from '@/stores/auth-store';
+import { useAuthStatus, useSession } from '@/stores/auth-store';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useRouter } from '@/utils/router';
 
@@ -21,9 +28,13 @@ export function WebLoginPage() {
   const router = useRouter();
   const { theme } = useTheme();
   const authStatus = useAuthStatus();
+  const session = useSession();
   const params = useLocalSearchParams<{ next?: string }>();
   const next = safeNextPath(params.next);
   const submittedRef = useRef(false);
+  const savedAccounts = useSavedAccounts();
+  const forget = useSavedAccountsStore((state) => state.forget);
+  const passwordRef = useRef<ComponentRef<typeof TextInput>>(null);
 
   // Oturum baska bir sekmede acildiysa veya oturum geri yuklenirken bu ekran
   // gorunduyse kullaniciyi bekletmeden hedefe tasi. Bu formdan yapilan giris
@@ -38,6 +49,9 @@ export function WebLoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Kayıtlı hesaptan mı dolduruldu? Yalnızca bu durumda şifre alanında ipucu
+  // gösterilir; kullanıcı e-postayı elle yazarsa ipucu kaybolur.
+  const [autofilled, setAutofilled] = useState(false);
 
   useWebMeta({
     title: 'Trabzone Giriş',
@@ -59,6 +73,16 @@ export function WebLoginPage() {
     }
 
     const [profile, pending] = await Promise.all([fetchMyProfile(), fetchPendingAcceptances()]);
+    // Başarılı giriş cihaza yazılır: bir sonraki gelişte avatarıyla listelenir.
+    rememberAccount({
+      id: result.data.user.id,
+      email: result.data.user.email ?? email,
+      name: profile.ok
+        ? `${profile.data?.first_name ?? ''} ${profile.data?.last_name ?? ''}`.trim() || undefined
+        : undefined,
+      username: profile.ok ? profile.data?.username : undefined,
+      avatarPath: profile.ok ? profile.data?.avatar_path : undefined,
+    });
     if (profile.ok && !profile.data?.onboarding_completed) {
       router.replace('/complete-profile');
       return;
@@ -69,6 +93,26 @@ export function WebLoginPage() {
     }
     router.replace((next ?? '/feed') as Href);
   };
+
+  // Kayıtlı hesaba dokunmak e-postayı doldurur. Oturumu hâlâ açık olan
+  // hesapta tek dokunuş doğrudan uygulamaya geçirir (oturum koruma).
+  const pickAccount = (account: SavedAccount) => {
+    setError(null);
+    setEmail(account.email);
+    setPassword('');
+    setAutofilled(true);
+    if (authStatus === 'authenticated' && session?.user?.id === account.id) {
+      submittedRef.current = true;
+      router.replace((next ?? '/feed') as Href);
+      return;
+    }
+    passwordRef.current?.focus();
+  };
+
+  const activeAccountShown =
+    authStatus === 'authenticated' &&
+    Boolean(session?.user?.id) &&
+    savedAccounts.some((account) => account.id === session?.user?.id);
 
   return (
     <WebAuthLayout
@@ -90,7 +134,7 @@ export function WebLoginPage() {
         </View>
       }
     >
-      {authStatus === 'authenticated' ? (
+      {activeAccountShown ? null : authStatus === 'authenticated' ? (
         <View style={[styles.notice, { backgroundColor: theme.colors.successSoft }]}>
           <Ionicons name="checkmark-circle-outline" size={18} color={theme.colors.success} />
           <AppText variant="caption" color="textSecondary" style={styles.flex}>
@@ -105,11 +149,21 @@ export function WebLoginPage() {
         </View>
       ) : null}
 
+      <SavedAccountsPicker
+        accounts={savedAccounts}
+        activeId={authStatus === 'authenticated' ? (session?.user?.id ?? null) : null}
+        onPick={pickAccount}
+        onForget={(account) => forget(account.id)}
+      />
+
       <View style={styles.form}>
         <TextField
           label="E-posta"
           value={email}
-          onChangeText={setEmail}
+          onChangeText={(value) => {
+            setEmail(value);
+            setAutofilled(false);
+          }}
           placeholder="ornek@eposta.com"
           keyboardType="email-address"
           autoCapitalize="none"
@@ -128,6 +182,10 @@ export function WebLoginPage() {
             autoComplete="password"
             leftIcon="lock-closed-outline"
             editable={!submitting}
+            ref={passwordRef}
+            hint={
+              autofilled ? 'E-posta dolduruldu. Devam etmek için şifreni gir.' : undefined
+            }
           />
           <View style={styles.forgotRow}>
             <Link href={'/forgot-password' as Href} asChild>

@@ -1,5 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 
+import { rememberAccountFromProfile } from '@/features/auth/saved-accounts';
+import { useAuthStore } from '@/stores/auth-store';
+
 import { fetchMyProfile, fetchMyRoles, type Profile } from '../services/profile-service';
 
 export const profileQueryKeys = {
@@ -15,6 +18,8 @@ export function useMyProfile() {
       if (!result.ok) {
         throw result.error;
       }
+      // Giriş ekranındaki hesap seçici avatarı buradan öğrenir; ek istek yok.
+      rememberAccountFromProfile(result.data, useAuthStore.getState().session?.user.email);
       return result.data;
     },
     staleTime: 30_000,

@@ -37,6 +37,12 @@ import {
   useStartCall,
   useTypingIndicator,
 } from '@/features/messaging/hooks/use-chat';
+import {
+  clearChatDraft,
+  getChatDraft,
+  useDraftsHydrated,
+  writeChatDraft,
+} from '@/features/messaging/drafts/draft-store';
 import type { ChatMessage, MessageKind } from '@/features/messaging/services/messaging-service';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { useSession } from '@/stores/auth-store';
@@ -72,8 +78,30 @@ export default function ChatScreen() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<ComponentRef<typeof TextInput>>(null);
+  const draftsHydrated = useDraftsHydrated();
+  const draftConversationRef = useRef<string>('');
 
   const typing = useTypingIndicator(conversationId, myId, draft.length > 0);
+
+  // Sohbete geri dönüldüğünde cihazdaki taslak input'a geri yüklenir.
+  useEffect(() => {
+    if (!draftsHydrated || !conversationId) {
+      return;
+    }
+    const previous = draftConversationRef.current;
+    draftConversationRef.current = conversationId;
+    setDraft((current) =>
+      // Hydrate gecikirse kullanıcının o an yazdığı metin ezilmesin; sohbet
+      // değiştiyse yeni sohbetin taslağı yüklenir.
+      previous === conversationId && current.trim() ? current : getChatDraft(conversationId),
+    );
+  }, [conversationId, draftsHydrated]);
+
+  // Gönderim sonrası hem input hem cihazdaki taslak temizlenir.
+  const clearComposerDraft = useCallback(() => {
+    setDraft('');
+    clearChatDraft(conversationId);
+  }, [conversationId]);
 
   const messages = useMemo(() => flattenMessages(messagesQuery.data), [messagesQuery.data]);
   const reversed = useMemo(() => [...messages].reverse(), [messages]);
@@ -154,7 +182,9 @@ export default function ChatScreen() {
         {
           onSuccess: () => {
             setEditing(null);
-            setDraft('');
+            // Düzenleme sırasında taslak deposuna dokunulmadı; kullanıcının
+            // önceki yarım mesajı varsa geri gelir.
+            setDraft(getChatDraft(conversationId));
           },
           onError: (error) => Alert.alert('Düzenlenemedi', error.message),
         },
@@ -167,13 +197,13 @@ export default function ChatScreen() {
       { kind: 'text', body, replyToId: reply?.id ?? null },
       {
         onSuccess: () => {
-          setDraft('');
+          clearComposerDraft();
           setReply(null);
         },
         onError: (error) => Alert.alert('Mesaj gönderilemedi', toMessage(error)),
       },
     );
-  }, [draft, editing, editMessage, reply?.id, sendMessage]);
+  }, [clearComposerDraft, conversationId, draft, editing, editMessage, reply?.id, sendMessage]);
 
   const uploadAndSend = useCallback(
     async (input: {
@@ -515,7 +545,8 @@ export default function ChatScreen() {
                 size={16}
                 onPress={() => {
                   setEditing(null);
-                  setDraft('');
+                  // Düzenlemeden vazgeçildi: kullanıcının taslağı geri gelir.
+                  setDraft(getChatDraft(conversationId));
                 }}
               />
             </View>
@@ -555,7 +586,12 @@ export default function ChatScreen() {
                 ref={inputRef}
                 value={draft}
                 onChangeText={(value) => {
-                  setDraft(value.slice(0, 4000));
+                  const next = value.slice(0, 4000);
+                  setDraft(next);
+                  // Düzenleme metni taslak değildir; yalnızca yeni mesaj yazımı saklanır.
+                  if (!editing) {
+                    writeChatDraft(conversationId, next);
+                  }
                   typing.notifyTyping();
                 }}
                 placeholder={editing ? 'Mesajı düzenle...' : 'Mesaj yaz...'}
