@@ -7,7 +7,6 @@ import {
   Alert,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   View,
   useWindowDimensions,
@@ -31,6 +30,8 @@ import { MapCanvas } from '@/features/map/components/MapCanvas';
 import type { MapPoint } from '@/features/map/types';
 import { useStartDirectConversation } from '@/features/messaging/hooks/use-chat';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
+import { estateShareLink } from '@/features/share/links';
+import { shareContent } from '@/features/share/share-action';
 import {
   useRealEstateDetail,
   useReportContent,
@@ -113,15 +114,17 @@ export default function RealEstateDetailScreen() {
 
   const share = async () => {
     if (!data) return;
-    try {
-      await Share.share({
-        message: `${data.title} · ${formatPrice(data.price_cents, data.currency, data.price_period)} · ${
-          [data.district, data.neighborhood].filter(Boolean).join(', ') || 'Trabzon'
-        } — Trabzone Emlak`,
-      });
-    } catch {
-      // Kullanıcı paylaşımı iptal etti.
-    }
+    const link = estateShareLink(data.id);
+    const place = [data.district, data.neighborhood].filter(Boolean).join(', ') || 'Trabzon';
+    await shareContent({
+      title: data.title,
+      message: `${data.title} · ${formatPrice(
+        data.price_cents,
+        data.currency,
+        data.price_period,
+      )} · ${place} — Trabzone Emlak\n${link}`,
+      url: link,
+    });
   };
 
   const openChat = () => {

@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { Share, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { AppText, Avatar, Button } from '@/components/ui';
 import { env } from '@/config/env';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { formatDateTime, formatMoney } from '@/features/ride/utils/format';
+import { shareContent } from '@/features/share/share-action';
 import { useTheme } from '@/theme/ThemeProvider';
 
 import { MAP_KIND_ICON, MAP_KIND_LABEL } from '../constants';
@@ -103,7 +104,7 @@ export function MapPointCard({
           leftIcon={<Ionicons name="share-outline" size={15} color={theme.colors.primaryDeep} />}
           onPress={() => {
             const link = `${env.appUrl}/map?lat=${point.lat}&lng=${point.lng}&label=${encodeURIComponent(point.title)}`;
-            void Share.share({ message: `${point.title} · Trabzone Haritası ${link}`, url: link });
+            void shareContent({ message: `${point.title} · Trabzone Haritası ${link}`, url: link });
           }}
         />
       ) : null}

@@ -8,7 +8,6 @@ import {
   Linking,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   useWindowDimensions,
   View,
@@ -20,6 +19,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ActionSheet, AppText, Avatar, Button, IconButton, Skeleton } from '@/components/ui';
 import { publicMediaUrl } from '@/features/media/media-service';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
+import { listingShareLink } from '@/features/share/links';
+import { shareContent } from '@/features/share/share-action';
 import { useReportSheet } from '@/features/safety/components/ReportSheetProvider';
 import { MarketListingCard } from '@/features/marketplace/components/MarketListingCard';
 import {
@@ -229,13 +230,16 @@ export default function MarketListingDetailScreen() {
   const phoneAllowed = Boolean(phone) && !listing.is_mine;
 
   const share = async () => {
-    try {
-      await Share.share({
-        message: `${listing.title} — ${formatMarketPrice(listing.price_cents, listing.currency, listing.price_period)}\nTrabzone'da görüntüle: trabzone://marketplace/${listing.id}`,
-      });
-    } catch {
-      // Kullanıcı paylaşımı iptal edebilir; sessiz geç.
-    }
+    const link = listingShareLink(listing.id);
+    await shareContent({
+      title: listing.title,
+      message: `${listing.title} — ${formatMarketPrice(
+        listing.price_cents,
+        listing.currency,
+        listing.price_period,
+      )}\nTrabzone'da görüntüle: ${link}`,
+      url: link,
+    });
   };
 
   const sendMessage = () => {

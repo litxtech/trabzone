@@ -4,7 +4,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from '@/utils/router';
 import { useCallback, useState } from 'react';
-import { Pressable, RefreshControl, Share, StyleSheet, View } from 'react-native';
+import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 
 import { AppText, Avatar, Card, IconButton, Screen, Skeleton } from '@/components/ui';
 import { fetchAccountOverview, providerLabel } from '@/features/account/services/account-service';
@@ -14,6 +14,8 @@ import { ProfileContentTabs } from '@/features/profile/components/ProfileContent
 import { useIncomingFriendRequestCount } from '@/features/profile/hooks/use-friend-requests';
 import { useMyProfile, useMyRoles } from '@/features/profile/hooks/use-my-profile';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
+import { profileShareLink } from '@/features/share/links';
+import { shareContent } from '@/features/share/share-action';
 import type { ConnectionKind } from '@/features/profile/services/social-service';
 import { useTheme } from '@/theme/ThemeProvider';
 
@@ -49,13 +51,12 @@ export default function ProfileScreen() {
     if (!profile) {
       return;
     }
-    try {
-      await Share.share({
-        message: `${fullName} (@${profile.username}) Trabzone'da. Sen de katıl!`,
-      });
-    } catch {
-      // Paylasim iptal edildi.
-    }
+    const link = profileShareLink(profile.username);
+    await shareContent({
+      title: fullName,
+      message: `${fullName} (@${profile.username}) Trabzone'da. Sen de katıl!\n${link}`,
+      url: link,
+    });
   }, [fullName, profile]);
 
   return (

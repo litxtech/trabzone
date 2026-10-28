@@ -4,7 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/utils/router';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, Share, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import {
   ActionSheet,
@@ -17,6 +17,8 @@ import {
   Skeleton,
 } from '@/components/ui';
 import { useCanMessage, useStartDirectConversation } from '@/features/messaging/hooks/use-chat';
+import { profileShareLink } from '@/features/share/links';
+import { shareContent } from '@/features/share/share-action';
 import { ConnectionsSheet } from '@/features/profile/components/ConnectionsSheet';
 import { ProfileContentTabs } from '@/features/profile/components/ProfileContentTabs';
 import { useToggleFollow } from '@/features/profile/hooks/use-follow';
@@ -26,10 +28,7 @@ import {
   useSendFriendRequest,
 } from '@/features/profile/hooks/use-friend-requests';
 import { useProfileView } from '@/features/profile/hooks/use-profile-view';
-import {
-  useBlockUser,
-  useUnblockUser,
-} from '@/features/profile/hooks/use-profile-mutations';
+import { useBlockUser, useUnblockUser } from '@/features/profile/hooks/use-profile-mutations';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import type { ConnectionKind } from '@/features/profile/services/social-service';
 import { useReportSheet } from '@/features/safety/components/ReportSheetProvider';
@@ -68,13 +67,12 @@ export default function PublicProfileScreen() {
     if (!profile) {
       return;
     }
-    try {
-      await Share.share({
-        message: `${fullName} (@${profile.username}) Trabzone'da. Profilini incele!`,
-      });
-    } catch {
-      // Paylasim iptal edildi.
-    }
+    const link = profileShareLink(profile.username);
+    await shareContent({
+      title: fullName,
+      message: `${fullName} (@${profile.username}) Trabzone'da. Profilini incele!\n${link}`,
+      url: link,
+    });
   };
 
   const reportProfile = () => {
@@ -294,9 +292,7 @@ export default function PublicProfileScreen() {
             ) : null}
 
             <View style={styles.metaRow}>
-              {profile.city ? (
-                <Meta icon="location-outline" label={profile.city} />
-              ) : null}
+              {profile.city ? <Meta icon="location-outline" label={profile.city} /> : null}
               <Meta icon="calendar-outline" label={formatJoined(profile.created_at)} />
             </View>
 
@@ -410,7 +406,9 @@ export default function PublicProfileScreen() {
                     <Ionicons
                       name="chatbubble-outline"
                       size={17}
-                      color={canMessage.data === false ? theme.colors.textTertiary : theme.colors.text}
+                      color={
+                        canMessage.data === false ? theme.colors.textTertiary : theme.colors.text
+                      }
                     />
                   }
                   style={styles.messageButton}
@@ -538,15 +536,7 @@ export default function PublicProfileScreen() {
   );
 }
 
-function Stat({
-  value,
-  label,
-  onPress,
-}: {
-  value: number;
-  label: string;
-  onPress?: () => void;
-}) {
+function Stat({ value, label, onPress }: { value: number; label: string; onPress?: () => void }) {
   return (
     <Pressable
       accessibilityRole={onPress ? 'button' : 'text'}
@@ -563,7 +553,13 @@ function Stat({
   );
 }
 
-function Meta({ icon, label }: { icon: React.ComponentProps<typeof Ionicons>['name']; label: string }) {
+function Meta({
+  icon,
+  label,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  label: string;
+}) {
   const { theme } = useTheme();
   return (
     <View style={styles.meta}>
@@ -596,7 +592,13 @@ const styles = StyleSheet.create({
   menuSpacer: { width: 40, height: 40 },
   skeleton: { gap: 12 },
   stateCard: { alignItems: 'center', gap: 10, paddingVertical: 28 },
-  stateIcon: { width: 56, height: 56, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  stateIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   cover: { height: 152, borderRadius: 26, overflow: 'hidden' },
   avatarRow: {
     flexDirection: 'row',

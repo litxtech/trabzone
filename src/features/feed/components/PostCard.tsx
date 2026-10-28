@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useRouter } from '@/utils/router';
 import { memo, useCallback, useState } from 'react';
-import { Alert, Pressable, Share, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { ActionSheet, AppImage, AppText, Avatar } from '@/components/ui';
 import { VideoThumbnail } from '@/features/media/components/VideoThumbnail';
@@ -10,6 +10,8 @@ import { publicMediaUrl } from '@/features/media/media-service';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { useReportSheet } from '@/features/safety/components/ReportSheetProvider';
 import { useBlockedUserIds } from '@/features/profile/hooks/use-relations';
+import { postShareLink, shareSnippet } from '@/features/share/links';
+import { didShare, shareContent } from '@/features/share/share-action';
 import {
   useDeletePost,
   useSharePost,
@@ -60,6 +62,10 @@ function PostMediaBlock({
   onOpen: (index: number) => void;
 }) {
   const { theme } = useTheme();
+  const { height: viewportHeight } = useWindowDimensions();
+  // Tek görselli gönderilerde dikey fotoğraf, sütun genişliği kadar
+  // yükseliyordu; geniş ekranlarda ekranın tamamını kaplamasın diye üst sınır.
+  const singleMediaMaxHeight = Math.round(Math.min(viewportHeight * 0.72, 620));
 
   if (media.length === 0) {
     return null;
@@ -82,6 +88,7 @@ function PostMediaBlock({
           styles.singleMedia,
           {
             aspectRatio: aspectFor(item),
+            maxHeight: singleMediaMaxHeight,
             borderRadius: theme.radius.lg,
             backgroundColor: theme.colors.surfaceMuted,
             opacity: pressed ? 0.94 : 1,
@@ -288,13 +295,21 @@ export const PostCard = memo(function PostCard({
 
   const onShare = useCallback(async () => {
     haptics.tap();
-    share.mutate(post.id);
-    try {
-      await Share.share({
-        message: `${authorName} (@${post.author_username}) Trabzone'da bir gönderi paylaştı.${post.body ? `\n\n${post.body}` : ''}`,
-      });
-    } catch {
-      // Paylasim iptal edildi.
+    // Paylaşılan metin tek başına kaybolmasın: https bağlantısı her zaman
+    // sonda durur, uygulama yüklüyse doğrudan gönderiye götürür.
+    const link = postShareLink(post.id);
+    const snippet = shareSnippet(post.body);
+    const outcome = await shareContent({
+      title: `${authorName} · Trabzone`,
+      message: `${authorName} (@${post.author_username}) Trabzone'da bir gönderi paylaştı.${
+        snippet ? `\n\n${snippet}` : ''
+      }\n\n${link}`,
+      url: link,
+    });
+    // Sayaç yalnızca paylaşım gerçekten tamamlandığında artar. Önceden
+    // paylaşım penceresi açılmadan (web'de hiç açılmıyordu) artırılıyordu.
+    if (didShare(outcome)) {
+      share.mutate(post.id);
     }
   }, [authorName, post.author_username, post.body, post.id, share]);
 

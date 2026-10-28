@@ -4,12 +4,15 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from '@/utils/router';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { memo, useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, Share, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { ActionSheet, AppImage, AppText, Avatar } from '@/components/ui';
 import { useToggleFollow } from '@/features/profile/hooks/use-follow';
+import { useBlockUser } from '@/features/profile/hooks/use-profile-mutations';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { useReportSheet } from '@/features/safety/components/ReportSheetProvider';
+import { reelShareLink, shareSnippet } from '@/features/share/links';
+import { didShare, shareContent } from '@/features/share/share-action';
 import { perf } from '@/perf';
 import { haptics } from '@/utils/haptics';
 
@@ -107,6 +110,26 @@ export const ReelItem = memo(function ReelItem({
   const toggleSave = useToggleReelSave();
   const share = useShareReel();
   const remove = useDeleteReel();
+  const blockAuthor = useBlockUser();
+
+  const confirmBlockAuthor = () => {
+    Alert.alert(
+      'Kullanıcıyı engelle',
+      `@${reel.author_username} engellenecek. İçeriklerini artık göremez, sana ulaşamaz.`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Engelle',
+          style: 'destructive',
+          onPress: () =>
+            blockAuthor.mutate(reel.author_id, {
+              onSuccess: () => haptics.success(),
+              onError: (error) => Alert.alert('Engellenemedi', error.message),
+            }),
+        },
+      ],
+    );
+  };
 
   useEffect(() => {
     // expo-video oynatıcısı zorunlu (imperative) bir yerel nesnedir.
@@ -149,15 +172,18 @@ export const ReelItem = memo(function ReelItem({
 
   const onShare = useCallback(async () => {
     haptics.tap();
-    share.mutate(reel.id);
-    try {
-      await Share.share({
-        message: `${fullName} (@${reel.author_username}) Trabzone Reels'te bir video paylaştı.${
-          reel.caption ? `\n\n${reel.caption}` : ''
-        }`,
-      });
-    } catch {
-      // Paylasim iptal edildi.
+    const link = reelShareLink(reel.id);
+    const caption = shareSnippet(reel.caption);
+    const outcome = await shareContent({
+      title: `${fullName} · Trabzone Reels`,
+      message: `${fullName} (@${reel.author_username}) Trabzone Reels'te bir video paylaştı.${
+        caption ? `\n\n${caption}` : ''
+      }\n\n${link}`,
+      url: link,
+    });
+    // Paylaşım sayacı yalnızca paylaşım/kopyalama tamamlandığında artar.
+    if (didShare(outcome)) {
+      share.mutate(reel.id);
     }
   }, [fullName, reel.author_username, reel.caption, reel.id, share]);
 
@@ -409,6 +435,12 @@ export const ReelItem = memo(function ReelItem({
             : [
                 { key: 'profile', label: 'Profili görüntüle', icon: 'person-outline' as const },
                 {
+                  key: 'block',
+                  label: 'Kullanıcıyı engelle',
+                  icon: 'ban-outline' as const,
+                  destructive: true,
+                },
+                {
                   key: 'report',
                   label: 'Videoyu şikâyet et',
                   icon: 'flag-outline' as const,
@@ -426,6 +458,8 @@ export const ReelItem = memo(function ReelItem({
             confirmDelete();
           } else if (key === 'profile') {
             openProfile();
+          } else if (key === 'block') {
+            confirmBlockAuthor();
           } else if (key === 'report') {
             setTimeout(
               () =>

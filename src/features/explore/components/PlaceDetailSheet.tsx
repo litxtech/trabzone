@@ -8,7 +8,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   TextInput,
   View,
@@ -22,6 +21,8 @@ import { publicMediaUrl } from '@/features/media/media-service';
 import { useStartDirectConversation } from '@/features/messaging/hooks/use-chat';
 import { MapCanvas } from '@/features/map/components/MapCanvas';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
+import { placeShareLink } from '@/features/share/links';
+import { shareContent } from '@/features/share/share-action';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatDateTr } from '@/utils/date';
 import { haptics } from '@/utils/haptics';
@@ -180,13 +181,13 @@ export function PlaceDetailSheet({ visible, placeId, onClose, onManage }: Props)
     if (!place) {
       return;
     }
-    try {
-      await Share.share({
-        message: `${place.name} — ${[place.district, place.neighborhood].filter(Boolean).join(', ')} · Trabzone Keşfet`,
-      });
-    } catch {
-      // Paylaşım iptal edildi.
-    }
+    const link = placeShareLink(place.id);
+    const where = [place.district, place.neighborhood].filter(Boolean).join(', ');
+    await shareContent({
+      title: place.name,
+      message: `${place.name} — ${where ? `${where} · ` : ''}Trabzone Keşfet\n${link}`,
+      url: link,
+    });
   };
 
   const directions = async () => {

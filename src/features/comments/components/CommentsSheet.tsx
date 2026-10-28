@@ -10,7 +10,6 @@ import {
   Modal,
   Pressable,
   RefreshControl,
-  Share,
   StyleSheet,
   TextInput,
   View,
@@ -25,6 +24,7 @@ import { ProfilePreviewSheet } from '@/features/profile/components/ProfilePrevie
 import { useBlockUser } from '@/features/profile/hooks/use-profile-mutations';
 import { publicMediaUrl } from '@/features/media/media-service';
 import { useReportSheet } from '@/features/safety/components/ReportSheetProvider';
+import { shareContent } from '@/features/share/share-action';
 import { fetchCommentReplies } from '@/features/comments/services/comment-service';
 import { useSession } from '@/stores/auth-store';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -409,9 +409,9 @@ export function CommentsSheet({
         case 'share': {
           setMenuComment(null);
           const link = commentDeepLink(contentType, contentId, comment.id);
-          void Share.share({
+          void shareContent({
             message: `Trabzone'da bir yorum: "${comment.body.slice(0, 120)}"\n${link}`,
-          }).catch(() => undefined);
+          });
           return;
         }
         default:
