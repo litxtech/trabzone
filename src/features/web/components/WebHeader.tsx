@@ -23,6 +23,8 @@ import { useAuthStatus } from '@/stores/auth-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { useTheme } from '@/theme/ThemeProvider';
 
+import { flatStyle } from '../link-style';
+
 const NAV_ITEMS = [
   { label: 'Ana Sayfa', href: '/' },
   { label: 'Keşfet', href: '/#kesfet' },
@@ -33,7 +35,33 @@ const NAV_ITEMS = [
   { label: 'Destek', href: '/support' },
 ] as const;
 
+/**
+ * Web'de tıklanabilir yüzeylerde imleç `pointer` olmalı; aksi halde buton
+ * etkileşimli görünmediği için kullanıcı tıklamayı denemiyor.
+ */
+const WEB_POINTER =
+  Platform.OS === 'web' ? ({ cursor: 'pointer' } as unknown as object) : null;
+
+/** Dokunmatik hedefleri en az 44px'e çıkarır; küçük ikonlar için kullanılır. */
+const ICON_HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 } as const;
+
+/** Çok dar ekranlarda ikincil kontrolleri gizlemek için (yalnızca web). */
+const MICRO_HIDDEN =
+  Platform.OS === 'web' ? ({ display: 'none' } as unknown as object) : ({ width: 0, height: 0, opacity: 0 } as const);
+
+/**
+ * expo-router `Link asChild` kullanıldığında stil, bağlantı öğesine `Link`
+ * üzerinden geçirilmelidir; çocuk `Pressable`'ın `style` prop'u eziliyor.
+ * `flatStyle` dizileri düz nesneye çevirir (bkz. `../link-style`).
+ */
+const linkStyle = flatStyle;
+
 function isActive(pathname: string, href: string) {
+  // Bölüm (hash) bağlantıları aynı sayfada farklı bölümlere gider; hepsini
+  // "aktif" göstermek menüyü yanıltıcı kılıyordu.
+  if (href.includes('#')) {
+    return false;
+  }
   const target = href.split('#')[0] || '/';
   if (target === '/') {
     return pathname === '/';
@@ -45,13 +73,8 @@ function NavLink({ label, href, onPress }: { label: string; href: string; onPres
   const pathname = usePathname();
   const active = isActive(pathname, href);
   return (
-    <Link href={href as Href} asChild>
-      <Pressable
-        accessibilityRole="link"
-        accessibilityLabel={label}
-        onPress={onPress}
-        style={({ pressed }) => [styles.navLink, { opacity: pressed ? 0.65 : 1 }]}
-      >
+    <Link href={href as Href} asChild style={linkStyle(styles.navLink)} onPress={onPress}>
+      <Pressable accessibilityRole="link" accessibilityLabel={label} style={styles.navLink}>
         <AppText
           variant="caption"
           color={active ? '#FFFFFF' : 'rgba(226,234,255,0.72)'}
@@ -76,6 +99,10 @@ export function WebHeader() {
   const [langOpen, setLangOpen] = useState(false);
 
   const desktop = width >= 1080;
+  // Dar ekranlarda marka ve buton topluluğu başlık içine sığmıyordu; bu yüzden
+  // hamburger butonu sağ boşluğun dışına taşıyordu.
+  const compactHeader = width < 430;
+  const microHeader = width < 360;
   const drawerWidth = Math.min(360, width * 0.86);
   const progress = useSharedValue(0);
 
@@ -99,14 +126,23 @@ export function WebHeader() {
 
   const closeMenu = () => setMenuOpen(false);
 
+  // Menü açılırken dil açılır penceresi açık kalırsa butonların üzerine biner
+  // ve tıklamaları yutar; bu yüzden her açılışta kapatılır.
+  const openMenu = () => {
+    setLangOpen(false);
+    setMenuOpen(true);
+  };
+
+  const toggleLang = () => setLangOpen((value) => !value);
+
   return (
     <>
       <View style={styles.headerWrap} pointerEvents="box-none">
         <View style={[styles.header, desktop ? styles.headerDesktop : styles.headerMobile]}>
-          <Link href={'/' as Href} asChild>
+          <Link href={'/' as Href} asChild style={linkStyle(styles.brand)}>
             <Pressable accessibilityRole="link" accessibilityLabel="Trabzone ana sayfa" style={styles.brand}>
               <Logo size={34} />
-              <Wordmark size={19} color="#FFFFFF" accentColor="#A78BFA" />
+              <Wordmark size={compactHeader ? 16 : 19} color="#FFFFFF" accentColor="#A78BFA" />
             </Pressable>
           </Link>
 
@@ -116,13 +152,18 @@ export function WebHeader() {
                 <NavLink key={item.href} label={item.label} href={item.href} />
               ))}
             </View>
-          ) : null}
+          ) : (
+            // Mobilde gezinme bağlantıları çekmecede; masaüstündeki `nav`
+            // boşluğunun yerini bu esnek boşluk alır ve aksiyonları sağa yaslar.
+            <View style={styles.headerSpacer} />
+          )}
 
           <View style={styles.actions}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Dil seçimi"
-              onPress={() => setLangOpen((value) => !value)}
+              hitSlop={ICON_HIT_SLOP}
+              onPress={toggleLang}
               style={({ pressed }) => [styles.iconButton, { opacity: pressed ? 0.6 : 1 }]}
             >
               <AppText variant="caption" color="#DCE6FF" style={styles.langText}>
@@ -133,8 +174,13 @@ export function WebHeader() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={scheme === 'dark' ? 'Açık temaya geç' : 'Koyu temaya geç'}
+              hitSlop={ICON_HIT_SLOP}
               onPress={() => setMode(scheme === 'dark' ? 'light' : 'dark')}
-              style={({ pressed }) => [styles.iconButton, { opacity: pressed ? 0.6 : 1 }]}
+              style={({ pressed }) => [
+                styles.iconButton,
+                microHeader ? styles.hiddenOnMicro : null,
+                { opacity: pressed ? 0.6 : 1 },
+              ]}
             >
               <Ionicons
                 name={scheme === 'dark' ? 'sunny-outline' : 'moon-outline'}
@@ -203,7 +249,8 @@ export function WebHeader() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Menüyü aç"
-                  onPress={() => setMenuOpen(true)}
+                  hitSlop={ICON_HIT_SLOP}
+                  onPress={openMenu}
                   style={({ pressed }) => [styles.menuButton, { opacity: pressed ? 0.6 : 1 }]}
                 >
                   <Ionicons name="menu" size={22} color="#FFFFFF" />
@@ -214,22 +261,30 @@ export function WebHeader() {
         </View>
 
         {langOpen ? (
-          <View style={styles.langPopover}>
-            <View style={styles.langRow}>
-              <AppText variant="caption" color="#FFFFFF">
-                Türkçe
-              </AppText>
-              <Ionicons name="checkmark" size={15} color="#7DD3A8" />
+          <>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Dil menüsünü kapat"
+              style={styles.langDismiss}
+              onPress={() => setLangOpen(false)}
+            />
+            <View style={styles.langPopover}>
+              <View style={styles.langRow}>
+                <AppText variant="caption" color="#FFFFFF">
+                  Türkçe
+                </AppText>
+                <Ionicons name="checkmark" size={15} color="#7DD3A8" />
+              </View>
+              <View style={[styles.langRow, { opacity: 0.5 }]}>
+                <AppText variant="caption" color="#DCE6FF">
+                  English
+                </AppText>
+                <AppText variant="caption" color="#9DB6FF" style={styles.soon}>
+                  yakında
+                </AppText>
+              </View>
             </View>
-            <View style={[styles.langRow, { opacity: 0.5 }]}>
-              <AppText variant="caption" color="#DCE6FF">
-                English
-              </AppText>
-              <AppText variant="caption" color="#9DB6FF" style={styles.soon}>
-                yakında
-              </AppText>
-            </View>
-          </View>
+          </>
         ) : null}
       </View>
 
@@ -259,21 +314,30 @@ export function WebHeader() {
               </Pressable>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.drawerBody}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.drawerBody}
+            >
               {navItems.map((item) => {
                 const active = isActive(pathname, item.href);
                 return (
-                  <Link key={item.href} href={item.href as Href} asChild>
+                  <Link
+                    key={item.href}
+                    href={item.href as Href}
+                    asChild
+                    onPress={closeMenu}
+                    style={linkStyle([
+                      styles.drawerRow,
+                      { backgroundColor: active ? theme.colors.primarySoft : 'transparent' },
+                    ])}
+                  >
                     <Pressable
                       accessibilityRole="link"
-                      onPress={closeMenu}
-                      style={({ pressed }) => [
+                      style={flatStyle([
                         styles.drawerRow,
-                        {
-                          backgroundColor: active ? theme.colors.primarySoft : 'transparent',
-                          opacity: pressed ? 0.65 : 1,
-                        },
-                      ]}
+                        { backgroundColor: active ? theme.colors.primarySoft : 'transparent' },
+                      ])}
                     >
                       <AppText
                         variant="bodyStrong"
@@ -294,80 +358,100 @@ export function WebHeader() {
 
               <View style={[styles.drawerDivider, { backgroundColor: theme.colors.divider }]} />
 
-              {authenticated ? (
-                <>
-                  <Pressable
-                    onPress={() => {
-                      closeMenu();
-                      router.push('/feed' as Href);
-                    }}
-                    style={[styles.drawerCta, { backgroundColor: theme.colors.primaryDeep }]}
-                  >
-                    <AppText variant="bodyStrong" color="onPrimary">
-                      Uygulamaya Git
-                    </AppText>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => {
-                      closeMenu();
-                      router.push('/settings' as Href);
-                    }}
-                    style={[styles.drawerRow, { borderColor: theme.colors.border, borderWidth: 1 }]}
-                  >
-                    <AppText variant="body" color="text">
-                      Hesap Ayarları
-                    </AppText>
-                  </Pressable>
-                </>
-              ) : (
-                <>
-                  <Pressable
-                    onPress={() => {
-                      closeMenu();
-                      router.push('/register' as Href);
-                    }}
-                    style={[styles.drawerCta, { backgroundColor: theme.colors.primaryDeep }]}
-                  >
-                    <AppText variant="bodyStrong" color="onPrimary">
-                      Hemen Katıl
-                    </AppText>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => {
-                      closeMenu();
-                      router.push('/login' as Href);
-                    }}
-                    style={[styles.drawerRow, { borderColor: theme.colors.border, borderWidth: 1 }]}
-                  >
-                    <AppText variant="body" color="text">
-                      Giriş Yap
-                    </AppText>
-                  </Pressable>
-                </>
-              )}
+              <View style={styles.drawerActions}>
+                {authenticated ? (
+                  <>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        closeMenu();
+                        router.push('/feed' as Href);
+                      }}
+                      style={({ pressed }) => [
+                        styles.drawerCta,
+                        { backgroundColor: theme.colors.primaryDeep, opacity: pressed ? 0.85 : 1 },
+                      ]}
+                    >
+                      <AppText variant="bodyStrong" color="onPrimary">
+                        Uygulamaya Git
+                      </AppText>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        closeMenu();
+                        router.push('/settings' as Href);
+                      }}
+                      style={({ pressed }) => [
+                        styles.drawerSecondary,
+                        { borderColor: theme.colors.border, opacity: pressed ? 0.7 : 1 },
+                      ]}
+                    >
+                      <AppText variant="body" color="text">
+                        Hesap Ayarları
+                      </AppText>
+                    </Pressable>
+                  </>
+                ) : (
+                  <>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        closeMenu();
+                        router.push('/register' as Href);
+                      }}
+                      style={({ pressed }) => [
+                        styles.drawerCta,
+                        { backgroundColor: theme.colors.primaryDeep, opacity: pressed ? 0.85 : 1 },
+                      ]}
+                    >
+                      <AppText variant="bodyStrong" color="onPrimary">
+                        Hemen Katıl
+                      </AppText>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        closeMenu();
+                        router.push('/login' as Href);
+                      }}
+                      style={({ pressed }) => [
+                        styles.drawerSecondary,
+                        { borderColor: theme.colors.border, opacity: pressed ? 0.7 : 1 },
+                      ]}
+                    >
+                      <AppText variant="body" color="text">
+                        Giriş Yap
+                      </AppText>
+                    </Pressable>
+                  </>
+                )}
+              </View>
+
+              <View style={[styles.drawerDivider, { backgroundColor: theme.colors.divider }]} />
 
               <View style={styles.drawerLegal}>
-                <Link href={'/terms' as Href} asChild>
-                  <Pressable onPress={closeMenu}>
-                    <AppText variant="caption" color="textTertiary">
-                      Kullanım Koşulları
-                    </AppText>
-                  </Pressable>
-                </Link>
-                <Link href={'/privacy' as Href} asChild>
-                  <Pressable onPress={closeMenu}>
-                    <AppText variant="caption" color="textTertiary">
-                      Gizlilik
-                    </AppText>
-                  </Pressable>
-                </Link>
-                <Link href={'/child-safety' as Href} asChild>
-                  <Pressable onPress={closeMenu}>
-                    <AppText variant="caption" color="textTertiary">
-                      Çocuk Güvenliği
-                    </AppText>
-                  </Pressable>
-                </Link>
+                {[
+                  { label: 'Kullanım Koşulları', href: '/terms' },
+                  { label: 'Gizlilik', href: '/privacy' },
+                  { label: 'KVKK', href: '/kvkk' },
+                  { label: 'Çocuk Güvenliği', href: '/child-safety' },
+                  { label: 'Hesap Silme', href: '/delete-account' },
+                ].map((link) => (
+                  <Link
+                    key={link.href}
+                    href={link.href as Href}
+                    asChild
+                    onPress={closeMenu}
+                    style={linkStyle(styles.drawerLegalLink)}
+                  >
+                    <Pressable accessibilityRole="link" style={styles.drawerLegalLink}>
+                      <AppText variant="caption" color="textSecondary">
+                        {link.label}
+                      </AppText>
+                    </Pressable>
+                  </Link>
+                ))}
               </View>
             </ScrollView>
           </Animated.View>
@@ -399,61 +483,81 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 18,
   },
-  headerDesktop: { paddingHorizontal: 28, minHeight: 72 },
-  headerMobile: { paddingHorizontal: 18, minHeight: 62 },
-  brand: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  headerDesktop: { paddingHorizontal: 28, minHeight: 72, gap: 18 },
+  headerMobile: { paddingHorizontal: 16, minHeight: 62, gap: 10 },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: 9, flexShrink: 1, ...(WEB_POINTER ?? {}) },
   nav: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 15 },
-  navLink: { paddingVertical: 8 },
+  navLink: { paddingVertical: 10, paddingHorizontal: 4, ...(WEB_POINTER ?? {}) },
   navLabel: { fontSize: 12.5, letterSpacing: 0.1 },
   navLabelActive: { fontFamily: undefined },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerSpacer: { flex: 1 },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
+  hiddenOnMicro: MICRO_HIDDEN,
   iconButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: 'rgba(160, 185, 240, 0.2)',
+    ...(WEB_POINTER ?? {}),
   },
   langText: { fontSize: 11, letterSpacing: 0.6 },
-  ghostButton: { paddingHorizontal: 10, paddingVertical: 9 },
+  ghostButton: {
+    minHeight: 38,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    ...(WEB_POINTER ?? {}),
+  },
   loginButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 7,
+    minHeight: 38,
     backgroundColor: '#FFFFFF',
     borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
+    paddingHorizontal: 15,
+    ...(WEB_POINTER ?? {}),
   },
   loginLabel: { fontSize: 12.5 },
   loginCompact: {
+    minHeight: 36,
+    justifyContent: 'center',
     backgroundColor: '#FFFFFF',
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    ...(WEB_POINTER ?? {}),
   },
   menuButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: 'rgba(160, 185, 240, 0.24)',
+    ...(WEB_POINTER ?? {}),
+  },
+  langDismiss: {
+    ...(Platform.OS === 'web'
+      ? ({ position: 'fixed', top: 0, right: 0, bottom: 0, left: 0 } as unknown as object)
+      : { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }),
+    zIndex: 55,
   },
   langPopover: {
     position: 'absolute',
-    right: 96,
-    top: 60,
-    minWidth: 160,
-    padding: 10,
-    gap: 8,
+    right: 18,
+    top: 66,
+    minWidth: 170,
+    padding: 12,
+    gap: 10,
     borderRadius: 14,
     backgroundColor: '#0D1526',
     borderWidth: 1,
     borderColor: 'rgba(140, 170, 235, 0.24)',
+    zIndex: 56,
   },
   langRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   soon: { fontSize: 10 },
@@ -472,6 +576,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 22,
     borderBottomLeftRadius: 22,
     paddingTop: 18,
+    paddingBottom: 12,
     paddingHorizontal: 18,
     shadowColor: '#000000',
     shadowOpacity: 0.28,
@@ -485,17 +590,55 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 16,
   },
-  drawerClose: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  drawerBody: { gap: 6, paddingBottom: 30 },
+  drawerClose: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 20,
+    ...(WEB_POINTER ?? {}),
+  },
+  drawerBody: { gap: 4, paddingBottom: 28 },
   drawerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    minHeight: 48,
     paddingVertical: 14,
     paddingHorizontal: 12,
     borderRadius: 12,
+    ...(WEB_POINTER ?? {}),
   },
-  drawerDivider: { height: 1, marginVertical: 10 },
-  drawerCta: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 6 },
-  drawerLegal: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 18 },
+  drawerDivider: { height: 1, marginVertical: 14 },
+  drawerActions: { gap: 10 },
+  drawerCta: {
+    borderRadius: 14,
+    minHeight: 48,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    // Çerçevesiz buton, çerçeveli ikincil butonla aynı toplam yüksekliğe
+    // ulaşsın diye saydam çerçeve kullanılır.
+    borderWidth: 1,
+    borderColor: 'transparent',
+    ...(WEB_POINTER ?? {}),
+  },
+  drawerSecondary: {
+    borderRadius: 14,
+    minHeight: 48,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    ...(WEB_POINTER ?? {}),
+  },
+  drawerLegal: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 8 },
+  drawerLegalLink: {
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    ...(WEB_POINTER ?? {}),
+  },
 });

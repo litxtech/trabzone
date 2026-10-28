@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { Image, ImageBackground, Platform, StyleSheet, View, type ImageSourcePropType } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -12,6 +12,8 @@ import Animated, {
 
 import { AppText } from '@/components/ui';
 import { useReduceMotion } from '@/perf/use-reduce-motion';
+
+import { webPhotos } from '../assets';
 
 function Float({
   children,
@@ -101,10 +103,12 @@ function AvatarDot({ size = 24, color = '#4169F5' }: { size?: number; color?: st
 
 function FeedCard({
   title,
+  photo,
   lines = 2,
   accent = '#4169F5',
 }: {
   title: string;
+  photo: ImageSourcePropType;
   lines?: number;
   accent?: string;
 }) {
@@ -121,9 +125,7 @@ function FeedCard({
       <AppText variant="caption" color="#EAF0FF" style={styles.feedTitle}>
         {title}
       </AppText>
-      <View style={[styles.mediaBlock, { backgroundColor: `${accent}22` }]}>
-        <Ionicons name="image-outline" size={24} color={accent} />
-      </View>
+      <Image source={photo} style={styles.mediaBlock} resizeMode="cover" accessibilityIgnoresInvertColors />
       {Array.from({ length: lines }).map((_, index) => (
         <View
           key={`line-${index}`}
@@ -150,19 +152,31 @@ export function FeedPhone() {
         <Ionicons name="notifications-outline" size={15} color="#9FB0CE" />
       </View>
       <View style={styles.storyRow}>
-        {['#4169F5', '#8057F4', '#2BB673', '#F0A23A'].map((color, index) => (
-          <View key={color} style={styles.storyItem}>
-            <View style={[styles.storyRing, { borderColor: color }]}>
-              <AvatarDot size={24} color={color} />
+        {[webPhotos.feed1, webPhotos.feed2, webPhotos.boztepe, webPhotos.harbour].map(
+          (photo, index) => (
+            <View key={`story-${index}`} style={styles.storyItem}>
+              <View
+                style={[
+                  styles.storyRing,
+                  { borderColor: ['#4169F5', '#8057F4', '#2BB673', '#F0A23A'][index] },
+                ]}
+              >
+                <Image source={photo} style={styles.storyImage} resizeMode="cover" />
+              </View>
+              <View style={[styles.line, { width: 22, height: 4 }]} />
+              <View style={[styles.line, styles.lineSoft, { width: 14, height: 3 }]} />
             </View>
-            <View style={[styles.line, { width: 22, height: 4 }]} />
-            <View style={[styles.line, styles.lineSoft, { width: 14, height: 3 }]} />
-          </View>
-        ))}
+          ),
+        )}
       </View>
       <View style={styles.feedList}>
-        <FeedCard title="Şehrinden bir kare paylaş" accent="#4169F5" />
-        <FeedCard title="Yeni bir keşif, yeni bir bağlantı" accent="#8057F4" lines={1} />
+        <FeedCard title="Şehrinden bir kare paylaş" photo={webPhotos.feed1} accent="#4169F5" />
+        <FeedCard
+          title="Yeni bir keşif, yeni bir bağlantı"
+          photo={webPhotos.uzungol}
+          accent="#8057F4"
+          lines={1}
+        />
       </View>
     </PhoneFrame>
   );
@@ -171,45 +185,47 @@ export function FeedPhone() {
 export function ReelsPhone() {
   return (
     <PhoneFrame width={230} height={470}>
-      <LinearGradient
-        colors={['#101B36', '#1B1238', '#0A1020']}
-        style={StyleSheet.absoluteFill}
-      />
-      <View style={styles.reelsTop}>
-        <AppText variant="caption" color="#FFFFFF" style={styles.reelsTitle}>
-          Reels
-        </AppText>
-        <Ionicons name="volume-mute" size={16} color="#FFFFFF" />
-      </View>
-      <View style={styles.reelsCenter}>
-        <View style={styles.playCircle}>
-          <Ionicons name="play" size={30} color="#FFFFFF" />
+      <ImageBackground source={webPhotos.reelSumela} style={styles.reelBg} resizeMode="cover">
+        <LinearGradient
+          colors={['rgba(6,10,22,0.72)', 'rgba(6,10,22,0.18)', 'rgba(6,10,22,0.86)']}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={styles.reelsTop}>
+          <AppText variant="caption" color="#FFFFFF" style={styles.reelsTitle}>
+            Reels
+          </AppText>
+          <Ionicons name="volume-mute" size={16} color="#FFFFFF" />
         </View>
-        <AppText variant="caption" color="#C7D4EE" align="center">
-          Sessiz başlar,{'\n'}ses kontrolü sende.
-        </AppText>
-      </View>
-      <View style={styles.reelsSide}>
-        <View style={styles.reelsAction}>
-          <Ionicons name="heart" size={18} color="#FF6B8A" />
-          <View style={[styles.line, { width: 16, height: 4 }]} />
+        <View style={styles.reelsCenter}>
+          <View style={styles.playCircle}>
+            <Ionicons name="play" size={30} color="#FFFFFF" />
+          </View>
+          <AppText variant="caption" color="#E6ECFA" align="center">
+            Sessiz başlar,{'\n'}ses kontrolü sende.
+          </AppText>
         </View>
-        <View style={styles.reelsAction}>
-          <Ionicons name="chatbubble-ellipses" size={17} color="#FFFFFF" />
-          <View style={[styles.line, { width: 16, height: 4 }]} />
+        <View style={styles.reelsSide}>
+          <View style={styles.reelsAction}>
+            <Ionicons name="heart" size={18} color="#FF6B8A" />
+            <View style={[styles.line, { width: 16, height: 4 }]} />
+          </View>
+          <View style={styles.reelsAction}>
+            <Ionicons name="chatbubble-ellipses" size={17} color="#FFFFFF" />
+            <View style={[styles.line, { width: 16, height: 4 }]} />
+          </View>
+          <View style={styles.reelsAction}>
+            <Ionicons name="paper-plane" size={17} color="#FFFFFF" />
+            <View style={[styles.line, { width: 16, height: 4 }]} />
+          </View>
         </View>
-        <View style={styles.reelsAction}>
-          <Ionicons name="paper-plane" size={17} color="#FFFFFF" />
-          <View style={[styles.line, { width: 16, height: 4 }]} />
+        <View style={styles.reelsBottom}>
+          <AvatarDot size={24} color="#8057F4" />
+          <View style={styles.flex}>
+            <View style={[styles.line, { width: '48%' }]} />
+            <View style={[styles.line, styles.lineSoft, { width: '72%' }]} />
+          </View>
         </View>
-      </View>
-      <View style={styles.reelsBottom}>
-        <AvatarDot size={24} color="#8057F4" />
-        <View style={styles.flex}>
-          <View style={[styles.line, { width: '48%' }]} />
-          <View style={[styles.line, styles.lineSoft, { width: '72%' }]} />
-        </View>
-      </View>
+      </ImageBackground>
     </PhoneFrame>
   );
 }
@@ -353,17 +369,16 @@ export function HeroShowcase() {
           <AppText variant="caption" color="#DCE6FF" style={styles.miniTitle}>
             Şehrinden bir kare
           </AppText>
-          <View style={[styles.miniMedia, { backgroundColor: 'rgba(65,105,245,0.18)' }]}>
-            <Ionicons name="image" size={22} color="#7FA0FF" />
-          </View>
+          <Image source={webPhotos.feed1} style={styles.miniMedia} resizeMode="cover" accessibilityIgnoresInvertColors />
         </View>
       </Float>
 
       <Float distance={11} duration={6400} style={[styles.floatCard, styles.floatReels]}>
         <View style={styles.miniCard}>
           <View style={styles.miniMediaTall}>
+            <Image source={webPhotos.reelUzungol} style={styles.fillImage} resizeMode="cover" accessibilityIgnoresInvertColors />
             <LinearGradient
-              colors={['#241A4D', '#101B36']}
+              colors={['rgba(8,12,26,0.5)', 'transparent', 'rgba(8,12,26,0.7)']}
               style={StyleSheet.absoluteFill}
             />
             <View style={styles.playSmall}>
@@ -386,7 +401,7 @@ export function HeroShowcase() {
               Marketplace
             </AppText>
           </View>
-          <View style={[styles.line, styles.lineSoft, { width: '72%' }]} />
+          <Image source={webPhotos.market} style={styles.miniMedia} resizeMode="cover" accessibilityIgnoresInvertColors />
           <View style={[styles.line, { width: '48%' }]} />
         </View>
       </Float>
@@ -465,6 +480,7 @@ const styles = StyleSheet.create({
   },
   storyItem: { alignItems: 'center', gap: 4 },
   storyRing: { borderWidth: 1.5, borderRadius: 18, padding: 2 },
+  storyImage: { width: 24, height: 24, borderRadius: 12 },
   feedList: { padding: 10, gap: 10 },
   feedCard: {
     borderRadius: 14,
@@ -480,8 +496,16 @@ const styles = StyleSheet.create({
   mediaBlock: {
     height: 62,
     borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: '100%',
+  },
+  fillImage: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
   },
   line: { height: 6, borderRadius: 4, backgroundColor: 'rgba(214,226,250,0.42)' },
   lineSoft: { backgroundColor: 'rgba(160,178,210,0.18)', height: 4 },
@@ -496,7 +520,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 14,
+    paddingTop: 4,
   },
+  reelBg: { flex: 1 },
   reelsTitle: { letterSpacing: 1, fontSize: 11 },
   reelsCenter: {
     flex: 1,
@@ -684,7 +710,11 @@ const styles = StyleSheet.create({
   },
   miniHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   miniTitle: { fontSize: 10 },
-  miniMedia: { height: 52, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  miniMedia: {
+    height: 52,
+    borderRadius: 9,
+    width: '100%',
+  },
   miniMediaTall: {
     height: 108,
     borderRadius: 9,

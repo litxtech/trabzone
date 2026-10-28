@@ -2,6 +2,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { ReactNode } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   StyleSheet,
   View,
@@ -111,20 +112,42 @@ export function Button({
         }
         onPress?.(event);
       }}
-      style={({ pressed }) => [
-        styles.base,
-        {
-          height: HEIGHTS[size],
-          borderRadius: theme.radius.md,
-          borderColor: palette.border,
-          borderWidth: variant === 'outline' ? 1.5 : 0,
-          alignSelf: fullWidth ? 'stretch' : 'flex-start',
-          opacity: isDisabled ? 0.55 : pressed ? 0.9 : 1,
-          transform: [{ scale: pressed && !isDisabled ? 0.985 : 1 }],
-        },
-        palette.shadow,
-        style,
-      ]}
+      style={
+        Platform.OS === 'web'
+          ? // Web'de `Link asChild` içinde kullanılan Pressable'ın fonksiyon
+            // biçimindeki `style` prop'u birleştirilemediği için (Radix Slot
+            // nesne bekliyor) tüm buton stilleri kayboluyordu. Ayrıca dizi
+            // biçimindeki stil de aynı nedenle çökme yaratıyor; bu yüzden ağda
+            // düz nesneye indirgenir. Basma geri bildirimi global CSS
+            // (`:active`) tarafından sağlanır.
+            StyleSheet.flatten([
+              styles.base,
+              {
+                height: HEIGHTS[size],
+                borderRadius: theme.radius.md,
+                borderColor: palette.border,
+                borderWidth: variant === 'outline' ? 1.5 : 0,
+                alignSelf: fullWidth ? 'stretch' : 'flex-start',
+                opacity: isDisabled ? 0.55 : 1,
+              },
+              palette.shadow,
+              style,
+            ])
+          : ({ pressed }) => [
+              styles.base,
+              {
+                height: HEIGHTS[size],
+                borderRadius: theme.radius.md,
+                borderColor: palette.border,
+                borderWidth: variant === 'outline' ? 1.5 : 0,
+                alignSelf: fullWidth ? 'stretch' : 'flex-start',
+                opacity: isDisabled ? 0.55 : pressed ? 0.9 : 1,
+                transform: [{ scale: pressed && !isDisabled ? 0.985 : 1 }],
+              },
+              palette.shadow,
+              style,
+            ]
+      }
       {...rest}
     >
       <View

@@ -669,6 +669,36 @@ export type RideAdminVerification = {
   };
 };
 
+export type RideAdminDriverApplication = {
+  user_id: string;
+  identity_status: string;
+  driver_status: string;
+  driver_bio: string | null;
+  level: string;
+  rating_avg: number | null;
+  completed_trips: number;
+  created_at: string;
+  updated_at: string;
+  user: {
+    id: string;
+    username: string;
+    first_name: string | null;
+    last_name: string | null;
+    avatar_path: string | null;
+    is_verified: boolean;
+  };
+  license_ok: boolean;
+  vehicles: { total: number; approved: number };
+  documents: {
+    id: string;
+    kind: string;
+    status: string;
+    expires_at: string | null;
+    reject_reason: string | null;
+    created_at: string;
+  }[];
+};
+
 export type RideAdminVehicle = RideVehicle & {
   owner: {
     id: string;

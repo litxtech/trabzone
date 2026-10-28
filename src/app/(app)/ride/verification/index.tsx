@@ -277,7 +277,7 @@ export default function RideVerificationScreen() {
     }
     try {
       await apply.mutateAsync(bio.trim());
-      setNotice('Sürücü başvurun alındı. Belgeler onaylandığında ilan yayınlayabilirsin.');
+      setNotice('Sürücü başvurun alındı. Onaylandığında araç ekleyip ilan yayınlayabilirsin.');
     } catch (cause) {
       setError(errorMessage(cause, 'Başvuru gönderilemedi.'));
     }
@@ -340,7 +340,8 @@ export default function RideVerificationScreen() {
           <View style={styles.flex}>
             <AppText variant="bodyStrong">Sürücü başvurusu</AppText>
             <AppText variant="caption" color="textTertiary">
-              Sürücü belgesi, araç ruhsatı ve sigorta onayı gerekir.
+              Onay için kimlik ve sürücü belgesi gerekir. İlan için ayrıca onaylı araç
+              (ruhsat + sigorta) şarttır.
             </AppText>
           </View>
           <Badge
@@ -603,7 +604,7 @@ export default function RideVerificationScreen() {
             {[
               { label: 'Kimlik doğrulaması', ok: identityApproved },
               { label: 'Sürücü belgesi', ok: licenseApproved },
-              { label: 'Araç sigortası (ilan için gerekli)', ok: insuranceApproved },
+              { label: 'Araç sigortası (garajda araç onayı için gerekli)', ok: insuranceApproved },
             ].map((item) => (
               <View key={item.label} style={styles.checkRow}>
                 <Ionicons
@@ -652,6 +653,32 @@ export default function RideVerificationScreen() {
             Belgelerin doğrulama ekibi tarafından kontrol ediliyor. Onaylandığında bildirim
             alacaksın.
           </AppText>
+        </Card>
+      ) : data?.driver_status === 'approved' ? (
+        <Card padding={15} tone="primarySoft">
+          <View style={styles.summaryRow}>
+            <View style={[styles.iconWrap, { backgroundColor: theme.colors.surface }]}>
+              <Ionicons name="checkmark-circle" size={24} color={theme.colors.success} />
+            </View>
+            <View style={styles.flex}>
+              <AppText variant="bodyStrong">Sürücü yetkin açık</AppText>
+              <AppText variant="caption" color="textSecondary">
+                Yolculuk ilanı yayınlayabilirsin. İlan için onaylı bir araç (ruhsat + sigorta)
+                gerekir; eksikse garajdan ekleyebilirsin.
+              </AppText>
+            </View>
+          </View>
+          <View style={styles.checklist}>
+            <Button
+              label="Yolculuk paylaş"
+              onPress={() => router.navigate('/ride/create' as never)}
+            />
+            <Button
+              label="Garajım"
+              variant="secondary"
+              onPress={() => router.navigate('/ride/garage' as never)}
+            />
+          </View>
         </Card>
       ) : null}
 

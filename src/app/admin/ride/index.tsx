@@ -13,6 +13,7 @@ import {
   useRideAdminAudit,
   useRideAdminDisputeDecide,
   useRideAdminDisputes,
+  useRideAdminDriverApplications,
   useRideAdminDriverDecide,
   useRideAdminFinance,
   useRideAdminIncidentAction,
@@ -53,6 +54,7 @@ import {
   SCOPE_LABEL,
   STATUS_TONE,
   VERIFICATION_LABEL,
+  VERIFICATION_STATUS_LABEL,
   WEEKDAY_NAMES,
   formatDateTime,
   formatMoney,
@@ -67,6 +69,7 @@ type TabKey =
   | 'reservations'
   | 'waitlists'
   | 'verifications'
+  | 'drivers'
   | 'vehicles'
   | 'disputes'
   | 'incidents'
@@ -84,6 +87,7 @@ const TABS: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap; 
   { key: 'reservations', label: 'Rezervasyonlar', icon: 'ticket-outline', permission: 'ride.view' },
   { key: 'waitlists', label: 'Bekleme listesi', icon: 'hourglass-outline', permission: 'ride.view' },
   { key: 'verifications', label: 'Doğrulamalar', icon: 'shield-checkmark-outline', permission: 'ride.verify' },
+  { key: 'drivers', label: 'Sürücü başvuruları', icon: 'id-card-outline', permission: 'ride.verify' },
   { key: 'vehicles', label: 'Araç ve belgeler', icon: 'car-sport-outline', permission: 'ride.verify' },
   { key: 'disputes', label: 'Uyuşmazlık', icon: 'git-compare-outline', permission: 'ride.moderate' },
   { key: 'incidents', label: 'Güvenlik olayları', icon: 'warning-outline', permission: 'ride.safety' },
@@ -169,6 +173,7 @@ export default function AdminRideScreen() {
           ) : null}
           {active?.key === 'waitlists' && can('ride.view') ? <WaitlistsPanel /> : null}
           {active?.key === 'verifications' && can('ride.verify') ? <VerificationsPanel /> : null}
+          {active?.key === 'drivers' && can('ride.verify') ? <DriverApplicationsPanel /> : null}
           {active?.key === 'vehicles' && can('ride.verify') ? <VehiclesPanel /> : null}
           {active?.key === 'disputes' && can('ride.moderate') ? <DisputesPanel /> : null}
           {active?.key === 'incidents' && can('ride.safety') ? <IncidentsPanel /> : null}
@@ -650,6 +655,10 @@ function VerificationsPanel() {
                   variant="ghost"
                   fullWidth={false}
                   loading={driverDecide.isPending}
+                  disabled={
+                    verification.user.identity_status !== 'approved' ||
+                    verification.user.driver_status === 'approved'
+                  }
                   onPress={() => driverDecide.mutate(
                     { userId: verification.user.id, approve: true },
                     { onSuccess: () => setNotice('Sürücü başvurusu onaylandı.'), onError: (cause) => setNotice(cause.message) },
@@ -659,6 +668,123 @@ function VerificationsPanel() {
             </AdminRow>
           ))}
           <Pager total={verifications.data?.total ?? 0} limit={30} offset={offset} onChange={setOffset} />
+        </View>
+      )}
+    </AdminSection>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sürücü başvuruları
+// ---------------------------------------------------------------------------
+function DriverApplicationsPanel() {
+  const [status, setStatus] = useState('pending');
+  const [offset, setOffset] = useState(0);
+  const [reason, setReason] = useState('');
+  const [notice, setNotice] = useState<string | null>(null);
+  const applications = useRideAdminDriverApplications({ status, offset });
+  const decide = useRideAdminDriverDecide();
+
+  const run = (userId: string, approve: boolean) => {
+    if (!approve && reason.trim().length < 5) {
+      setNotice('Ret için en az 5 karakterlik gerekçe girin.');
+      return;
+    }
+    setNotice(null);
+    decide.mutate(
+      { userId, approve, reason: approve ? undefined : reason.trim() },
+      {
+        onSuccess: () => {
+          setNotice(approve ? 'Sürücü başvurusu onaylandı. Kullanıcı yetkileri açıldı.' : 'Sürücü başvurusu reddedildi.');
+          void applications.refetch();
+        },
+        onError: (cause) => setNotice(cause.message),
+      },
+    );
+  };
+
+  return (
+    <AdminSection
+      title="Sürücü başvuruları"
+      subtitle="Onay için kimlik ve geçerli ehliyet yeterlidir. İlan yayınlamak için ayrıca onaylı bir araç (ruhsat + sigorta) gerekir."
+      action={<Badge label={`${applications.data?.total ?? 0} kayıt`} tone="neutral" />}
+    >
+      <FilterChips
+        value={status}
+        onChange={(next) => { setStatus(next); setOffset(0); }}
+        options={[
+          { key: 'pending', label: 'İnceleniyor' },
+          { key: 'approved', label: 'Onaylı' },
+          { key: 'rejected', label: 'Reddedildi' },
+          { key: 'suspended', label: 'Askıda' },
+          { key: 'all', label: 'Tümü' },
+        ]}
+      />
+      <ReasonField value={reason} onChangeText={setReason} placeholder="Ret gerekçesi (onayda zorunlu değil)" />
+      {notice ? <AppText variant="caption" color="primaryDeep">{notice}</AppText> : null}
+
+      {applications.isLoading ? <LoadingBlock compact /> : applications.isError ? (
+        <ErrorBlock message={applications.error.message} onRetry={() => void applications.refetch()} />
+      ) : (applications.data?.items.length ?? 0) === 0 ? (
+        <EmptyBlock text="Bu filtrede sürücü başvurusu yok." />
+      ) : (
+        <View style={styles.stack}>
+          {applications.data?.items.map((application) => (
+            <AdminRow key={application.user_id}>
+              <View style={styles.rowHead}>
+                <View style={styles.flex}>
+                  <AppText variant="bodyStrong" numberOfLines={1}>
+                    {application.user.first_name ?? application.user.username}
+                    {application.user.last_name ? ` ${application.user.last_name}` : ''} · @{application.user.username}
+                  </AppText>
+                  <AppText variant="caption" color="textTertiary" numberOfLines={2}>
+                    Başvuru {dateText(application.updated_at)}
+                    {application.driver_bio ? ` · “${application.driver_bio}”` : ''}
+                  </AppText>
+                </View>
+                <Badge
+                  label={VERIFICATION_STATUS_LABEL[application.driver_status] ?? application.driver_status}
+                  tone={application.driver_status === 'approved' ? 'success' : application.driver_status === 'rejected' ? 'danger' : 'warning'}
+                />
+              </View>
+              <View style={styles.wrap}>
+                <Badge label={`Kimlik: ${application.identity_status}`} tone={application.identity_status === 'approved' ? 'success' : 'warning'} />
+                <Badge label={`Ehliyet: ${application.license_ok ? 'onaylı' : 'eksik'}`} tone={application.license_ok ? 'success' : 'danger'} />
+                <Badge label={`${application.vehicles.approved}/${application.vehicles.total} onaylı araç`} tone={application.vehicles.approved > 0 ? 'success' : 'neutral'} />
+                <Badge label={`${application.documents.length} belge`} tone="neutral" />
+                {application.rating_avg ? <Badge label={`${application.rating_avg.toFixed(1)}★`} tone="accent" /> : null}
+                <Badge label={`${application.completed_trips} yolculuk`} tone="neutral" />
+              </View>
+              {application.driver_status !== 'approved' ? (
+                <View style={styles.wrap}>
+                  <Button
+                    label="Sürücülüğü onayla"
+                    size="sm"
+                    variant="secondary"
+                    fullWidth={false}
+                    loading={decide.isPending}
+                    disabled={application.identity_status !== 'approved' || !application.license_ok}
+                    onPress={() => run(application.user_id, true)}
+                  />
+                  <Button
+                    label="Reddet"
+                    size="sm"
+                    variant="danger"
+                    fullWidth={false}
+                    loading={decide.isPending}
+                    disabled={reason.trim().length < 5}
+                    onPress={() => run(application.user_id, false)}
+                  />
+                  {application.identity_status !== 'approved' || !application.license_ok ? (
+                    <AppText variant="caption" color="textTertiary">
+                      Onay için kimlik ve geçerli ehliyet onayı gerekir.
+                    </AppText>
+                  ) : null}
+                </View>
+              ) : null}
+            </AdminRow>
+          ))}
+          <Pager total={applications.data?.total ?? 0} limit={30} offset={offset} onChange={setOffset} />
         </View>
       )}
     </AdminSection>

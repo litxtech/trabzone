@@ -14,6 +14,7 @@ import type { ContactChannel } from '@/features/web-content/types';
 import { useTheme } from '@/theme/ThemeProvider';
 
 import { useWebMeta } from '../use-web-meta';
+import { flatStyle } from '../link-style';
 import { WebFooter } from './WebFooter';
 import { WebHeader } from './WebHeader';
 
@@ -124,7 +125,6 @@ function ChannelCard({ channel }: { channel: Channel }) {
       <Pressable
         accessibilityRole="link"
         accessibilityLabel={`${channel.title}: ${channel.action}`}
-        style={({ pressed }) => [{ opacity: pressed ? 0.85 : 1 }]}
       >
         {content}
       </Pressable>
@@ -290,10 +290,7 @@ export function WebContactPage() {
           </View>
           <Link href={'/support' as Href} asChild>
             <Pressable
-              style={({ pressed }) => [
-                styles.ctaButton,
-                { backgroundColor: theme.colors.primaryDeep, opacity: pressed ? 0.82 : 1 },
-              ]}
+              style={flatStyle([styles.ctaButton, { backgroundColor: theme.colors.primaryDeep }])}
             >
               <AppText variant="bodyStrong" color="onPrimary">
                 Destek merkezi

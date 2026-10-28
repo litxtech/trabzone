@@ -102,7 +102,7 @@ export function WebAboutPage() {
           </AppText>
           <View style={styles.heroActions}>
             <Link href={'/register' as Href} asChild>
-              <Pressable style={({ pressed }) => [styles.primaryButton, { opacity: pressed ? 0.82 : 1 }]}>
+              <Pressable style={styles.primaryButton}>
                 <Ionicons name="sparkles-outline" size={16} color="#08111F" />
                 <AppText variant="bodyStrong" color="#08111F">
                   Hesap oluştur
@@ -110,7 +110,7 @@ export function WebAboutPage() {
               </Pressable>
             </Link>
             <Link href={'/contact' as Href} asChild>
-              <Pressable style={({ pressed }) => [styles.ghostButton, { opacity: pressed ? 0.82 : 1 }]}>
+              <Pressable style={styles.ghostButton}>
                 <Ionicons name="mail-outline" size={16} color="#FFFFFF" />
                 <AppText variant="bodyStrong" color="#FFFFFF">
                   İletişime geç

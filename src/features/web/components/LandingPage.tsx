@@ -3,6 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, type Href } from 'expo-router';
 import { useEffect, useMemo } from 'react';
 import {
+  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -25,6 +26,7 @@ import { useReduceMotion } from '@/perf/use-reduce-motion';
 import { useTheme } from '@/theme/ThemeProvider';
 
 import { useWebMeta } from '../use-web-meta';
+import { webPhotos } from '../assets';
 import { WebFooter } from './WebFooter';
 import { WebHeader } from './WebHeader';
 import {
@@ -270,10 +272,21 @@ export function LandingPage() {
       >
         {/* HERO */}
         <View nativeID="top" style={styles.hero}>
+          <Image
+            source={webPhotos.hero}
+            style={styles.heroImage}
+            resizeMode="cover"
+            accessibilityIgnoresInvertColors
+            accessibilityLabel="Trabzon şehir manzarası"
+          />
           <LinearGradient
-            colors={['#04070E', '#081228', '#0C1730']}
+            colors={['rgba(4,7,14,0.94)', 'rgba(8,18,40,0.88)', 'rgba(12,23,48,0.8)']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          />
+          <LinearGradient
+            colors={['transparent', 'rgba(4,7,14,0.55)', 'rgba(4,7,14,0.9)']}
             style={StyleSheet.absoluteFill}
           />
           <AnimatedGlow />
@@ -464,6 +477,28 @@ export function LandingPage() {
             <View style={styles.marketGrid}>
               {MARKET_TILES.map((tile) => (
                 <MarketplaceTile key={tile.label} icon={tile.icon} label={tile.label} accent={tile.accent} />
+              ))}
+            </View>
+            <View style={styles.photoRow}>
+              {[
+                { photo: webPhotos.market, label: 'Yerel ürünler' },
+                { photo: webPhotos.feed3, label: 'Şehirden kareler' },
+                { photo: webPhotos.estate, label: 'Emlak ve konut' },
+              ].map((item) => (
+                <View key={item.label} style={styles.photoCard}>
+                  <Image
+                    source={item.photo}
+                    style={styles.photo}
+                    resizeMode="cover"
+                    accessibilityIgnoresInvertColors
+                    accessibilityLabel={item.label}
+                  />
+                  <View style={styles.photoCaption}>
+                    <AppText variant="caption" color="#FFFFFF" style={styles.photoCaptionText}>
+                      {item.label}
+                    </AppText>
+                  </View>
+                </View>
               ))}
             </View>
             <View style={styles.marketFooter}>
@@ -677,6 +712,17 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
 
   hero: { overflow: 'hidden' },
+  heroImage: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    // RN Web, stil içinde ölçü verilmezse görselin doğal boyutunu kullanır;
+    // bu yüzden genişlik/yükseklik açıkça yüzde olarak verilir.
+    width: '100%',
+    height: '100%',
+  },
   heroInner: {
     width: '100%',
     maxWidth: 1280,
@@ -789,6 +835,30 @@ const styles = StyleSheet.create({
   privacyRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
 
   marketGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 11, marginTop: 4 },
+  photoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 6 },
+  photoCard: {
+    flexGrow: 1,
+    flexBasis: 220,
+    minWidth: 180,
+    height: 168,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(12,20,38,0.6)',
+  },
+  photo: {
+    width: '100%',
+    height: '100%',
+  },
+  photoCaption: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(6,10,20,0.62)',
+  },
+  photoCaptionText: { fontSize: 11.5, letterSpacing: 0.2 },
   marketFooter: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 20 },
   marketButton: {
     flexDirection: 'row',

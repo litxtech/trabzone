@@ -22,6 +22,7 @@ import type {
   ReservationStatus,
   RideAdminAuditEntry,
   RideAdminDispute,
+  RideAdminDriverApplication,
   RideAdminFinance,
   RideAdminIncident,
   RideAdminOffer,
@@ -1234,6 +1235,17 @@ export const adminDriverDecide = (userId: string, approve: boolean, reason?: str
     p_user_id: userId,
     p_approve: approve,
     p_reason: reason ?? null,
+  });
+
+export const adminDriverApplications = (input: {
+  status?: string | null;
+  limit?: number;
+  offset?: number;
+}) =>
+  call<Paged<RideAdminDriverApplication>>('ride_admin_driver_applications', {
+    p_status: input.status ?? 'pending',
+    p_limit: input.limit ?? 30,
+    p_offset: input.offset ?? 0,
   });
 
 export const adminVehicles = (input: { status?: string | null; limit?: number; offset?: number }) =>

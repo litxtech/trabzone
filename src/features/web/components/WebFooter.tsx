@@ -1,14 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Link, type Href } from 'expo-router';
-import { Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import {
+  Platform,
+  Pressable,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import { AppText, Logo, Wordmark } from '@/components/ui';
 
 import { openCookieSettings } from '../cookie-consent';
+import { flatStyle } from '../link-style';
 import { useWebsiteContent } from '@/features/web-content/hooks/use-web-content';
 
-const COLUMNS: { title: string; links: { label: string; href: string }[] }[] = [
-  {
+const COLUMNS: { title: string; links: { label: string; href: string }[] }[] = [  {
     title: 'Trabzone',
     links: [
       { label: 'Hakkımızda', href: '/about' },
@@ -45,11 +51,8 @@ const COLUMNS: { title: string; links: { label: string; href: string }[] }[] = [
 
 function FooterLink({ label, href }: { label: string; href: string }) {
   return (
-    <Link href={href as Href} asChild>
-      <Pressable
-        accessibilityRole="link"
-        style={({ pressed }) => [styles.link, { opacity: pressed ? 0.6 : 1 }]}
-      >
+    <Link href={href as Href} asChild style={flatStyle(styles.link)}>
+      <Pressable accessibilityRole="link" style={flatStyle(styles.link)}>
         <AppText variant="caption" color="#93A4C7">
           {label}
         </AppText>
@@ -182,7 +185,11 @@ export function WebFooter() {
             © {year} {operator}. Tüm hakları saklıdır.
           </AppText>
           <View style={styles.bottomActions}>
-            <Pressable accessibilityRole="button" onPress={openCookieSettings}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={openCookieSettings}
+              style={({ pressed }) => [styles.cookieButton, { opacity: pressed ? 0.6 : 1 }]}
+            >
               <AppText variant="caption" color="#93A4C7">
                 Çerez Ayarları
               </AppText>
@@ -194,6 +201,12 @@ export function WebFooter() {
         <AppText variant="caption" color="#5F6E8C" style={styles.disclaimer}>
           Trabzone bir sosyal keşif ve ilan platformudur. Marketplace üzerinden yapılan işlemlerde
           ödeme altyapısı etkin değildir; taraflar işlem öncesi gerekli kontrolleri yapmalıdır.
+        </AppText>
+        <AppText variant="caption" color="#5F6E8C" style={styles.disclaimer}>
+          Sayfa fotoğrafları Wikimedia Commons&apos;tan alınmıştır: Nezih Durmazlar (CC BY-SA 2.0),
+          Onur capıt, Dosseman, Balkanique, Resrk, Jaba1977, Kadıoğlu Muhsin (CC BY-SA 4.0),
+          Bertramz, Bjørn Christian Tørrissen (CC BY-SA 3.0), Radosław Botev (CC BY 3.0 pl),
+          Hamdigumus (CC0). Lisanslar: creativecommons.org/licenses.
         </AppText>
       </View>
     </View>
@@ -229,6 +242,7 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     paddingHorizontal: 11,
     paddingVertical: 8,
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as unknown as object) : {}),
   },
   storeDisabled: { opacity: 0.62 },
   storeHint: { fontSize: 9, letterSpacing: 0.3 },
@@ -236,8 +250,11 @@ const styles = StyleSheet.create({
   columnsDesktop: { flexDirection: 'row', justifyContent: 'space-between' },
   columnsMobile: { flexDirection: 'row', flexWrap: 'wrap' },
   column: { minWidth: 140, gap: 11 },
-  linkList: { gap: 7 },
-  link: { paddingVertical: 2 },
+  linkList: { gap: 4 },
+  link: {
+    paddingVertical: 6,
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as unknown as object) : {}),
+  },
   bottom: {
     borderTopWidth: 1,
     borderTopColor: 'rgba(120, 150, 220, 0.12)',
@@ -255,7 +272,12 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
   },
-  bottomActions: { flexDirection: 'row', alignItems: 'center', gap: 16, flexWrap: 'wrap' },
+  bottomActions: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  cookieButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as unknown as object) : {}),
+  },
   disclaimer: {
     width: '100%',
     maxWidth: 1240,

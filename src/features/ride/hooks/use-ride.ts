@@ -10,7 +10,10 @@ export function useRideProfile(enabled = true) {
     queryKey: ride.rideQueryKeys.profile,
     queryFn: () => unwrap(ride.getRideProfile()),
     enabled,
-    staleTime: 30_000,
+    // Yönetici sürücü/kimlik onayladığında kullanıcı ekranı yeniden açtığında
+    // güncel yetki durumunu görsün diye her bağlanmada tazelenir.
+    refetchOnMount: 'always',
+    staleTime: 15_000,
   });
 }
 
@@ -529,6 +532,14 @@ export function useRideAdminVerifications(input: { status?: string | null; offse
   return useQuery({
     queryKey: [...ride.rideQueryKeys.admin, 'verifications', input],
     queryFn: () => unwrap(ride.adminVerifications({ ...input, limit: 30 })),
+    staleTime: 15_000,
+  });
+}
+
+export function useRideAdminDriverApplications(input: { status?: string | null; offset?: number }) {
+  return useQuery({
+    queryKey: [...ride.rideQueryKeys.admin, 'driver-applications', input],
+    queryFn: () => unwrap(ride.adminDriverApplications({ ...input, limit: 30 })),
     staleTime: 15_000,
   });
 }

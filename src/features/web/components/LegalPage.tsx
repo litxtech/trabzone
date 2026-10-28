@@ -13,6 +13,7 @@ import { parsePolicyMarkdown } from '@/features/safety/utils/policy-markdown';
 import { PolicyBody } from '@/features/safety/components/PolicyBody';
 
 import { PUBLIC_LEGAL_PAGES, findPublicLegalPage } from '../../legal/catalog';
+import { flatStyle } from '../link-style';
 import { useWebMeta } from '../use-web-meta';
 import { WebFooter } from './WebFooter';
 import { WebHeader } from './WebHeader';
@@ -272,11 +273,10 @@ export function LegalPage({ slug, document: doc, isLoading }: Props) {
                   return (
                     <Link key={item.slug} href={item.path as Href} asChild>
                       <Pressable
-                        style={({ pressed }) => [
+                        style={flatStyle([
                           styles.asideLink,
                           active ? { backgroundColor: theme.colors.primarySoft } : null,
-                          { opacity: pressed ? 0.7 : 1 },
-                        ]}
+                        ])}
                       >
                         <AppText
                           variant={active ? 'bodyStrong' : 'body'}

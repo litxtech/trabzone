@@ -354,7 +354,17 @@ function pageJsonLd(page) {
 
 function headFor(page) {
   const url = absoluteUrl(page.path);
-  const verification = process.env.GOOGLE_SITE_VERIFICATION;
+  // Birden fazla dogrulama jetonu virgulle ayrilabilir; Search Console
+  // yeniden dogrulama baslattiginda jeton degisebildigi icin hepsi basilir.
+  const verificationTags = (process.env.GOOGLE_SITE_VERIFICATION || '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .map(
+      (token) =>
+        `<meta name="google-site-verification" content="${escapeHtml(token)}" />`,
+    )
+    .join('\n    ');
   const supabaseHost = (() => {
     try {
       return new URL(process.env.EXPO_PUBLIC_SUPABASE_URL || '').origin;
@@ -365,7 +375,7 @@ function headFor(page) {
 
   return `
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />
     <title>${escapeHtml(page.title)}</title>
     <meta name="description" content="${escapeHtml(page.description)}" />
     <meta name="robots" content="${ROBOTS_INDEX}" />
@@ -375,7 +385,7 @@ function headFor(page) {
     <meta name="color-scheme" content="dark light" />
     <meta name="apple-mobile-web-app-title" content="${SITE_NAME}" />
     <meta name="application-name" content="${SITE_NAME}" />
-    ${verification ? `<meta name="google-site-verification" content="${escapeHtml(verification)}" />` : ''}
+    ${verificationTags}
     <link rel="canonical" href="${url}" />
     <link rel="alternate" hreflang="tr-TR" href="${url}" />
     <link rel="alternate" hreflang="x-default" href="${url}" />
@@ -432,6 +442,42 @@ const BOOT_STYLES = `
       }
       @keyframes tz-boot-slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(280%); } }
       @media (prefers-reduced-motion: reduce) { .tz-boot__bar::after { animation: none; width: 100%; } }
+    </style>
+    <style id="tz-global-style">
+      /*
+       * Dokunma güvenilirliği:
+       * Mobil tarayıcılar, çift dokunuşla yakınlaştırmayı beklerken ilk
+       * dokunuşu ~300 ms geciktirir ve bu sırada bazı dokunuşları yutar.
+       * "touch-action: manipulation" bu beklemeyi kaldırır; butonların
+       * "bazen çalışıp bazen çalışmaması" şikâyetinin ana nedeni buydu.
+       */
+      html, body { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+      body { -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
+      *, *::before, *::after { -webkit-tap-highlight-color: transparent; }
+      a, button, input[type="submit"], [role="button"], [role="link"], [role="menuitem"], [role="tab"] {
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      /* Dokunma geri bildirimi JS'e bağlı olmadığı için her zaman çalışır. */
+      a:active, button:active, [role="button"]:active, [role="link"]:active {
+        opacity: 0.72;
+      }
+      a { text-decoration: none; color: inherit; }
+      input, textarea, select { touch-action: manipulation; }
+      a:focus-visible, button:focus-visible,
+      [role="button"]:focus-visible, [role="link"]:focus-visible {
+        outline: 2px solid #7fa0ff;
+        outline-offset: 2px;
+      }
+      ::selection { background: rgba(65, 105, 245, 0.35); }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.001ms !important;
+          scroll-behavior: auto !important;
+        }
+      }
     </style>`;
 
 const BOOT_MARKUP =
@@ -474,19 +520,27 @@ function inject(template, page) {
 }
 
 function sitemap(pages) {
+  // hreflang bağlantıları sitemap şemasında xhtml ad alanıyla verilir; Google
+  // tek dilli sitelerde de bu bildirimi kabul eder ve dil/ülke hedeflemesini
+  // netleştirir. Aynı adres x-default olarak işaretlenir.
   const urls = pages
-    .map(
-      (page) => `  <url>
-    <loc>${escapeXml(absoluteUrl(page.path))}</loc>
+    .sort((a, b) => Number(b.priority) - Number(a.priority))
+    .map((page) => {
+      const loc = escapeXml(absoluteUrl(page.path));
+      return `  <url>
+    <loc>${loc}</loc>
     <lastmod>${TODAY}</lastmod>
     <changefreq>${page.changefreq}</changefreq>
     <priority>${page.priority}</priority>
-  </url>`,
-    )
+    <xhtml:link rel="alternate" hreflang="tr-TR" href="${loc}" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="${loc}" />
+  </url>`;
+    })
     .join('\n');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
 ${urls}
 </urlset>
 `;
