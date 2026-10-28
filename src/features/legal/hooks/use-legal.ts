@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 
+import { supabase } from '@/services/supabase/client';
 import type { Result } from '@/utils/result';
 
 import * as legal from '../services/legal-service';
@@ -35,7 +37,9 @@ export function useLegalDocument(slug: string, locale: LegalLocale = 'tr') {
   return useQuery<LegalDocument | null, Error>({
     queryKey: legalKeys.document(slug, locale),
     queryFn: async () => unwrap(await legal.fetchLegalDocument(slug, locale)),
-    staleTime: 5 * 60_000,
+    // Yönetici yayınladığı an site taze metni göstermeli; uzun önbellek yok.
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
     enabled: slug.length > 0,
   });
 }
@@ -44,8 +48,39 @@ export function useLegalDocuments(locale: LegalLocale = 'tr') {
   return useQuery<LegalDocumentSummary[], Error>({
     queryKey: legalKeys.documents(locale),
     queryFn: async () => unwrap(await legal.fetchLegalDocuments(locale)),
-    staleTime: 10 * 60_000,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
   });
+}
+
+/**
+ * Yayınlanmış sözleşmeler değiştiğinde açık oturumları anında tazeler.
+ * Yönetim panelinden yapılan her yayın/geri alma/düzenleme, sayfa
+ * yenilenmeden siteye ve uygulamaya yansır.
+ */
+export function useLegalRealtime(enabled = true) {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+    const channel = supabase
+      .channel('legal-policy-versions')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'safety_policy_versions' },
+        () => {
+          void queryClient.invalidateQueries({ queryKey: ['legal'] });
+          void queryClient.invalidateQueries({ queryKey: ['safety'] });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [enabled, queryClient]);
 }
 
 export function usePendingAcceptances(enabled = true) {
@@ -150,6 +185,49 @@ export function useAdminArchiveLegalDocument() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['legal', 'admin'] });
       void queryClient.invalidateQueries({ queryKey: ['legal', 'documents'] });
+    },
+  });
+}
+
+/** Yayındaki sözleşmeyi geri alır; varsa önceki sürüm yeniden yürürlüğe girer. */
+export function useAdminUnpublishLegalDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { id: string; reason?: string | null }) =>
+      unwrap(await legal.adminUnpublishLegalDocument(input.id, input.reason)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['legal', 'admin'] });
+      void queryClient.invalidateQueries({ queryKey: ['legal', 'documents'] });
+      void queryClient.invalidateQueries({ queryKey: ['legal', 'document'] });
+    },
+  });
+}
+
+/** Tek sürümü kalıcı siler (kabul kaydı yoksa ve sürüm yayında değilse). */
+export function useAdminDeleteLegalVersion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { id: string }) =>
+      unwrap(await legal.adminDeleteLegalVersion(input.id)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['legal', 'admin'] });
+      void queryClient.invalidateQueries({ queryKey: ['legal', 'documents'] });
+      void queryClient.invalidateQueries({ queryKey: ['legal', 'document'] });
+    },
+  });
+}
+
+/** Belgeyi tüm sürümleriyle siler (hiç kabul kaydı yoksa). */
+export function useAdminDeleteLegalDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { slug: string; locale?: LegalLocale }) =>
+      unwrap(await legal.adminDeleteLegalDocument(input.slug, input.locale)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['legal', 'admin'] });
+      void queryClient.invalidateQueries({ queryKey: ['legal', 'documents'] });
+      void queryClient.invalidateQueries({ queryKey: ['legal', 'document'] });
+      void queryClient.invalidateQueries({ queryKey: ['legal', 'pending'] });
     },
   });
 }

@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState, type ReactNode } from 'react';
 import {
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -15,12 +16,14 @@ import { AppText, Badge, Button } from '@/components/ui';
 import { AdminPage, AdminSection, FilterChips } from '@/features/admin/components/AdminPage';
 import { useAdminToast } from '@/features/admin/components/AdminToast';
 import {
-  useAdminArchiveLegalDocument,
+  useAdminDeleteLegalDocument,
+  useAdminDeleteLegalVersion,
   useAdminLegalVersions,
   useAdminPublishLegalDocument,
   useAdminSaveLegalDocument,
+  useAdminUnpublishLegalDocument,
 } from '@/features/legal/hooks/use-legal';
-import { PUBLIC_LEGAL_PAGES } from '@/features/legal/catalog';
+import { PUBLIC_LEGAL_PAGES, legalPath } from '@/features/legal/catalog';
 import type { LegalAdminVersion, LegalDocType } from '@/features/legal/types';
 import { PolicyBody } from '@/features/safety/components/PolicyBody';
 import { parsePolicyMarkdown } from '@/features/safety/utils/policy-markdown';
@@ -39,6 +42,22 @@ const DOC_TYPES: { key: LegalDocType; label: string }[] = [
 const DOC_LABEL: Record<string, string> = Object.fromEntries(
   PUBLIC_LEGAL_PAGES.map((item) => [item.slug, item.title]),
 );
+
+/** Panelde gösterilecek genel site adresi (yayın sonrası kontrol için). */
+const SITE_URL = 'https://www.trabzoneapp.com';
+
+function publicHref(slug: string) {
+  return `${SITE_URL}${legalPath(slug)}`;
+}
+
+function openPublicPage(slug: string) {
+  const url = publicHref(slug);
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  void Linking.openURL(url).catch(() => undefined);
+}
 
 type Group = {
   slug: string;
@@ -133,7 +152,9 @@ export default function AdminLegalScreen() {
   const versionsQuery = useAdminLegalVersions(null);
   const save = useAdminSaveLegalDocument();
   const publish = useAdminPublishLegalDocument();
-  const archive = useAdminArchiveLegalDocument();
+  const unpublish = useAdminUnpublishLegalDocument();
+  const deleteVersion = useAdminDeleteLegalVersion();
+  const deleteDocument = useAdminDeleteLegalDocument();
 
   const [filter, setFilter] = useState<'all' | 'published' | 'draft'>('all');
   const [search, setSearch] = useState('');
@@ -144,6 +165,11 @@ export default function AdminLegalScreen() {
   const [compareBase, setCompareBase] = useState<string | null>(null);
   const [compareNext, setCompareNext] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<
+    | { kind: 'document'; slug: string; title: string; versions: number }
+    | { kind: 'version'; id: string; label: string }
+    | null
+  >(null);
 
   const groups = useMemo<Group[]>(() => {
     const map = new Map<string, LegalAdminVersion[]>();
@@ -235,16 +261,64 @@ export default function AdminLegalScreen() {
     );
   };
 
-  const runArchive = (id: string) => {
+  const runUnpublish = (id: string) => {
     setBusyId(id);
-    archive.mutate(
-      { id, reason: 'Yönetici tarafından arşivlendi.' },
+    unpublish.mutate(
+      { id, reason: 'Yönetici tarafından yayından kaldırıldı.' },
       {
-        onSuccess: () => {
-          toast.success('Sürüm arşivlendi. Kabul kayıtları korunuyor.');
+        onSuccess: (result) => {
+          toast.success(
+            result.previous_version
+              ? `Sürüm yayından kaldırıldı. v${result.previous_version} yeniden yürürlükte.`
+              : 'Sürüm yayından kaldırıldı. Belge artık sitede görünmüyor.',
+          );
           setVersionsFor(null);
         },
         onError: (error) => toast.error(error.message),
+        onSettled: () => setBusyId(null),
+      },
+    );
+  };
+
+  const confirmDelete = () => {
+    if (!deleteTarget) {
+      return;
+    }
+    const target = deleteTarget;
+    if (target.kind === 'document') {
+      setBusyId(target.slug);
+      deleteDocument.mutate(
+        { slug: target.slug },
+        {
+          onSuccess: (result) => {
+            haptics.success();
+            toast.success(`Belge silindi (${result.deleted_versions} sürüm). Siteden kaldırıldı.`);
+            setDeleteTarget(null);
+            setVersionsFor(null);
+          },
+          onError: (error) => {
+            haptics.error();
+            toast.error(error.message);
+          },
+          onSettled: () => setBusyId(null),
+        },
+      );
+      return;
+    }
+
+    setBusyId(target.id);
+    deleteVersion.mutate(
+      { id: target.id },
+      {
+        onSuccess: () => {
+          haptics.success();
+          toast.success('Sürüm silindi.');
+          setDeleteTarget(null);
+        },
+        onError: (error) => {
+          haptics.error();
+          toast.error(error.message);
+        },
         onSettled: () => setBusyId(null),
       },
     );
@@ -256,7 +330,7 @@ export default function AdminLegalScreen() {
       { id },
       {
         onSuccess: () => {
-          toast.success('Sürüm yayınlandı. Web ve mobil aynı kaynaktan güncellendi.');
+          toast.success('Sürüm yayınlandı. Değişiklik site ve uygulamada anında yayında.');
           setVersionsFor(null);
         },
         onError: (error) => toast.error(error.message),
@@ -382,7 +456,7 @@ export default function AdminLegalScreen() {
                       {group.draft ? <Badge label="Taslak" tone="warning" /> : null}
                     </View>
                     <AppText variant="caption" color="textTertiary">
-                      /{group.slug} · {group.versions.length} sürüm ·{' '}
+                      {legalPath(group.slug)} · {group.versions.length} sürüm ·{' '}
                       {active.effective_at
                         ? `Yürürlük ${formatDateTr(active.effective_at)}`
                         : 'Yürürlük tarihi yok'}
@@ -414,6 +488,39 @@ export default function AdminLegalScreen() {
                         setCompareNext(null);
                       }}
                     />
+                    <Button
+                      label="Sitede gör"
+                      size="sm"
+                      variant="outline"
+                      fullWidth={false}
+                      disabled={!group.published}
+                      leftIcon={
+                        <Ionicons
+                          name="open-outline"
+                          size={14}
+                          color={group.published ? theme.colors.primaryDeep : theme.colors.textTertiary}
+                        />
+                      }
+                      onPress={() => openPublicPage(group.slug)}
+                    />
+                    <Button
+                      label="Sil"
+                      size="sm"
+                      variant="danger"
+                      fullWidth={false}
+                      disabled={
+                        busyId === group.slug ||
+                        group.versions.some((version) => version.acceptance_count > 0)
+                      }
+                      onPress={() =>
+                        setDeleteTarget({
+                          kind: 'document',
+                          slug: group.slug,
+                          title: DOC_LABEL[group.slug] ?? group.title,
+                          versions: group.versions.length,
+                        })
+                      }
+                    />
                   </View>
                 </View>
               );
@@ -423,8 +530,10 @@ export default function AdminLegalScreen() {
       </AdminSection>
 
       <AdminSection title="Yayın kuralları" subtitle="Hukuki kontrol olmadan yayın yapılmaz.">
+        <Rule text="Yayınlanan değişiklik site ve uygulamada anında yayına girer; sayfa yenilemek gerekmez." />
         <Rule text="Yayınlanmış bir sürüm düzenlenemez; düzenleme her zaman yeni taslak oluşturur." />
-        <Rule text="Kabul kayıtları silinmez ve üzerine yazılmaz; eski sürümler arşivde kalır." />
+        <Rule text="Kabul kayıtları silinmez; kabul almış bir belge silinemez, yalnızca yayından kaldırılır." />
+        <Rule text="Yayından kaldırılan sürümün yerine varsa önceki yayınlanmış sürüm yürürlüğe döner." />
         <Rule text="Yeni metin yayınlanmadan önce hukuk danışmanı tarafından kontrol edilmelidir." />
         <Rule text="Onay gerektiren değişikliklerde kullanıcıya yeniden kabul ekranı gösterilir." />
       </AdminSection>
@@ -870,12 +979,28 @@ export default function AdminLegalScreen() {
                       ) : null}
                       {version.is_published ? (
                         <Button
-                          label="Arşivle"
+                          label="Yayından kaldır"
                           size="sm"
                           variant="danger"
                           fullWidth={false}
                           loading={busyId === version.id}
-                          onPress={() => runArchive(version.id)}
+                          onPress={() => runUnpublish(version.id)}
+                        />
+                      ) : null}
+                      {!version.is_published ? (
+                        <Button
+                          label="Sil"
+                          size="sm"
+                          variant="danger"
+                          fullWidth={false}
+                          disabled={version.acceptance_count > 0 || busyId === version.id}
+                          onPress={() =>
+                            setDeleteTarget({
+                              kind: 'version',
+                              id: version.id,
+                              label: `v${version.version}`,
+                            })
+                          }
                         />
                       ) : null}
                     </View>
@@ -952,6 +1077,74 @@ export default function AdminLegalScreen() {
                     setEditorTab('write');
                     setVersionsFor(null);
                   }}
+                />
+              </View>
+            </View>
+          ) : null}
+        </View>
+      </Modal>
+
+      {/* Silme onayı */}
+      <Modal
+        visible={Boolean(deleteTarget)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeleteTarget(null)}
+      >
+        <View style={styles.modalRoot}>
+          <Pressable
+            style={styles.backdrop}
+            onPress={() => setDeleteTarget(null)}
+            accessibilityLabel="Kapat"
+          />
+          {deleteTarget ? (
+            <View
+              style={[
+                styles.modalCard,
+                styles.confirmCard,
+                { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+              ]}
+            >
+              <View style={styles.modalHead}>
+                <View style={styles.flex}>
+                  <AppText variant="h3">Kalıcı olarak silinsin mi?</AppText>
+                  <AppText variant="caption" color="textTertiary">
+                    Bu işlem geri alınamaz.
+                  </AppText>
+                </View>
+                <Pressable onPress={() => setDeleteTarget(null)} accessibilityLabel="Kapat">
+                  <Ionicons name="close" size={22} color={theme.colors.textSecondary} />
+                </Pressable>
+              </View>
+
+              <View style={styles.form}>
+                <View style={[styles.notice, { backgroundColor: theme.colors.dangerSoft }]}>
+                  <Ionicons name="warning-outline" size={18} color={theme.colors.danger} />
+                  <AppText variant="caption" color="textSecondary" style={styles.flex}>
+                    {deleteTarget.kind === 'document'
+                      ? `“${deleteTarget.title}” belgesi ${deleteTarget.versions} sürümüyle birlikte veritabanından silinecek ve siteden kaldırılacak.`
+                      : `${deleteTarget.label} sürümü veritabanından silinecek.`}
+                  </AppText>
+                </View>
+                <AppText variant="caption" color="textTertiary">
+                  Kullanıcı kabul kaydı bulunan belgeler silinemez; bu durumda “Yayından kaldır”
+                  kullanılır ve kabul kayıtları korunur.
+                </AppText>
+              </View>
+
+              <View style={styles.modalFooter}>
+                <Button
+                  label="Vazgeç"
+                  variant="outline"
+                  fullWidth={false}
+                  onPress={() => setDeleteTarget(null)}
+                />
+                <Button
+                  label="Kalıcı olarak sil"
+                  variant="danger"
+                  fullWidth={false}
+                  loading={busyId !== null}
+                  onPress={confirmDelete}
                 />
               </View>
             </View>
@@ -1135,6 +1328,7 @@ const styles = StyleSheet.create({
   rowActions: { flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap' },
   rowActionsCompact: { justifyContent: 'flex-start' },
   error: { flexDirection: 'row', alignItems: 'center', gap: 9, padding: 12, borderRadius: 10 },
+  notice: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, padding: 12, borderRadius: 10 },
   rule: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
   modalRoot: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 14 },
   backdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(7,12,24,0.62)' },

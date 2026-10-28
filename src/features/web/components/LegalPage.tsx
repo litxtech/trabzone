@@ -7,20 +7,23 @@ import { AppText, Button, Card, Skeleton } from '@/components/ui';
 import { useAuthStatus } from '@/stores/auth-store';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatDateTr } from '@/utils/date';
-import { usePendingAcceptances, useRecordAcceptance } from '@/features/legal/hooks/use-legal';
+import {
+  useLegalDocuments,
+  useLegalRealtime,
+  usePendingAcceptances,
+  useRecordAcceptance,
+} from '@/features/legal/hooks/use-legal';
 import type { LegalDocument } from '@/features/legal/types';
 import { parsePolicyMarkdown } from '@/features/safety/utils/policy-markdown';
 import { PolicyBody } from '@/features/safety/components/PolicyBody';
 
-import { PUBLIC_LEGAL_PAGES, findPublicLegalPage } from '../../legal/catalog';
+import { buildLegalDirectory, groupLegalDirectory, legalPath } from '../../legal/catalog';
 import { flatStyle } from '../link-style';
 import { useWebMeta } from '../use-web-meta';
 import { WebFooter } from './WebFooter';
 import { WebHeader } from './WebHeader';
 
 type Props = { slug: string; document?: LegalDocument | null; isLoading?: boolean };
-
-const CATEGORY_ORDER = ['Sözleşmeler', 'Veri ve Gizlilik', 'Güvenlik', 'Platform Kuralları'] as const;
 
 /**
  * Herkese açık hukuki belge görüntüleyicisi. Metinler Supabase'de sürümlenmiş
@@ -31,8 +34,13 @@ export function LegalPage({ slug, document: doc, isLoading }: Props) {
   const { theme } = useTheme();
   const authStatus = useAuthStatus();
   const isAuthed = authStatus === 'authenticated';
-  const catalogItem = findPublicLegalPage(slug);
   const [copied, setCopied] = useState(false);
+
+  // Panelden eklenen belgeler menüde anında görünsün.
+  const { data: documents } = useLegalDocuments('tr');
+  useLegalRealtime(true);
+  const directory = useMemo(() => buildLegalDirectory(documents), [documents]);
+  const directoryItem = directory.find((item) => item.slug === slug) ?? null;
 
   const { data: pending } = usePendingAcceptances(isAuthed);
   const record = useRecordAcceptance();
@@ -44,14 +52,15 @@ export function LegalPage({ slug, document: doc, isLoading }: Props) {
   const docTitle = doc?.title
     ? doc.title.replace(/^trabzone\s+/i, '').replace(/\s+·\s+Trabzone$/i, '')
     : null;
+  const fallbackTitle = directoryItem?.title ?? 'Hukuki Belge';
 
   useWebMeta({
-    title: `${docTitle ?? catalogItem?.title ?? 'Politika'} · Trabzone`,
+    title: `${docTitle ?? fallbackTitle} · Trabzone`,
     description:
       doc?.summary ??
-      catalogItem?.description ??
+      directoryItem?.description ??
       'Trabzone hukuki politikaları, veri koruma ve topluluk kuralları.',
-    path: catalogItem?.path ?? `/policy/${slug}`,
+    path: legalPath(slug),
     type: 'article',
   });
 
@@ -65,10 +74,7 @@ export function LegalPage({ slug, document: doc, isLoading }: Props) {
     });
   };
 
-  const grouped = CATEGORY_ORDER.map((category) => ({
-    category,
-    items: PUBLIC_LEGAL_PAGES.filter((item) => item.category === category),
-  })).filter((group) => group.items.length > 0);
+  const grouped = groupLegalDirectory(directory);
 
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
@@ -101,11 +107,11 @@ export function LegalPage({ slug, document: doc, isLoading }: Props) {
             style={styles.heroTitle}
             accessibilityRole="header"
           >
-            {docTitle ?? catalogItem?.title ?? 'Hukuki Belge'}
+            {docTitle ?? fallbackTitle}
           </AppText>
-          {doc?.summary ?? catalogItem?.description ? (
+          {doc?.summary ?? directoryItem?.description ? (
             <AppText variant="body" color="#A9BDE2" style={styles.heroSummary}>
-              {doc?.summary ?? catalogItem?.description}
+              {doc?.summary ?? directoryItem?.description}
             </AppText>
           ) : null}
 

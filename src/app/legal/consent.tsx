@@ -7,7 +7,7 @@ import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { AppText, Button, Card, Skeleton } from '@/components/ui';
 import { AuthGate } from '@/features/auth/components/AuthGate';
 import { AuthScreen } from '@/features/auth/components/AuthScreen';
-import { PUBLIC_LEGAL_PAGES } from '@/features/legal/catalog';
+import { legalPath } from '@/features/legal/catalog';
 import {
   legalKeys,
   usePendingAcceptances,
@@ -29,7 +29,7 @@ export default function LegalConsentRoute() {
 }
 
 function documentPath(slug: string) {
-  return PUBLIC_LEGAL_PAGES.find((item) => item.slug === slug)?.path ?? `/policy/${slug}`;
+  return legalPath(slug);
 }
 
 function LegalConsentScreen() {
