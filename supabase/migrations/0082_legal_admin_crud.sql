@@ -183,6 +183,56 @@ revoke all on function public.legal_admin_delete_document(text, text) from publi
 grant execute on function public.legal_admin_delete_document(text, text) to authenticated;
 
 -- ---------------------------------------------------------------------------
+-- 3b. Yayınla: yayından kaldırılmış sürüm yeniden yayınlanabilmeli
+--     (önceki tanım `archived_at` alanını temizlemediği için belge
+--      is_published=true olsa da sitede görünmüyordu)
+-- ---------------------------------------------------------------------------
+create or replace function public.legal_admin_publish(
+  p_id uuid,
+  p_effective_at timestamptz default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_row public.safety_policy_versions%rowtype;
+begin
+  perform public.require_permission('safety.policy.manage');
+
+  select * into v_row from public.safety_policy_versions where id = p_id for update;
+  if not found then
+    raise exception 'document_not_found' using errcode = '22023';
+  end if;
+  if v_row.is_published and v_row.archived_at is null then
+    raise exception 'already_published' using errcode = '22023';
+  end if;
+
+  update public.safety_policy_versions
+     set is_published = true,
+         archived_at = null,
+         published_at = now(),
+         effective_at = coalesce(p_effective_at, now()),
+         updated_by = v_uid
+   where id = p_id
+   returning * into v_row;
+
+  perform public.safety_audit(
+    'legal.publish', 'Hukuki belge yayınlandı', 'legal_document',
+    v_row.slug || ' v' || v_row.version,
+    jsonb_build_object('version', v_row.version, 'locale', v_row.locale)
+  );
+
+  return to_jsonb(v_row);
+end
+$$;
+
+revoke all on function public.legal_admin_publish(uuid, timestamptz) from public, anon;
+grant execute on function public.legal_admin_publish(uuid, timestamptz) to authenticated;
+
+-- ---------------------------------------------------------------------------
 -- 4. Katalog: yeni belgeler de listelensin (doc_type + kabul bilgisi ile)
 -- ---------------------------------------------------------------------------
 create or replace function public.legal_documents(p_locale text default 'tr')
@@ -231,6 +281,11 @@ create policy safety_policies_select_published_public
   for select
   to anon, authenticated
   using (is_published and archived_at is null);
+
+-- Realtime, abonenin tablo üzerinde SELECT yetkisi olmasını da ister.
+-- RLS politikası yalnızca yayınlanmış satırları açar; belge metinleri
+-- zaten `legal_document` üzerinden herkese açıktır.
+grant select on public.safety_policy_versions to anon;
 
 do $$
 begin
