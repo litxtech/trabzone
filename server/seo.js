@@ -419,6 +419,13 @@ function buildNoscriptHtml(listing, model) {
   `;
 }
 
+function availabilityFor(listing) {
+  if (listing.status === 'sold') {
+    return 'https://schema.org/SoldOut';
+  }
+  return 'https://schema.org/InStock';
+}
+
 function buildJsonLd(listing, model) {
   const graph = [
     {
@@ -457,7 +464,7 @@ function buildJsonLd(listing, model) {
         '@type': 'Offer',
         price: priceValue,
         priceCurrency: listing.currency || 'TRY',
-        availability: 'https://schema.org/InStock',
+        availability: availabilityFor(listing),
         url: model.canonical,
       },
     });
@@ -482,7 +489,7 @@ function buildJsonLd(listing, model) {
         '@type': 'Offer',
         price: priceValue,
         priceCurrency: listing.currency || 'TRY',
-        availability: 'https://schema.org/InStock',
+        availability: availabilityFor(listing),
         url: model.canonical,
       },
     });
