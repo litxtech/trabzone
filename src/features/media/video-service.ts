@@ -152,20 +152,69 @@ export type VideoSource = {
 };
 
 /**
- * Video kodlaması cihazda tek sırada çalışır. Çoklu video seçiminde aynı anda
- * birkaç 1080p kodlama başlatmak encoder'ı kilitler, cihazı ısıtır ve toplam
- * süreyi uzatır; sıralı çalışmada ilk video çok daha erken hazır olur.
+ * Cihazdaki **bütün** ağır video işleri (kodlama ve kapak üretimi) tek sırada
+ * çalışır.
+ *
+ * Neden: kapak üretimi de kodlama da native tarafta bir video decoder açar.
+ * İkisi aynı anda başladığında Android'de MediaCodec bileşeni ayıramıyor
+ * ("Failed to allocate component instance"), iOS'ta AVAssetReader/Writer
+ * çakışıyor ve bellek tepesi ikiye katlanıyor. Bu durumda hata JS'e değil,
+ * doğrudan native katmana düşüyor: uygulama kapanıyor. Sıraya almak toplam
+ * süreyi yalnızca birkaç yüz milisaniye uzatır, karşılığında çökme riskini
+ * ortadan kaldırır. Çoklu video seçiminde de encoder'ı kilitlenmekten korur.
  */
-let encodeChain: Promise<unknown> = Promise.resolve();
+let nativeVideoChain: Promise<unknown> = Promise.resolve();
 
-function runExclusiveEncode<T>(work: () => Promise<T>): Promise<T> {
-  const result = encodeChain.then(work, work);
-  encodeChain = result.then(
+function runExclusiveNativeVideo<T>(work: () => Promise<T>): Promise<T> {
+  const result = nativeVideoChain.then(work, work);
+  nativeVideoChain = result.then(
     () => undefined,
     () => undefined,
   );
   return result;
 }
+
+/**
+ * Native bir promise hiç çözülmezse paylaşım sonsuza kadar beklemesin.
+ *
+ * iOS'ta `getVideoMetaData` video track'i olmayan bir dosyada `resolve` veya
+ * `reject` çağırmıyor; promise sonsuza kadar askıda kalıyor ve "Paylaş"
+ * düğmesi kalıcı olarak "hazırlanıyor" ekranında kilitleniyordu.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label}-timeout`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(`${label}-failed`));
+      },
+    );
+  });
+}
+
+/** Meta okuma kısa bir sürede bitmezse seçim anındaki bilgilerle devam edilir. */
+const META_TIMEOUT_MS = 4_000;
+/** Kapak üretimi bu sürede bitmezse kapaksız devam edilir. */
+const POSTER_TIMEOUT_MS = 8_000;
+/**
+ * Kodlama ilerlemesi bu süre boyunca hiç gelmezse iş takılmış sayılır.
+ *
+ * MediaCodec/AVAssetWriter bazı bozuk kaynaklarda hatayı bildirmeden kilitlenir
+ * ve promise asla sonuçlanmaz. Süre her ilerleme olayında sıfırlandığı için
+ * uzun ama sağlıklı kodlamalar kesilmez.
+ */
+const ENCODE_STALL_MS = 90_000;
+
+/**
+ * Süren kodlamaların iptal kimlikleri: video URI'si → native cancellation id.
+ * "İptal" düğmesi hem JS tarafındaki beklemeyi hem native encoder'ı durdurur.
+ */
+const activeEncodes = new Map<string, string>();
 
 export type PreparedVideo = {
   uri: string;
@@ -220,7 +269,11 @@ async function readNativeMeta(
   uri: string,
 ): Promise<NativeVideoMeta | null> {
   try {
-    return (await compressor.getVideoMetaData(uri)) as NativeVideoMeta;
+    return (await withTimeout(
+      compressor.getVideoMetaData(uri) as Promise<NativeVideoMeta>,
+      META_TIMEOUT_MS,
+      'meta',
+    )) as NativeVideoMeta;
   } catch {
     return null;
   }
@@ -434,6 +487,130 @@ async function runPrepare(
   }
 }
 
+/**
+ * Tek bir videoyu yeniden kodlar.
+ *
+ * Sarmalayıcının üç görevi var:
+ * 1. İlerleme akmaya devam ettiği sürece dokunmamak, tamamen durduğunda
+ *    (native kilitlenme) işi iptal edip orijinal dosyayla devam etmek.
+ * 2. Native iptal kimliğini kaydetmek; "İptal" düğmesi gerçek encoder'ı
+ *    durdurabilsin.
+ * 3. Sözü her koşulda sonuçlandırmak. Sıradaki videoların (ve "Paylaş"
+ *    düğmesinin) sonsuza kadar beklememesi buna bağlı.
+ */
+function compressWithStallGuard(
+  compressor: CompressorModule,
+  uri: string,
+  bitrate: number,
+  maxSize: number,
+  report: (ratio: number) => void,
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    let settled = false;
+    let cancellationId: string | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const clear = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      activeEncodes.delete(uri);
+    };
+
+    const settle = (fn: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clear();
+      fn();
+    };
+
+    const arm = () => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+      timer = setTimeout(() => {
+        // Takılan native işi serbest bırak: aksi halde encoder açık kalır ve
+        // sonraki videolar onun arkasında bekler.
+        stopNativeCompression(compressor, cancellationId);
+        settle(() => reject(new Error('encode-stalled')));
+      }, ENCODE_STALL_MS);
+    };
+
+    arm();
+
+    try {
+      compressor.Video.compress(
+        uri,
+        {
+          compressionMethod: 'manual',
+          maxSize,
+          bitrate,
+          // Süre sınırı yok: her video, uzunluğu ne olursa olsun işlenir.
+          minimumFileSizeForCompress: 0,
+          progressDivider: 4,
+          getCancellationId: (id) => {
+            cancellationId = id;
+            activeEncodes.set(uri, id);
+          },
+        },
+        (progress) => {
+          arm();
+          report(Math.max(0, Math.min(progress, 1)));
+        },
+      ).then(
+        (output) => settle(() => resolve(output)),
+        (error: unknown) => settle(() => reject(error)),
+      );
+    } catch (error) {
+      settle(() => reject(error));
+    }
+  });
+}
+
+function stopNativeCompression(compressor: CompressorModule, cancellationId: string | null) {
+  if (!cancellationId) {
+    return;
+  }
+  try {
+    compressor.Video.cancelCompression(cancellationId);
+  } catch {
+    // Native iptal desteklenmiyorsa JS tarafı yine de bırakır.
+  }
+}
+
+/**
+ * Süren video hazırlığını iptal eder.
+ *
+ * Kullanıcı paylaşımdan vazgeçtiğinde çağrılır: native encoder durur, geçici
+ * çıktı dosyası salınır ve önbellek temizlenir. Böylece iptal edilen video
+ * arka planda çalışmaya devam edip cihazı yormaz.
+ */
+export function cancelVideoPreparation(uri: string): void {
+  const cancellationId = activeEncodes.get(uri) ?? null;
+  activeEncodes.delete(uri);
+
+  // Bu URI'ye ait önbellek kayıtları düşürülür ki yeniden denendiğinde iş
+  // baştan ve temiz biçimde başlasın.
+  const prefix = `${uri}|`;
+  for (const key of Array.from(preparedCache.keys())) {
+    if (key.startsWith(prefix)) {
+      preparedCache.delete(key);
+    }
+  }
+
+  if (!cancellationId) {
+    return;
+  }
+  void loadVideoCompressor().then((compressor) => {
+    if (compressor) {
+      stopNativeCompression(compressor, cancellationId);
+    }
+  });
+}
+
 async function encodeForUpload(
   source: VideoSource,
   maxLongSide: number,
@@ -487,19 +664,8 @@ async function encodeForUpload(
     maxSize: number,
   ): Promise<PreparedVideo | null> => {
     try {
-      const uri = await runExclusiveEncode(() =>
-        compressor.Video.compress(
-          source.uri,
-          {
-            compressionMethod: 'manual',
-            maxSize,
-            bitrate,
-            // Süre sınırı yok: her video, uzunluğu ne olursa olsun işlenir.
-            minimumFileSizeForCompress: 0,
-            progressDivider: 4,
-          },
-          (progress) => report(Math.max(0, Math.min(progress, 1))),
-        ),
+      const uri = await runExclusiveNativeVideo(() =>
+        compressWithStallGuard(compressor, source.uri, bitrate, maxSize, report),
       );
       const encodedNative = await readNativeMeta(compressor, uri);
       return {
@@ -583,6 +749,14 @@ async function encodeForUpload(
 const posterCache = new Map<string, string>();
 
 /**
+ * Daha önce üretilmiş kapak varsa senkron olarak döner. İyimser (henüz
+ * yüklenmemiş) video balonunun beklemeden kapak göstermesini sağlar.
+ */
+export function cachedVideoPoster(uri: string, timeMs = 400): string | null {
+  return posterCache.get(`${uri}#${timeMs}`) ?? null;
+}
+
+/**
  * Video için yerel bir kapak (ilk kare) üretir. Sonuç ekranlar arasında
  * paylaşılan bir bellek önbelleğinde tutulur; aynı video için tekrar
  * üretilmez.
@@ -601,10 +775,16 @@ export async function generateVideoPoster(
     return null;
   }
   try {
-    const thumbnail = await thumbnails.getThumbnailAsync(uri, {
-      time: Math.max(0, Math.min(timeMs, 1000)),
-      quality: 0.72,
-    });
+    const thumbnail = await runExclusiveNativeVideo(() =>
+      withTimeout(
+        thumbnails.getThumbnailAsync(uri, {
+          time: Math.max(0, Math.min(timeMs, 1000)),
+          quality: 0.72,
+        }),
+        POSTER_TIMEOUT_MS,
+        'poster',
+      ),
+    );
     posterCache.set(key, thumbnail.uri);
     return {
       uri: thumbnail.uri,

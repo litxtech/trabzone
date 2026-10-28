@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useState } from 'react';
-import { FlatList, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { FlatList, Keyboard, Modal, Pressable, StyleSheet, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useKeyboardBottomInset } from '@/providers/keyboard';
 import { useTheme } from '@/theme/ThemeProvider';
 
 import { AppText } from './AppText';
@@ -29,7 +31,25 @@ export function SelectSheet({
 }: SelectSheetProps) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboardInset = useKeyboardBottomInset();
   const [query, setQuery] = useState('');
+
+  // Panel açılırken alttaki ekranda açık klavye varsa kapatılır; aksi halde
+  // seçim listesi klavyenin arkasında kalıyordu. Arama kutusu odaklanınca
+  // klavye yeniden açılır ve panel klavyenin üstüne kayar.
+  useEffect(() => {
+    if (!visible) {
+      return;
+    }
+    Keyboard.dismiss();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setQuery('');
+  }, [visible]);
+
+  const close = () => {
+    Keyboard.dismiss();
+    onClose();
+  };
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('tr-TR');
@@ -46,15 +66,15 @@ export function SelectSheet({
       visible={visible}
       transparent
       animationType="slide"
-      onRequestClose={onClose}
+      onRequestClose={close}
       statusBarTranslucent
     >
-      <View style={styles.root}>
+      <Animated.View style={[styles.root, keyboardInset]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Seçimi kapat"
           style={[styles.backdrop, { backgroundColor: theme.colors.overlay }]}
-          onPress={onClose}
+          onPress={close}
         />
         <View
           style={[
@@ -74,7 +94,7 @@ export function SelectSheet({
               accessibilityRole="button"
               accessibilityLabel="Kapat"
               hitSlop={10}
-              onPress={onClose}
+              onPress={close}
             >
               <Ionicons name="close" size={22} color={theme.colors.textSecondary} />
             </Pressable>
@@ -138,7 +158,7 @@ export function SelectSheet({
             }}
           />
         </View>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }

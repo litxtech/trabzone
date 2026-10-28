@@ -7,7 +7,12 @@ import {
   type PropsWithChildren,
 } from 'react';
 import { Keyboard, Platform } from 'react-native';
-import { useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
+import {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+  type SharedValue,
+} from 'react-native-reanimated';
 
 import { useReduceMotion } from '@/perf/use-reduce-motion';
 
@@ -87,4 +92,16 @@ export function useKeyboard(): KeyboardContextValue {
     throw new Error('useKeyboard must be used inside <KeyboardProvider>');
   }
   return context;
+}
+
+/**
+ * Alt panel (Modal) köküne uygulanan animasyonlu alt boşluk.
+ *
+ * Modal ayrı bir pencerede açıldığı için Android'de pencere klavye açılınca
+ * küçülmüyor; iOS'ta da klavye pencereyi itmiyor. Paneli klavyenin üstünde
+ * tutmak için klavye yüksekliğini kök kapsayıcıda ayırıyoruz.
+ */
+export function useKeyboardBottomInset() {
+  const { height } = useKeyboard();
+  return useAnimatedStyle(() => ({ paddingBottom: height.value }));
 }

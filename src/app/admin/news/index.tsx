@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, Switch, useWindowDimensions, View } from 'react-native';
 
@@ -9,9 +9,11 @@ import { ReasonDialog } from '@/features/admin/components/ReasonDialog';
 import { StatCard, StatGrid } from '@/features/admin/components/StatCard';
 import { useAdminToast } from '@/features/admin/components/AdminToast';
 import { NewsReviewModal } from '@/features/admin/components/news/NewsReviewModal';
+import { NewsSourceEditModal } from '@/features/admin/components/news/NewsSourceEditModal';
 import {
   useAdminNewsCosts,
   useAdminNewsDiagnostics,
+  useAdminNewsEditorialQueue,
   useAdminNewsErrors,
   useAdminNewsOverview,
   useAdminNewsPublisherBind,
@@ -21,11 +23,13 @@ import {
   useAdminNewsRuns,
   useAdminNewsSettings,
   useAdminNewsSettingsSave,
+  useAdminNewsSourceEnrich,
   useAdminNewsSourceToggle,
   useAdminNewsSources,
 } from '@/features/admin/hooks/use-admin-news';
 import { useAdminMe } from '@/features/admin/hooks/use-admin';
 import type {
+  NewsEditorialQueueItem,
   NewsQueueState,
   NewsReviewItem,
   NewsRun,
@@ -37,11 +41,12 @@ import type {
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatDateTimeTr } from '@/utils/date';
 
-type Tab = 'panel' | 'review' | 'settings' | 'sources' | 'costs';
+type Tab = 'panel' | 'review' | 'editorial' | 'settings' | 'sources' | 'costs';
 
 const TABS: { key: Tab; label: string; icon: ComponentProps<typeof Ionicons>['name'] }[] = [
   { key: 'panel', label: 'Kontrol Paneli', icon: 'grid-outline' },
   { key: 'review', label: 'Haber İnceleme', icon: 'shield-checkmark-outline' },
+  { key: 'editorial', label: 'Haber Geliştirme', icon: 'create-outline' },
   { key: 'settings', label: 'Otomasyon Ayarları', icon: 'options-outline' },
   { key: 'sources', label: 'Kaynak ve Lisans', icon: 'library-outline' },
   { key: 'costs', label: 'Maliyet ve Günlük', icon: 'analytics-outline' },
@@ -99,6 +104,23 @@ type SettingsForm = {
   notify_daily_cap: string;
   notify_quiet_start: string;
   notify_quiet_end: string;
+  body_format_default: NewsSettings['body_format_default'];
+  short_min_words: string;
+  short_max_words: string;
+  standard_min_words: string;
+  standard_max_words: string;
+  extended_min_words: string;
+  extended_max_words: string;
+  title_min_chars: string;
+  title_max_chars: string;
+  spot_min_chars: string;
+  spot_max_chars: string;
+  preview_lines: string;
+  reading_min_words: string;
+  auto_subheads: boolean;
+  require_source_verification: boolean;
+  quality_check_enabled: boolean;
+  source_display_mode: NewsSettings['source_display_mode'];
 };
 
 function formFromSettings(settings: NewsSettings): SettingsForm {
@@ -126,6 +148,23 @@ function formFromSettings(settings: NewsSettings): SettingsForm {
     notify_daily_cap: String(settings.notify_daily_cap),
     notify_quiet_start: String(settings.notify_quiet_start),
     notify_quiet_end: String(settings.notify_quiet_end),
+    body_format_default: settings.body_format_default,
+    short_min_words: String(settings.short_min_words),
+    short_max_words: String(settings.short_max_words),
+    standard_min_words: String(settings.standard_min_words),
+    standard_max_words: String(settings.standard_max_words),
+    extended_min_words: String(settings.extended_min_words),
+    extended_max_words: String(settings.extended_max_words),
+    title_min_chars: String(settings.title_min_chars),
+    title_max_chars: String(settings.title_max_chars),
+    spot_min_chars: String(settings.spot_min_chars),
+    spot_max_chars: String(settings.spot_max_chars),
+    preview_lines: String(settings.preview_lines),
+    reading_min_words: String(settings.reading_min_words),
+    auto_subheads: settings.auto_subheads,
+    require_source_verification: settings.require_source_verification,
+    quality_check_enabled: settings.quality_check_enabled,
+    source_display_mode: settings.source_display_mode,
   };
 }
 
@@ -167,6 +206,23 @@ function toPayload(form: SettingsForm, settings: NewsSettings): NewsSettingsProg
     notify_daily_cap: intValue(form.notify_daily_cap, settings.notify_daily_cap),
     notify_quiet_start: intValue(form.notify_quiet_start, settings.notify_quiet_start),
     notify_quiet_end: intValue(form.notify_quiet_end, settings.notify_quiet_end),
+    body_format_default: form.body_format_default,
+    short_min_words: intValue(form.short_min_words, settings.short_min_words),
+    short_max_words: intValue(form.short_max_words, settings.short_max_words),
+    standard_min_words: intValue(form.standard_min_words, settings.standard_min_words),
+    standard_max_words: intValue(form.standard_max_words, settings.standard_max_words),
+    extended_min_words: intValue(form.extended_min_words, settings.extended_min_words),
+    extended_max_words: intValue(form.extended_max_words, settings.extended_max_words),
+    title_min_chars: intValue(form.title_min_chars, settings.title_min_chars),
+    title_max_chars: intValue(form.title_max_chars, settings.title_max_chars),
+    spot_min_chars: intValue(form.spot_min_chars, settings.spot_min_chars),
+    spot_max_chars: intValue(form.spot_max_chars, settings.spot_max_chars),
+    preview_lines: intValue(form.preview_lines, settings.preview_lines),
+    reading_min_words: intValue(form.reading_min_words, settings.reading_min_words),
+    auto_subheads: form.auto_subheads,
+    require_source_verification: form.require_source_verification,
+    quality_check_enabled: form.quality_check_enabled,
+    source_display_mode: form.source_display_mode,
   };
 }
 
@@ -184,13 +240,19 @@ export default function AdminNewsScreen() {
   const limit = 20;
   const [selected, setSelected] = useState<NewsReviewItem | null>(null);
   const [confirmAction, setConfirmAction] = useState<'run' | 'diagnostics' | 'bind' | null>(null);
-  const [form, setForm] = useState<SettingsForm | null>(null);
+  const [formEdits, setFormEdits] = useState<SettingsForm | null>(null);
   const [sourceFilter, setSourceFilter] = useState<'all' | NewsSourceKind>('all');
+  const [editItem, setEditItem] = useState<NewsEditorialQueueItem | null>(null);
 
   const overview = useAdminNewsOverview();
   const runs = useAdminNewsRuns(12);
   const settings = useAdminNewsSettings();
+  // Sunucu verisi geldiğinde form türetilir; düzenlemeler ayrı tutulur ve
+  // kaydettikten sonra sıfırlanır. Böylece effect içinde setState gerekmez.
+  const form = formEdits ?? (settings.data ? formFromSettings(settings.data) : null);
+  const setForm = setFormEdits;
   const review = useAdminNewsReview(reviewState, limit, offset);
+  const editorial = useAdminNewsEditorialQueue(60);
   const detail = useAdminNewsReviewDetail(selected?.event_id ?? null);
   const sources = useAdminNewsSources();
   const costs = useAdminNewsCosts();
@@ -201,12 +263,7 @@ export default function AdminNewsScreen() {
   const diagnostics = useAdminNewsDiagnostics();
   const bindPublisher = useAdminNewsPublisherBind();
   const toggleSource = useAdminNewsSourceToggle();
-
-  useEffect(() => {
-    if (settings.data && !form) {
-      setForm(formFromSettings(settings.data));
-    }
-  }, [settings.data, form]);
+  const enrichSource = useAdminNewsSourceEnrich();
 
   const stats = overview.data;
   const filteredSources = useMemo(() => {
@@ -249,6 +306,7 @@ export default function AdminNewsScreen() {
     if (!form || !settings.data) return;
     try {
       await saveSettings.mutateAsync({ payload: toPayload(form, settings.data) });
+      setForm(null);
       toast.success('Otomasyon ayarları kaydedildi.');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Ayarlar kaydedilemedi.');
@@ -260,6 +318,24 @@ export default function AdminNewsScreen() {
       await toggleSource.mutateAsync({ id: source.id, active: !source.active });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Kaynak güncellenemedi.');
+    }
+  };
+
+  const quickEnrich = async (item: NewsEditorialQueueItem) => {
+    try {
+      const result = await enrichSource.mutateAsync(item.post_id);
+      if (result.ok !== true) {
+        toast.error(
+          String(result.message ?? 'Yeterli doğrulanmış kaynak bulunamadı; metin değiştirilmedi.'),
+        );
+        return;
+      }
+      const saved = (result.saved ?? {}) as Record<string, unknown>;
+      toast.success(
+        `Haber genişletildi · ${String(saved.word_count ?? '')} kelime · sürüm ${String(saved.version ?? '')}.`,
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Genişletme tamamlanamadı.');
     }
   };
 
@@ -482,6 +558,102 @@ export default function AdminNewsScreen() {
         </View>
       ) : null}
 
+      {tab === 'editorial' ? (
+        <View style={styles.stack}>
+          <AdminSection
+            title="Editoryal iyileştirme kuyruğu"
+            subtitle="Kısa veya kaynak metniyle yayımlanmış haberler. AI genişletme yalnızca yeni doğrulanmış kaynak bulursa çalışır; bulamazsa kayıt değişmez."
+            action={
+              <Badge
+                label={`${number.format(editorial.data?.items.length ?? 0)} haber`}
+                tone="neutral"
+              />
+            }
+          >
+            {editorial.isLoading ? (
+              <AppText variant="caption" color="textTertiary">
+                Haberler getiriliyor…
+              </AppText>
+            ) : editorial.isError ? (
+              <View style={styles.chips}>
+                <AppText variant="caption" color="danger">
+                  Kuyruk yüklenemedi.
+                </AppText>
+                <Button
+                  label="Tekrar dene"
+                  size="sm"
+                  variant="secondary"
+                  fullWidth={false}
+                  onPress={() => void editorial.refetch()}
+                />
+              </View>
+            ) : (editorial.data?.items.length ?? 0) === 0 ? (
+              <AppText variant="caption" color="textTertiary">
+                İyileştirme bekleyen haber yok.
+              </AppText>
+            ) : (
+              <View style={styles.listGap}>
+                {(editorial.data?.items ?? []).map((item) => (
+                  <View
+                    key={item.post_id}
+                    style={[
+                      styles.rowCard,
+                      { borderColor: theme.colors.border, backgroundColor: theme.colors.surface },
+                    ]}
+                  >
+                    <View style={styles.chips}>
+                      <Badge
+                        label={item.kind === 'ai' ? 'AI haber' : 'Kaynak haber'}
+                        tone={item.kind === 'ai' ? 'primary' : 'neutral'}
+                      />
+                      <Badge
+                        label={`${number.format(item.word_count)} kelime`}
+                        tone={item.word_count < 250 ? 'warning' : 'success'}
+                      />
+                      <Badge label={`Format: ${item.body_format}`} tone="neutral" />
+                      {item.needs_review ? <Badge label="İnceleme" tone="warning" /> : null}
+                      <Badge label={`Risk ${item.risk_level}`} tone={riskTone(item.risk_level)} />
+                    </View>
+                    <AppText variant="bodyStrong">{item.title}</AppText>
+                    <AppText variant="caption" color="textTertiary">
+                      {item.source_name ?? 'Kaynak'} · {formatDateTimeTr(item.published_at)}
+                      {item.source_url ? ` · ${item.source_url}` : ''}
+                    </AppText>
+                    <View style={styles.chips}>
+                      <Button
+                        label="AI ile genişlet"
+                        size="sm"
+                        variant="secondary"
+                        fullWidth={false}
+                        loading={enrichSource.isPending && enrichSource.variables === item.post_id}
+                        disabled={enrichSource.isPending}
+                        onPress={() => void quickEnrich(item)}
+                      />
+                      <Button
+                        label="Editörle düzenle"
+                        size="sm"
+                        variant="outline"
+                        fullWidth={false}
+                        onPress={() => setEditItem(item)}
+                      />
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+          </AdminSection>
+
+          <NewsSourceEditModal
+            visible={editItem !== null}
+            item={editItem}
+            onClose={() => {
+              setEditItem(null);
+              void editorial.refetch();
+            }}
+          />
+        </View>
+      ) : null}
+
       {tab === 'settings' ? (
         <View style={styles.stack}>
           {!form || !settings.data ? (
@@ -535,6 +707,68 @@ export default function AdminNewsScreen() {
                     Risk C haberler hiçbir ayarla otomatik yayımlanmaz. Bu eşik sunucuda sabittir.
                   </AppText>
                 </View>
+              </AdminSection>
+
+              <AdminSection
+                title="Haber kalitesi ve editoryal ayarlar"
+                subtitle="Kelime aralıkları hedeftir; kaynak yetmiyorsa metin şişirilmez ve kısa format seçilir."
+              >
+                <AppText variant="caption" color="textTertiary">
+                  Varsayılan haber formatı
+                </AppText>
+                <FilterChips
+                  options={[
+                    { key: 'auto', label: 'Otomatik' },
+                    { key: 'short', label: 'Kısa' },
+                    { key: 'standard', label: 'Standart' },
+                    { key: 'extended', label: 'Kapsamlı' },
+                  ] as { key: SettingsForm['body_format_default']; label: string }[]}
+                  value={form.body_format_default}
+                  onChange={(next) => setForm({ ...form, body_format_default: next })}
+                />
+                <View style={styles.formGrid}>
+                  <FormField label="Kısa min. kelime" value={form.short_min_words} onChange={(value) => setForm({ ...form, short_min_words: value })} />
+                  <FormField label="Kısa maks. kelime" value={form.short_max_words} onChange={(value) => setForm({ ...form, short_max_words: value })} />
+                  <FormField label="Standart min. kelime" value={form.standard_min_words} onChange={(value) => setForm({ ...form, standard_min_words: value })} />
+                  <FormField label="Standart maks. kelime" value={form.standard_max_words} onChange={(value) => setForm({ ...form, standard_max_words: value })} />
+                  <FormField label="Kapsamlı min. kelime" value={form.extended_min_words} onChange={(value) => setForm({ ...form, extended_min_words: value })} />
+                  <FormField label="Kapsamlı maks. kelime" value={form.extended_max_words} onChange={(value) => setForm({ ...form, extended_max_words: value })} />
+                  <FormField label="Başlık min. karakter" value={form.title_min_chars} onChange={(value) => setForm({ ...form, title_min_chars: value })} />
+                  <FormField label="Başlık maks. karakter" value={form.title_max_chars} onChange={(value) => setForm({ ...form, title_max_chars: value })} />
+                  <FormField label="Spot min. karakter" value={form.spot_min_chars} onChange={(value) => setForm({ ...form, spot_min_chars: value })} />
+                  <FormField label="Spot maks. karakter" value={form.spot_max_chars} onChange={(value) => setForm({ ...form, spot_max_chars: value })} />
+                  <FormField label="Akış önizleme satırı" value={form.preview_lines} onChange={(value) => setForm({ ...form, preview_lines: value })} />
+                </View>
+                <AppText variant="caption" color="textTertiary">
+                  Kaynak gösterim biçimi
+                </AppText>
+                <FilterChips
+                  options={[
+                    { key: 'card', label: 'Kart' },
+                    { key: 'inline', label: 'Metin içi' },
+                    { key: 'both', label: 'İkisi' },
+                  ] as { key: SettingsForm['source_display_mode']; label: string }[]}
+                  value={form.source_display_mode}
+                  onChange={(next) => setForm({ ...form, source_display_mode: next })}
+                />
+                <ToggleRow
+                  label="Otomatik alt başlık"
+                  hint="Uzun gövdelerde okunabilirlik için doğrulanmış bilgiler alt başlıklara ayrılır."
+                  value={form.auto_subheads}
+                  onChange={(next) => setForm({ ...form, auto_subheads: next })}
+                />
+                <ToggleRow
+                  label="Kaynak doğrulama zorunlu"
+                  hint="Kaynak referansı olmayan taslak yayımlanamaz."
+                  value={form.require_source_verification}
+                  onChange={(next) => setForm({ ...form, require_source_verification: next })}
+                />
+                <ToggleRow
+                  label="Yayın öncesi kalite kontrolü"
+                  hint="Başlık-gövde uyumu, tarih, isim, alıntı ve çelişki denetimi çalıştırılır."
+                  value={form.quality_check_enabled}
+                  onChange={(next) => setForm({ ...form, quality_check_enabled: next })}
+                />
               </AdminSection>
 
               <AdminSection title="Tarama ve yayın kuralları" subtitle="Sayısal sınırlar sunucuda doğrulanır">

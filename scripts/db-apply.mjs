@@ -1,8 +1,8 @@
-// Applies supabase/migrations/*.sql through the Supabase Management API.
-// Used because `supabase db push` needs the database password, which we do not
-// store yet. Every file is applied inside a single transaction by the API.
-import { readFileSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+// Applies a UTF-8 SQL migration file to the hosted Supabase project.
+// PowerShell pipelines can corrupt Turkish characters, so the SQL is sent
+// directly from disk as UTF-8 through the Supabase Management API.
+import { readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -16,41 +16,28 @@ const env = Object.fromEntries(
     }),
 );
 
-const token = process.env.SUPABASE_ACCESS_TOKEN ?? env.SUPABASE_ACCESS_TOKEN;
-const ref = process.env.SUPABASE_PROJECT_REF ?? env.SUPABASE_PROJECT_REF;
+const token = env.SUPABASE_ACCESS_TOKEN;
+const ref = env.SUPABASE_PROJECT_REF;
 if (!token || !ref) {
-  console.error('SUPABASE_ACCESS_TOKEN and SUPABASE_PROJECT_REF are required.');
+  console.error('missing credentials');
   process.exit(1);
 }
 
-const runQuery = async (query) => {
-  const response = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query }),
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`${response.status} ${text}`);
-  }
-  return text;
-};
-
-const only = process.argv[2];
-const files = readdirSync(join(root, 'supabase', 'migrations'))
-  .filter((file) => file.endsWith('.sql'))
-  .sort()
-  .filter((file) => !only || file.startsWith(only));
-
-for (const file of files) {
-  const sql = readFileSync(join(root, 'supabase', 'migrations', file), 'utf8');
-  process.stdout.write(`applying ${file}... `);
-  try {
-    await runQuery(sql);
-    console.log('ok');
-  } catch (error) {
-    console.log('FAILED');
-    console.error(error.message);
-    process.exit(1);
-  }
+const file = process.argv[2];
+if (!file) {
+  console.error('usage: node scripts/db-apply.mjs <path-to.sql>');
+  process.exit(1);
 }
+
+const query = readFileSync(resolve(root, file), 'utf8');
+const response = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, {
+  method: 'POST',
+  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=utf-8' },
+  body: JSON.stringify({ query }),
+});
+const text = await response.text();
+if (!response.ok) {
+  console.error(`${response.status} ${text}`);
+  process.exit(1);
+}
+console.log(text);

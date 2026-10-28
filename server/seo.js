@@ -1700,12 +1700,15 @@ async function renderBlogPost(post) {
  */
 function newsPostModel(post) {
   const canonical = `${SITE}${NEWS_PATH}/${encodeURIComponent(post.slug)}`;
-  const title = post.title.length <= 52 ? `${post.title} | Trabzone Haber` : post.title;
+  const suffix = ' | Trabzone Haber';
+  // Başlığı ortadan kesmek yerine marka ekini yalnızca sığdığında kullan.
+  const title =
+    post.title.length + suffix.length <= 70 ? `${post.title}${suffix}` : post.title;
   const description = truncate(post.spot || post.title, 165);
   const image = post.media ? mediaUrl('posts', post.media.storage_path) : null;
   return {
     canonical,
-    title: truncate(title, 70),
+    title,
     description,
     image: image || DEFAULT_IMAGE,
     published: post.published_at,
@@ -1768,14 +1771,57 @@ function newsPostJsonLd(post, model) {
   return { '@context': 'https://schema.org', '@graph': graph };
 }
 
+/** Haber gövdesini güvenli biçimde editoryal HTML'e çevirir (## alt başlık, liste, kalın). */
+function newsInline(value) {
+  return escapeHtml(value)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+
 function newsBodyHtml(body) {
-  return String(body || '')
-    .split(/\n{2,}/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean)
-    .slice(0, 24)
-    .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, '<br />')}</p>`)
-    .join('\n');
+  const lines = String(body || '').replace(/\r\n?/g, '\n').split('\n');
+  const html = [];
+  let paragraph = [];
+  let list = null;
+
+  const flushParagraph = () => {
+    if (paragraph.length === 0) return;
+    html.push(`<p>${paragraph.map(newsInline).join('<br />')}</p>`);
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (!list || list.length === 0) return;
+    html.push(`<ul>${list.map((item) => `<li>${newsInline(item)}</li>`).join('')}</ul>`);
+    list = null;
+  };
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+    const heading = line.match(/^(#{2,3})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      const tag = heading[1].length === 2 ? 'h2' : 'h3';
+      html.push(`<${tag}>${newsInline(heading[2])}</${tag}>`);
+      continue;
+    }
+    if (/^[-*+]\s+/.test(line)) {
+      flushParagraph();
+      list = list || [];
+      list.push(line.replace(/^[-*+]\s+/, ''));
+      continue;
+    }
+    flushList();
+    paragraph.push(line);
+  }
+  flushParagraph();
+  flushList();
+  return html.slice(0, 80).join('\n');
 }
 
 function newsStamp(value) {
@@ -1790,11 +1836,20 @@ function newsMediaFigure(post) {
   const src = mediaUrl('posts', post.media.storage_path);
   if (!src) return '';
   const credit = post.media.is_placeholder
-    ? 'Trabzone kategori tasarımı — olay fotoğrafı değildir'
-    : [post.media.credit, post.media.attribution].filter(Boolean).join(' · ') ||
+    ? 'Temsilî görsel'
+    : post.media.credit ||
+      post.media.attribution ||
       'Fotoğraf: kaynakta belirtilen lisans koşullarıyla kullanılmıştır';
+  // Metin içeren kurumsal görseller ve dikey görseller `contain` ile tam
+  // görünür; gerçek yatay fotoğraflar kontrollü `cover` ile çerçevelenir.
+  const fit =
+    post.media.is_placeholder ||
+    post.media.display_fit === 'contain' ||
+    post.kind === 'source'
+      ? 'contain'
+      : 'cover';
   return `<figure class="tz-news__figure">
-      <img src="${escapeHtml(src)}" alt="${escapeHtml(post.media.alt_text || post.title)}" loading="eager" />
+      <img src="${escapeHtml(src)}" alt="${escapeHtml(post.media.alt_text || post.title)}" loading="eager" style="object-fit:${fit};background:#eef2fa" />
       <figcaption>${escapeHtml(credit)}</figcaption>
     </figure>`;
 }
@@ -1870,12 +1925,17 @@ function newsPostBodyHtml(post, model) {
       .tz-news__spot { font-size: 18px; line-height: 1.6; color: #33415c; margin: 0 0 14px; max-width: 840px; }
       .tz-news__meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: #5b6b8c; margin: 0 0 20px; }
       .tz-news__tag { border: 1px solid #d6deee; border-radius: 999px; padding: 3px 9px; font-size: 12px; color: #33415c; }
-      .tz-news__tag--ai { border-color: #b7c6f5; background: #f2f5ff; color: #2f55d4; font-weight: 700; }
       .tz-news__figure { margin: 0 0 24px; }
       .tz-news__figure img { display: block; width: 100%; max-height: 500px; object-fit: cover; border-radius: 16px; background: #eef2fa; }
       .tz-news__figure figcaption { margin-top: 8px; font-size: 12px; color: #6b7a96; }
+      .tz-news__notice { max-width: 820px; margin: 0 0 22px; padding: 12px 15px; border: 1px solid #dbe4f5; border-radius: 12px; background: #f7f9fe; color: #33415c; font-size: 14px; line-height: 1.6; }
       .tz-news__body { font-size: 17px; line-height: 1.75; color: #1c2740; max-width: 820px; }
       .tz-news__body p { margin: 0 0 16px; }
+      .tz-news__body h2 { font-size: 24px; line-height: 1.3; margin: 28px 0 12px; }
+      .tz-news__body h3 { font-size: 20px; line-height: 1.35; margin: 24px 0 10px; }
+      .tz-news__body ul { margin: 0 0 18px; padding-left: 22px; }
+      .tz-news__body li { margin: 0 0 8px; }
+      .tz-news__lead { font-size: 19px; line-height: 1.65; font-weight: 500; color: #16233d; border-left: 3px solid #2f55d4; padding-left: 14px; margin: 0 0 20px; max-width: 820px; }
       .tz-news__block { max-width: 820px; margin: 34px 0 0; padding-top: 22px; border-top: 1px solid #e6ebf5; }
       .tz-news__block h2 { font-size: 22px; margin: 0 0 12px; }
       .tz-news__sources { margin: 0; padding-left: 22px; font-size: 15px; line-height: 1.6; }
@@ -1899,6 +1959,7 @@ function newsPostBodyHtml(post, model) {
       <p class="tz-news__eyebrow">${escapeHtml(post.category_name || 'Trabzon Gündem')}</p>
       <h1>${escapeHtml(post.title)}</h1>
       ${post.spot ? `<p class="tz-news__spot">${escapeHtml(post.spot)}</p>` : ''}
+      ${post.lead ? `<p class="tz-news__lead">${escapeHtml(post.lead)}</p>` : ''}
       <p class="tz-news__meta">
         <span class="tz-news__tag">${escapeHtml(district)}</span>
         <span class="tz-news__tag">${escapeHtml(post.published_by || 'Trabzone Haber')}</span>
@@ -1907,9 +1968,11 @@ function newsPostBodyHtml(post, model) {
           : '<span class="tz-news__tag">Yerel haber</span>'}
         ${published ? `<span>· ${escapeHtml(published)}</span>` : ''}
         ${eventDate ? `<span>· Olay tarihi: ${escapeHtml(eventDate)}</span>` : ''}
+        ${post.reading_minutes ? `<span>· ${Number(post.reading_minutes)} dk okuma</span>` : ''}
         ${updated && updated !== published ? `<span>· Güncelleme: ${escapeHtml(updated)}</span>` : ''}
       </p>
       ${newsMediaFigure(post)}
+      ${post.body_notice ? `<p class="tz-news__notice">${escapeHtml(post.body_notice)}</p>` : ''}
       <article class="tz-news__body">${newsBodyHtml(post.body)}</article>
       ${newsSourcesHtml(post)}
       ${newsTransparencyHtml(post, model)}

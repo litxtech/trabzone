@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { VideoView, useVideoPlayer } from 'expo-video';
+import * as Clipboard from 'expo-clipboard';
 import { useRouter } from '@/utils/router';
 import { memo, useCallback, useMemo, useState } from 'react';
 import { Alert, Linking, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
@@ -10,15 +11,18 @@ import { publicMediaUrl } from '@/features/media/media-service';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { useReportSheet } from '@/features/safety/components/ReportSheetProvider';
 import { useBlockedUserIds } from '@/features/profile/hooks/use-relations';
+import { ViewCount } from '@/features/views/components/ViewCount';
+import { ContentStatsSheet } from '@/features/views/components/ContentStatsSheet';
 import { postShareLink, shareSnippet } from '@/features/share/links';
 import { didShare, shareContent } from '@/features/share/share-action';
+import { newsCategoryPalette, newsFormatLabel } from '@/features/news/category-theme';
 import {
   useDeletePost,
   useSharePost,
   useTogglePostLike,
   useTogglePostSave,
 } from '../hooks/use-feed';
-import type { FeedPost, PostMedia } from '../services/feed-service';
+import type { FeedPost, PostMedia, PostNewsMeta } from '../services/feed-service';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 import { formatRelativeTr } from '@/utils/date';
@@ -64,6 +68,145 @@ function stripSourceLines(body: string | null): string | null {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   return kept.length > 0 ? kept : body;
+}
+
+/**
+ * Haber gönderileri için birleşik meta. AI haberleri `news` alanında,
+ * kaynak haberleri ise yeni `source` alanında aynı okuma alanlarını taşır.
+ */
+function resolveNewsMeta(post: FeedPost): PostNewsMeta | null {
+  if (post.news?.title) return post.news;
+  const source = post.source;
+  if (!source?.title) return null;
+  return {
+    post_id: post.id,
+    kind: 'source',
+    slug: source.slug ?? null,
+    title: source.title,
+    subtitle: source.subtitle ?? null,
+    spot: source.spot ?? null,
+    lead: source.lead ?? null,
+    preview: source.preview ?? null,
+    body_format: source.body_format ?? 'short',
+    word_count: source.word_count ?? null,
+    preview_lines: source.preview_lines ?? null,
+    category_slug: source.category_slug ?? null,
+    category_name: source.category_name ?? null,
+    district: source.district ?? post.city ?? null,
+    published_at: source.published_at ?? post.created_at,
+    updated_at: source.updated_at ?? post.updated_at,
+    ai_generated: Boolean(source.ai_generated),
+    source_count: source.source_count ?? 1,
+  };
+}
+
+function previewText(meta: PostNewsMeta): string | null {
+  const text = meta.preview ?? meta.lead ?? null;
+  if (!text) return null;
+  const clean = text
+    .replace(/^#{1,3}\s+/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return clean.length > 0 ? clean : null;
+}
+
+/** Görselin doğal oranını koruyan haber medyası; metin görselleri kırpılmaz. */
+function NewsMediaBlock({
+  media,
+  postId,
+  preferContain = false,
+  onOpen,
+}: {
+  media: PostMedia[];
+  postId: string;
+  /** Kaynak haber görselleri sıklıkla başlık metni içerir; kırpmadan göster. */
+  preferContain?: boolean;
+  onOpen: (index: number) => void;
+}) {
+  const { theme } = useTheme();
+  const { height: viewportHeight } = useWindowDimensions();
+  const item = media[0];
+  if (!item) return null;
+
+  const uri = publicMediaUrl('posts', item.storage_path);
+  const posterUri = publicMediaUrl('posts', item.thumbnail_path);
+  if (!uri) return null;
+
+  const naturalRatio =
+    item.width && item.height ? item.width / item.height : item.media_type === 'video' ? 16 / 9 : 4 / 3;
+  const fit =
+    item.display_fit && item.display_fit !== 'auto'
+      ? item.display_fit
+      : preferContain || naturalRatio < 0.9
+        ? 'contain'
+        : 'cover';
+  // Dikey görseller akışı aşırı uzatmasın; tamamı galeride görülebilir.
+  const ratio = Math.min(Math.max(naturalRatio, 0.62), 1.78);
+  const maxHeight = Math.round(Math.min(viewportHeight * 0.58, 520));
+
+  return (
+    <Pressable
+      accessibilityRole="imagebutton"
+      accessibilityLabel="Haber görselini tam ekran aç"
+      onPress={() => onOpen(0)}
+      style={({ pressed }) => [
+        styles.newsMedia,
+        {
+          aspectRatio: ratio,
+          maxHeight,
+          borderRadius: theme.radius.lg,
+          backgroundColor: theme.colors.surfaceMuted,
+          opacity: pressed ? 0.94 : 1,
+        },
+      ]}
+    >
+      {item.media_type === 'video' ? (
+        <>
+          {posterUri ? (
+            <VideoThumbnail
+              posterUri={posterUri}
+              durationMs={item.duration_ms}
+              qualityLabel="1080p"
+              style={StyleSheet.absoluteFill}
+            />
+          ) : (
+            <VideoSurface uri={uri} />
+          )}
+          <View style={styles.videoBadge}>
+            <Ionicons name="play" size={13} color="#FFFFFF" />
+            <AppText variant="caption" color="#FFFFFF">
+              Video
+            </AppText>
+          </View>
+        </>
+      ) : (
+        <>
+          <AppImage
+            source={{ uri }}
+            style={StyleSheet.absoluteFill}
+            contentFit={fit}
+            recycleKey={`news-${postId}-${item.id}`}
+          />
+          {fit === 'contain' ? (
+            <View style={[styles.containBadge, { backgroundColor: 'rgba(9,14,28,0.55)' }]}>
+              <Ionicons name="expand-outline" size={12} color="#FFFFFF" />
+              <AppText variant="caption" color="#FFFFFF">
+                Tam görünüm
+              </AppText>
+            </View>
+          ) : null}
+        </>
+      )}
+      {media.length > 1 ? (
+        <View style={styles.mediaCountBadge}>
+          <Ionicons name="images-outline" size={12} color="#FFFFFF" />
+          <AppText variant="caption" color="#FFFFFF">
+            {media.length}
+          </AppText>
+        </View>
+      ) : null}
+    </Pressable>
+  );
 }
 
 function PostMediaBlock({
@@ -265,6 +408,7 @@ export const PostCard = memo(function PostCard({
   const remove = useDeletePost();
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
 
@@ -282,6 +426,8 @@ export const PostCard = memo(function PostCard({
       thumbnailUri: publicMediaUrl('posts', item.thumbnail_path),
       media_type: item.media_type,
       duration_ms: item.duration_ms,
+      width: item.width,
+      height: item.height,
     }))
     .filter((item) => item.uri);
 
@@ -290,6 +436,19 @@ export const PostCard = memo(function PostCard({
   }, [post.author_username, router]);
 
   const source = post.source ?? null;
+  const newsMeta = useMemo(() => resolveNewsMeta(post), [post]);
+  const newsPreview = newsMeta ? previewText(newsMeta) : null;
+  const isNews = newsMeta !== null;
+  const palette = newsCategoryPalette(newsMeta?.category_slug);
+  const openReader = useCallback(() => {
+    haptics.tap();
+    router.push(`/post/${post.id}` as never);
+  }, [post.id, router]);
+  const copyNewsLink = useCallback(async () => {
+    await Clipboard.setStringAsync(postShareLink(post.id));
+    haptics.success();
+    Alert.alert('Bağlantı kopyalandı', 'Haber bağlantısı panoya kopyalandı.');
+  }, [post.id]);
   const openSource = useCallback(() => {
     if (!source?.url) return;
     haptics.tap();
@@ -433,7 +592,77 @@ export const PostCard = memo(function PostCard({
         </Pressable>
       </View>
 
-      {bodyText ? (
+      {isNews && newsMeta ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${newsMeta.title} — haberi oku`}
+          onPress={openReader}
+          style={styles.newsText}
+        >
+          <View style={styles.chipRow}>
+            {newsMeta.category_name ? (
+              <View style={[styles.chip, { backgroundColor: palette.soft }]}>
+                <AppText variant="caption" color={palette.accent}>
+                  {newsMeta.category_name}
+                </AppText>
+              </View>
+            ) : null}
+            {newsMeta.district ? (
+              <View style={[styles.chip, styles.chipNeutral, { borderColor: theme.colors.border }]}>
+                <Ionicons name="location-outline" size={11} color={theme.colors.textSecondary} />
+                <AppText variant="caption" color="textSecondary">
+                  {newsMeta.district}
+                </AppText>
+              </View>
+            ) : null}
+            {newsFormatLabel(newsMeta.body_format) ? (
+              <AppText variant="caption" color="textTertiary">
+                {newsFormatLabel(newsMeta.body_format)}
+              </AppText>
+            ) : null}
+          </View>
+
+          <AppText variant="h2" style={styles.newsTitle} numberOfLines={4}>
+            {newsMeta.title}
+          </AppText>
+
+          {newsMeta.spot ? (
+            <AppText variant="body" color="textSecondary" style={styles.newsSpot} numberOfLines={3}>
+              {newsMeta.spot}
+            </AppText>
+          ) : null}
+
+          {newsPreview && newsPreview !== newsMeta.spot ? (
+            <AppText
+              variant="body"
+              color="textSecondary"
+              style={styles.newsPreview}
+              numberOfLines={Math.min(Math.max(newsMeta.preview_lines ?? 4, 2), 6)}
+            >
+              {newsPreview}
+            </AppText>
+          ) : null}
+
+          <View style={styles.readMoreRow}>
+            <AppText variant="label" color="primary">
+              Devamını Oku
+            </AppText>
+            <Ionicons name="arrow-forward" size={15} color={theme.colors.primary} />
+          </View>
+
+          {newsMeta.ai_generated ? (
+            <View style={styles.aiRow}>
+              <Ionicons name="sparkles-outline" size={12} color={theme.colors.textTertiary} />
+              <AppText variant="caption" color="textTertiary">
+                Yapay zekâ desteğiyle, kaynaklara dayalı
+                {newsMeta.source_count && newsMeta.source_count > 1
+                  ? ` · ${newsMeta.source_count} kaynak`
+                  : ''}
+              </AppText>
+            </View>
+          ) : null}
+        </Pressable>
+      ) : bodyText ? (
         <AppText variant="body" style={styles.body}>
           {bodyText}
           {post.is_edited ? (
@@ -444,14 +673,26 @@ export const PostCard = memo(function PostCard({
         </AppText>
       ) : null}
 
-      <PostMediaBlock
-        media={post.media}
-        postId={post.id}
-        onOpen={(index) => {
-          setViewerIndex(index);
-          setViewerOpen(true);
-        }}
-      />
+      {isNews ? (
+        <NewsMediaBlock
+          media={post.media}
+          postId={post.id}
+          preferContain={Boolean(source?.url)}
+          onOpen={(index) => {
+            setViewerIndex(index);
+            setViewerOpen(true);
+          }}
+        />
+      ) : (
+        <PostMediaBlock
+          media={post.media}
+          postId={post.id}
+          onOpen={(index) => {
+            setViewerIndex(index);
+            setViewerOpen(true);
+          }}
+        />
+      )}
 
       {source?.url ? (
         <Pressable
@@ -521,6 +762,8 @@ export const PostCard = memo(function PostCard({
           label={post.share_count > 0 ? String(post.share_count) : 'Paylaş'}
           onPress={() => void onShare()}
         />
+        {/* Pasif metrik: yeni buton eklemez, beğeni/yorum/paylaşım ile aynı satırda. */}
+        <ViewCount type="post" id={post.id} initial={post.view_count} />
         <View style={styles.actionSpacer} />
         <ActionButton
           icon="bookmark-outline"
@@ -553,6 +796,12 @@ export const PostCard = memo(function PostCard({
             ? [
                 { key: 'edit', label: 'Gönderiyi düzenle', icon: 'create-outline' as const },
                 {
+                  key: 'stats',
+                  label: 'İçerik istatistikleri',
+                  icon: 'eye-outline' as const,
+                  description: 'Tekil görüntüleme, beğeni ve yorum özeti',
+                },
+                {
                   key: 'delete',
                   label: 'Gönderiyi sil',
                   icon: 'trash-outline' as const,
@@ -570,6 +819,29 @@ export const PostCard = memo(function PostCard({
                 },
               ]),
           { key: 'share', label: 'Bağlantıyı paylaş', icon: 'share-social-outline' as const },
+          ...(isNews
+            ? [
+                {
+                  key: 'save',
+                  label: post.saved ? 'Kaydı kaldır' : 'Haberi kaydet',
+                  icon: 'bookmark-outline' as const,
+                },
+                {
+                  key: 'copy',
+                  label: 'Bağlantıyı kopyala',
+                  icon: 'link-outline' as const,
+                },
+                ...(source?.url
+                  ? [
+                      {
+                        key: 'source',
+                        label: 'Kaynağı görüntüle',
+                        icon: 'open-outline' as const,
+                      },
+                    ]
+                  : []),
+              ]
+            : []),
         ]}
         onClose={() => setMenuOpen(false)}
         onSelect={(key) => {
@@ -578,6 +850,8 @@ export const PostCard = memo(function PostCard({
             confirmDelete();
           } else if (key === 'edit') {
             router.push(`/compose/post?postId=${post.id}` as never);
+          } else if (key === 'stats') {
+            setStatsOpen(true);
           } else if (key === 'profile') {
             openProfile();
           } else if (key === 'report') {
@@ -592,9 +866,25 @@ export const PostCard = memo(function PostCard({
             confirmBlock();
           } else if (key === 'share') {
             void onShare();
+          } else if (key === 'save') {
+            onSave();
+          } else if (key === 'copy') {
+            void copyNewsLink();
+          } else if (key === 'source') {
+            openSource();
           }
         }}
       />
+
+      {post.is_mine ? (
+        <ContentStatsSheet
+          visible={statsOpen}
+          onClose={() => setStatsOpen(false)}
+          type="post"
+          id={post.id}
+          title={post.body?.slice(0, 80) || 'Gönderi'}
+        />
+      ) : null}
     </View>
   );
 });
@@ -666,4 +956,44 @@ const styles = StyleSheet.create({
   sourceName: { flexShrink: 1 },
   action: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 32 },
   actionSpacer: { flex: 1 },
+  newsText: { gap: 8 },
+  chipRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  chipNeutral: { borderWidth: StyleSheet.hairlineWidth, backgroundColor: 'transparent' },
+  newsTitle: { letterSpacing: -0.3 },
+  newsSpot: { lineHeight: 21 },
+  newsPreview: { lineHeight: 21 },
+  readMoreRow: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingTop: 2 },
+  aiRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  newsMedia: { width: '100%', overflow: 'hidden' },
+  containBadge: {
+    position: 'absolute',
+    right: 10,
+    top: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  mediaCountBadge: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(9,14,28,0.55)',
+  },
 });

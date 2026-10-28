@@ -8,6 +8,7 @@ import { mapAdminError } from './admin-service';
 import type {
   NewsAssistAction,
   NewsCostSummary,
+  NewsEditorialQueue,
   NewsErrorItem,
   NewsOverview,
   NewsReviewAction,
@@ -31,6 +32,7 @@ export const adminNewsKeys = {
   sources: ['admin', 'news', 'sources'] as const,
   costs: ['admin', 'news', 'costs'] as const,
   errors: (limit: number) => ['admin', 'news', 'errors', limit] as const,
+  editorial: ['admin', 'news', 'editorial'] as const,
 };
 
 async function rpc<T>(fn: string, args: Record<string, unknown> = {}): Promise<Result<T>> {
@@ -48,6 +50,20 @@ export const fetchNewsSettings = () => rpc<NewsSettings>('admin_ai_news_settings
 
 export const saveNewsSettings = (payload: NewsSettingsProgress, reason: string | null = null) =>
   rpc<NewsSettings>('admin_ai_news_settings_save', { p_payload: payload, p_reason: reason });
+
+export const fetchNewsEditorialQueue = (limit = 40) =>
+  rpc<NewsEditorialQueue>('admin_news_editorial_queue', { p_limit: limit });
+
+export const saveNewsSourceBody = (
+  postId: string,
+  payload: Record<string, unknown>,
+  reason: string | null = null,
+) =>
+  rpc<Record<string, unknown>>('admin_news_source_save', {
+    p_post_id: postId,
+    p_payload: payload,
+    p_reason: reason,
+  });
 
 export const runNewsNow = () => rpc<Record<string, unknown>>('admin_ai_news_run_now');
 
@@ -146,6 +162,37 @@ export async function invokeNewsAssist(
   if (!data || typeof data !== 'object' || (data as { ok?: boolean }).ok !== true) {
     return fail(appError('unknown', 'AI yanıtı işlenemedi.'));
   }
+  return ok(data as Record<string, unknown>);
+}
+
+/** Kaynak haberi YALNIZCA yeni doğrulanmış kaynaklarla genişletir. */
+export async function invokeNewsSourceEnrich(
+  postId: string,
+  payload: Record<string, unknown> = {},
+): Promise<Result<Record<string, unknown>>> {
+  const { data, error } = await supabase.functions.invoke('ai-news-worker', {
+    body: { action: 'enrich_source', post_id: postId, payload },
+  });
+  if (error) {
+    let detail = error.message;
+    const context = (error as { context?: Response }).context;
+    if (context) {
+      try {
+        const body = (await context.json()) as { error?: string; detail?: string };
+        detail = body.detail || body.error || detail;
+      } catch {
+        // Gövde okunamadıysa genel mesaj kullanılır.
+      }
+    }
+    if (/forbidden|not_authenticated|admin_required/i.test(detail)) {
+      return fail(appError('forbidden', 'Bu işlem için AI haber yönetici yetkisi gerekiyor.'));
+    }
+    return fail(appError('unknown', detail.slice(0, 240)));
+  }
+  if (!data || typeof data !== 'object') {
+    return fail(appError('unknown', 'AI yanıtı işlenemedi.'));
+  }
+  // enrich_source doğrulama başarısız olduğunda `ok:false` + açıklama döner.
   return ok(data as Record<string, unknown>);
 }
 

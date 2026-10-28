@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -104,23 +104,56 @@ export function NewsReviewModal({
   const compact = width < 860;
   const toast = useAdminToast();
 
-  const [draft, setDraft] = useState<EditorDraft>(EMPTY);
-  const [suggestion, setSuggestion] = useState<Record<string, unknown> | null>(null);
+  const [draftEdits, setDraftEdits] = useState<{ eventId: string; draft: EditorDraft } | null>(null);
+  const [suggestionState, setSuggestionState] = useState<{
+    eventId: string;
+    value: Record<string, unknown> | null;
+  } | null>(null);
   const [reasonAction, setReasonAction] = useState<
     'reject' | 'archive' | 'retract' | 'high_risk' | null
   >(null);
+
+  // Sunucu verisi değiştiğinde form türetilir; yalnızca editör düzenlemeleri
+  // ayrı tutulur. Böylece effect içinde setState çağrılmaz ve başka bir olaya
+  // geçildiğinde eski taslak yanlışlıkla taşınmaz.
+  const draft =
+    draftEdits && draftEdits.eventId === (eventId ?? '')
+      ? draftEdits.draft
+      : detail
+        ? fromDetail(detail)
+        : EMPTY;
+  const suggestion =
+    suggestionState && suggestionState.eventId === (eventId ?? '')
+      ? suggestionState.value
+      : null;
+  const setDraft = useCallback(
+    (next: EditorDraft | ((current: EditorDraft) => EditorDraft)) => {
+      setDraftEdits((current) => {
+        const base =
+          current && current.eventId === (eventId ?? '')
+            ? current.draft
+            : detail
+              ? fromDetail(detail)
+              : EMPTY;
+        return {
+          eventId: eventId ?? '',
+          draft: typeof next === 'function' ? next(base) : next,
+        };
+      });
+    },
+    [detail, eventId],
+  );
+  const setSuggestion = useCallback(
+    (value: Record<string, unknown> | null) => {
+      setSuggestionState({ eventId: eventId ?? '', value });
+    },
+    [eventId],
+  );
 
   const action = useAdminNewsReviewAction();
   const retract = useAdminNewsRetract();
   const highRisk = useAdminNewsHighRiskPublish();
   const assist = useAdminNewsAssist();
-
-  useEffect(() => {
-    if (detail) {
-      setDraft(fromDetail(detail));
-      setSuggestion(null);
-    }
-  }, [detail]);
 
   const busy =
     action.isPending || retract.isPending || highRisk.isPending || assist.isPending || loading;
@@ -168,7 +201,10 @@ export function NewsReviewModal({
       | 'simplify'
       | 'proofread'
       | 'check_conflicts'
-      | 'social_copy',
+      | 'social_copy'
+      | 'expand'
+      | 'prepare_spot'
+      | 'check_quality',
   ) => {
     if (!eventId) return;
     try {
@@ -181,6 +217,27 @@ export function NewsReviewModal({
         } else {
           toast.success('Olayla eşleşen lisanslı fotoğraf bulunamadı; kategori görseli korunuyor.');
         }
+      } else if (assistAction === 'expand') {
+        const next = (result.suggestion ?? null) as Record<string, unknown> | null;
+        if (!next) {
+          toast.error(
+            String(
+              result.message ??
+                'Yeni doğrulanmış kaynak bilgisi bulunamadı; metin genişletilmedi.',
+            ),
+          );
+        } else {
+          setSuggestion(next);
+          toast.success(
+            `Yeni kaynaklarla genişletildi (${Number(result.added_source_count ?? 0)} kaynak). Öneriyi uygula.`,
+          );
+        }
+      } else if (assistAction === 'check_quality') {
+        const unsupported = Array.isArray(result.unsupported) ? result.unsupported.length : 0;
+        const quality = Number(result.quality ?? 0);
+        toast.success(
+          `Kalite: ${Math.round(quality * 100)}/100 · ${unsupported} doğrulanamayan iddia.`,
+        );
       } else if (assistAction === 'check_conflicts') {
         const suggestion = (result.suggestion ?? {}) as Record<string, unknown>;
         const conflicts = Array.isArray(suggestion.conflicts)
@@ -391,6 +448,9 @@ export function NewsReviewModal({
                       <Button label="Metni sadeleştir" size="sm" variant="secondary" fullWidth={false} loading={assist.isPending} onPress={() => void runAssist('simplify')} />
                       <Button label="Yazımı düzelt" size="sm" variant="secondary" fullWidth={false} loading={assist.isPending} onPress={() => void runAssist('proofread')} />
                       <Button label="Metni iyileştir" size="sm" variant="secondary" fullWidth={false} loading={assist.isPending} onPress={() => void runAssist('rewrite')} />
+                      <Button label="Kaynaklarla genişlet" size="sm" variant="secondary" fullWidth={false} loading={assist.isPending} onPress={() => void runAssist('expand')} />
+                      <Button label="Spot hazırla" size="sm" variant="secondary" fullWidth={false} loading={assist.isPending} onPress={() => void runAssist('prepare_spot')} />
+                      <Button label="Kalite kontrolü" size="sm" variant="secondary" fullWidth={false} loading={assist.isPending} onPress={() => void runAssist('check_quality')} />
                       <Button label="Kaynakları kontrol et" size="sm" variant="secondary" fullWidth={false} loading={assist.isPending} onPress={() => void runAssist('recheck_sources')} />
                       <Button label="Çelişkileri incele" size="sm" variant="secondary" fullWidth={false} loading={assist.isPending} onPress={() => void runAssist('check_conflicts')} />
                       <Button label="Sosyal metin hazırla" size="sm" variant="secondary" fullWidth={false} loading={assist.isPending} onPress={() => void runAssist('social_copy')} />

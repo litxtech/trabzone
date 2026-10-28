@@ -20,7 +20,9 @@ import {
   fetchConversations,
   fetchMessage,
   fetchMessages,
+  isLocalMediaPath,
   leaveConversation,
+  localMediaPath,
   markConversationRead,
   markMessagesDelivered,
   removeGroupMember,
@@ -36,11 +38,13 @@ import {
   type Conversation,
   type MessageKind,
   type MessageMediaInput,
+  type MessageMediaItem,
 } from '../services/messaging-service';
+import { removeMedia, uploadMedia, uploadVideoWithPoster } from '@/features/media/media-service';
+import { appError } from '@/services/errors';
 import { supabase } from '@/services/supabase/client';
 import { useSession } from '@/stores/auth-store';
 import { unwrap } from '@/utils/result';
-import { removeMedia } from '@/features/media/media-service';
 
 type MessagePages = InfiniteData<ChatMessage[], string | null>;
 
@@ -213,15 +217,213 @@ export type SendMessageInput = {
   clientId?: string | null;
   /** Yeniden denemede mevcut iyimser satırı hedeflemek için. */
   tempId?: string;
+  /**
+   * Gönderim anında yüklenecek yerel dosyalar. İyimser satır bu yükleme
+   * bitmeden listeye girer; kullanıcı "gönder"e bastığı anda balon görünür.
+   */
+  uploads?: PendingMediaUpload[];
+  /** Yükleme ilerlemesi (0..1). */
+  onUploadProgress?: (ratio: number) => void;
 };
+
+/** Sohbete eklenecek, henüz yüklenmemiş yerel dosya. */
+export type PendingMediaUpload = {
+  media_type: MessageKind;
+  uri: string;
+  mime?: string | null;
+  fileName?: string | null;
+  width?: number | null;
+  height?: number | null;
+  durationMs?: number | null;
+  size?: number | null;
+};
+
+/**
+ * Yükleme eşzamanlılığı. Birden fazla fotoğraf sırayla yüklenirken ağ boşta
+ * bekliyordu; video kodlaması ise CPU'yu doldurduğu için düşük tutulur.
+ */
+function uploadConcurrency(uploads: PendingMediaUpload[]): number {
+  const hasVideo = uploads.some((item) => item.media_type === 'video');
+  return Math.max(1, Math.min(uploads.length, hasVideo ? 2 : 4));
+}
+
+/** Tek bir eklentiyi yükler ve sunucuya yazılacak medya kaydını döndürür. */
+async function uploadMessageMedia(input: {
+  conversationId: string;
+  uploaderId: string;
+  item: PendingMediaUpload;
+  onProgress: (ratio: number) => void;
+}): Promise<MessageMediaInput> {
+  const { item } = input;
+
+  if (item.media_type === 'video') {
+    const uploaded = await uploadVideoWithPoster({
+      bucket: 'message-media',
+      folder: input.conversationId,
+      uploaderId: input.uploaderId,
+      uri: item.uri,
+      mime: item.mime ?? 'video/mp4',
+      fileName: item.fileName ?? null,
+      durationMs: item.durationMs ?? null,
+      width: item.width ?? null,
+      height: item.height ?? null,
+      fileSize: item.size ?? null,
+      onProgress: (stage, ratio) =>
+        // Kapak hazırlığı videonun önüne geçmesin: ilk %15 hazırlık sayılır.
+        input.onProgress(stage === 'uploading' ? 0.15 + ratio * 0.85 : ratio * 0.15),
+    });
+    if (!uploaded.ok) {
+      throw uploaded.error;
+    }
+    const video = uploaded.data.video;
+    return {
+      media_type: 'video',
+      storage_path: video.path,
+      thumbnail_path: video.thumbnailPath ?? null,
+      width: video.width ?? item.width ?? null,
+      height: video.height ?? item.height ?? null,
+      duration_ms: video.durationMs ?? item.durationMs ?? null,
+      mime: video.mime,
+      name: item.fileName ?? null,
+      size: video.size,
+    };
+  }
+
+  const uploaded = await uploadMedia({
+    bucket: 'message-media',
+    folder: input.conversationId,
+    uploaderId: input.uploaderId,
+    uri: item.uri,
+    mime: item.mime ?? null,
+    fileName: item.fileName ?? null,
+    fileSize: item.size ?? null,
+    onProgress: (_stage, ratio) => input.onProgress(ratio),
+  });
+  if (!uploaded.ok) {
+    throw uploaded.error;
+  }
+  const media = uploaded.data;
+  return {
+    media_type: item.media_type === 'file' ? 'file' : 'image',
+    storage_path: media.path,
+    mime: media.mime,
+    name: item.fileName ?? null,
+    size: media.size,
+    width: media.width ?? item.width ?? null,
+    height: media.height ?? item.height ?? null,
+  };
+}
+
+/** Eklentileri sınırlı eşzamanlılıkla yükler; sıra korunur. */
+async function uploadAttachments(
+  uploads: PendingMediaUpload[],
+  context: {
+    conversationId: string;
+    uploaderId: string;
+    onProgress?: (ratio: number) => void;
+  },
+): Promise<MessageMediaInput[]> {
+  const total = uploads.length;
+  const results: (MessageMediaInput | null)[] = new Array<MessageMediaInput | null>(total).fill(
+    null,
+  );
+  const ratios = new Array<number>(total).fill(0);
+
+  const report = () => {
+    if (!context.onProgress) {
+      return;
+    }
+    const sum = ratios.reduce((acc, value) => acc + value, 0);
+    context.onProgress(Math.min(1, sum / total));
+  };
+
+  let next = 0;
+  const worker = async () => {
+    while (next < total) {
+      const index = next;
+      next += 1;
+      const item = uploads[index];
+      if (!item) {
+        continue;
+      }
+      results[index] = await uploadMessageMedia({
+        conversationId: context.conversationId,
+        uploaderId: context.uploaderId,
+        item,
+        onProgress: (ratio) => {
+          // Aynı dosyanın ilerlemesi geri gitmesin.
+          ratios[index] = Math.min(1, Math.max(ratios[index] ?? 0, ratio));
+          report();
+        },
+      });
+    }
+  };
+
+  await Promise.all(Array.from({ length: uploadConcurrency(uploads) }, () => worker()));
+  return results.filter((item): item is MessageMediaInput => item !== null);
+}
+
+/** İyimser satırın medya listesi: yerel dosyalar beklemeden görünür. */
+function buildOptimisticMedia(
+  tempId: string,
+  uploads: PendingMediaUpload[],
+  media: MessageMediaInput[],
+): MessageMediaItem[] {
+  if (uploads.length > 0) {
+    return uploads.map((item, index) => ({
+      id: `${tempId}-media-${index}`,
+      media_type: item.media_type,
+      storage_path: localMediaPath(item.uri),
+      thumbnail_path: null,
+      width: item.width ?? null,
+      height: item.height ?? null,
+      duration_ms: item.durationMs ?? null,
+      sort_order: index,
+      local_uri: item.uri,
+    }));
+  }
+  return media.map((item, index) => ({
+    id: `${tempId}-media-${index}`,
+    media_type: item.media_type,
+    storage_path: item.storage_path,
+    thumbnail_path: item.thumbnail_path ?? null,
+    width: item.width ?? null,
+    height: item.height ?? null,
+    duration_ms: item.duration_ms ?? null,
+    sort_order: index,
+    local_uri: item.local_uri ?? null,
+  }));
+}
 
 export function useSendMessage(conversationId: string) {
   const queryClient = useQueryClient();
   const session = useSession();
+  const myId = session?.user?.id ?? null;
+  /**
+   * `onMutate` içinde üretilen client_id `mutationFn`'e bağlamla geçmez.
+   * React Query aynı değişken nesnesini verdiği için kimlik bu haritada taşınır;
+   * böylece idempotent yeniden deneme aynı anahtarı kullanır.
+   */
+  const clientIds = useRef(new WeakMap<SendMessageInput, string>()).current;
 
   const mutation = useMutation({
-    mutationFn: (input: SendMessageInput) =>
-      unwrap(
+    mutationFn: async (input: SendMessageInput) => {
+      const clientId = clientIds.get(input) ?? input.clientId ?? Crypto.randomUUID();
+      const uploads = input.uploads ?? [];
+      let media = input.media ?? [];
+
+      if (uploads.length > 0) {
+        if (!myId) {
+          throw appError('session_missing');
+        }
+        media = await uploadAttachments(uploads, {
+          conversationId,
+          uploaderId: myId,
+          onProgress: input.onUploadProgress,
+        });
+      }
+
+      return unwrap(
         sendMessage({
           conversationId,
           kind: input.kind,
@@ -229,13 +431,15 @@ export function useSendMessage(conversationId: string) {
           mediaPath: input.mediaPath,
           mediaMeta: input.mediaMeta,
           replyToId: input.replyToId,
-          media: input.media,
-          clientId: input.clientId,
+          media,
+          clientId,
         }),
-      ),
+      );
+    },
     onMutate: async (input) => {
       const me = session?.user;
       const clientId = input.clientId ?? Crypto.randomUUID();
+      clientIds.set(input, clientId);
       const tempId = input.tempId ?? `temp-${Crypto.randomUUID()}`;
       if (!me) {
         return { tempId, clientId };
@@ -247,9 +451,12 @@ export function useSendMessage(conversationId: string) {
         last_name?: string;
         avatar_path?: string;
       };
+      const uploads = input.uploads ?? [];
       const media = input.media ?? [];
+      const firstUpload = uploads[0];
       const kind =
         input.kind ??
+        (uploads[0]?.media_type as MessageKind | undefined) ??
         (media[0]?.media_type as MessageKind | undefined) ??
         (input.mediaPath ? 'image' : 'text');
 
@@ -263,18 +470,20 @@ export function useSendMessage(conversationId: string) {
         sender_avatar_path: metadata.avatar_path ?? null,
         kind,
         body: input.body ?? null,
-        media_path: input.mediaPath ?? media[0]?.storage_path ?? null,
-        media_meta: input.mediaMeta ?? null,
-        media: media.map((item, index) => ({
-          id: `${tempId}-media-${index}`,
-          media_type: item.media_type,
-          storage_path: item.storage_path,
-          thumbnail_path: item.thumbnail_path ?? null,
-          width: item.width ?? null,
-          height: item.height ?? null,
-          duration_ms: item.duration_ms ?? null,
-          sort_order: index,
-        })),
+        media_path: input.mediaPath ?? uploads[0]?.uri ?? media[0]?.storage_path ?? null,
+        media_meta:
+          input.mediaMeta ??
+          (firstUpload
+            ? {
+                mime: firstUpload.mime ?? null,
+                name: firstUpload.fileName ?? null,
+                size: firstUpload.size ?? null,
+                width: firstUpload.width ?? null,
+                height: firstUpload.height ?? null,
+                duration: firstUpload.durationMs ?? null,
+              }
+            : null),
+        media: buildOptimisticMedia(tempId, uploads, media),
         reply_to_id: input.replyToId ?? null,
         reply_preview: buildReplyPreview(queryClient, conversationId, input.replyToId ?? null),
         edited_at: null,
@@ -330,26 +539,39 @@ export function useSendMessage(conversationId: string) {
           : data,
       );
     },
-    onSuccess: (message, _input, context) => {
+    onSuccess: (message, input, context) => {
+      // Sunucu kaydı geldikten sonra da yerel önizleme korunur: imzalı adres
+      // çözülene kadar fotoğraf boş görünmesin.
+      const previews = (input.uploads ?? []).map((item) => item.uri);
+      const resolved: ChatMessage =
+        previews.length > 0
+          ? {
+              ...message,
+              media: message.media.map((item, index) =>
+                previews[index] ? { ...item, local_uri: previews[index] } : item,
+              ),
+            }
+          : message;
+
       if (context?.tempId) {
         queryClient.setQueryData<MessagePages>(chatQueryKeys.messages(conversationId), (data) => {
           if (!data) {
-            return { pages: [[message]], pageParams: [null] };
+            return { pages: [[resolved]], pageParams: [null] };
           }
           return {
             ...data,
             pages: data.pages.map((page) =>
               page.map((item) =>
                 item.id === context.tempId ||
-                (message.client_id && item.client_id === message.client_id)
-                  ? message
+                (resolved.client_id && item.client_id === resolved.client_id)
+                  ? resolved
                   : item,
               ),
             ),
           };
         });
       } else {
-        upsertMessage(queryClient, conversationId, message);
+        upsertMessage(queryClient, conversationId, resolved);
       }
       void queryClient.invalidateQueries({ queryKey: chatQueryKeys.list });
     },
@@ -357,20 +579,46 @@ export function useSendMessage(conversationId: string) {
 
   const retryMessage = useCallback(
     (message: ChatMessage) => {
+      const meta = (message.media_meta ?? {}) as {
+        mime?: unknown;
+        name?: unknown;
+        size?: unknown;
+      };
+      // Yükleme yarıda kaldıysa elde yerel dosyalar vardır: bunlar yeniden
+      // yüklenir. Sunucuya yazılmış medya ise olduğu gibi tekrar gönderilir.
+      const uploads = message.media
+        .filter((item) => isLocalMediaPath(item.storage_path) && item.local_uri)
+        .map((item) => ({
+          media_type: item.media_type,
+          uri: item.local_uri as string,
+          width: item.width,
+          height: item.height,
+          durationMs: item.duration_ms,
+          mime: typeof meta.mime === 'string' ? meta.mime : null,
+          fileName: typeof meta.name === 'string' ? meta.name : null,
+          size: typeof meta.size === 'number' ? meta.size : null,
+        }));
+
       mutation.mutate({
         kind: message.kind,
         body: message.body,
-        mediaPath: message.media_path,
-        mediaMeta: message.media_meta ?? {},
+        ...(uploads.length > 0
+          ? { uploads }
+          : {
+              mediaPath: message.media_path,
+              mediaMeta: message.media_meta ?? {},
+              media: message.media
+                .filter((item) => !isLocalMediaPath(item.storage_path))
+                .map((item) => ({
+                  media_type: item.media_type,
+                  storage_path: item.storage_path,
+                  thumbnail_path: item.thumbnail_path,
+                  width: item.width,
+                  height: item.height,
+                  duration_ms: item.duration_ms,
+                })),
+            }),
         replyToId: message.reply_to_id,
-        media: message.media.map((item) => ({
-          media_type: item.media_type,
-          storage_path: item.storage_path,
-          thumbnail_path: item.thumbnail_path,
-          width: item.width,
-          height: item.height,
-          duration_ms: item.duration_ms,
-        })),
         clientId: message.client_id ?? Crypto.randomUUID(),
         tempId: message.id,
       });
@@ -602,30 +850,69 @@ export function useConversationListRealtime() {
 /** Açık sohbete düşen mesaj, teslim ve okundu olaylarını dar kapsamda yamalar. */
 export function useConversationRealtime(conversationId: string | null) {
   const queryClient = useQueryClient();
+  const session = useSession();
+  const myId = session?.user?.id ?? null;
 
   useEffect(() => {
     if (!conversationId) {
       return;
     }
 
-    const syncMessage = async (messageId: unknown) => {
-      if (typeof messageId !== 'string') {
+    let disposed = false;
+    let listTimer: ReturnType<typeof setTimeout> | null = null;
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const queued = new Set<string>();
+
+    /**
+     * Sohbet listesi her olayda ayrı ayrı yenilenmesin: kısa bir turda
+     * birleştirilir. Önceden her makbuz olayı kendi `chat_list` isteğini
+     * tetikliyordu.
+     */
+    const touchList = () => {
+      if (listTimer) {
         return;
       }
+      listTimer = setTimeout(() => {
+        listTimer = null;
+        void queryClient.invalidateQueries({ queryKey: chatQueryKeys.list });
+      }, 500);
+    };
+
+    const isCached = (messageId: string) => {
+      const data = queryClient.getQueryData<MessagePages>(chatQueryKeys.messages(conversationId));
+      return Boolean(data?.pages.some((page) => page.some((item) => item.id === messageId)));
+    };
+
+    const syncMessage = async (messageId: string) => {
       const result = await fetchMessage(messageId);
-      if (!result.ok) {
+      if (disposed || !result.ok) {
         return;
       }
-      const found = patchMessageById(
-        queryClient,
-        conversationId,
-        result.data.id,
-        result.data,
-      );
+      const found = patchMessageById(queryClient, conversationId, result.data.id, result.data);
       if (!found) {
         upsertMessage(queryClient, conversationId, result.data);
       }
-      void queryClient.invalidateQueries({ queryKey: chatQueryKeys.list });
+      touchList();
+    };
+
+    const flush = () => {
+      flushTimer = null;
+      const ids = Array.from(queued);
+      queued.clear();
+      for (const id of ids) {
+        if (disposed) {
+          return;
+        }
+        void syncMessage(id);
+      }
+    };
+
+    /** Aynı mesaj için art arda gelen olayları tek okumada birleştirir. */
+    const enqueue = (messageId: string, delay = 120) => {
+      queued.add(messageId);
+      if (!flushTimer) {
+        flushTimer = setTimeout(flush, delay);
+      }
     };
 
     const channel = supabase
@@ -639,7 +926,16 @@ export function useConversationRealtime(conversationId: string | null) {
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
-          const row = payload.new as { id?: string };
+          const row = payload.new as { id?: string; sender_id?: string };
+          if (typeof row.id !== 'string') {
+            return;
+          }
+          // Kendi mesajımız mutasyon yanıtıyla zaten yerleşti. Olay yalnızca
+          // yanıt kaybolduysa (satır önbellekte yoksa) yedek olarak okunur.
+          if (row.sender_id === myId && isCached(row.id)) {
+            return;
+          }
+          // Karşı tarafın mesajı: gecikme olmadan tek okuma.
           void syncMessage(row.id);
         },
       )
@@ -653,31 +949,40 @@ export function useConversationRealtime(conversationId: string | null) {
         },
         (payload) => {
           const row = payload.new as { id?: string };
-          void syncMessage(row.id);
+          if (typeof row.id === 'string') {
+            enqueue(row.id);
+          }
         },
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'message_receipts' },
         (payload) => {
-          const row = payload.new as { message_id?: string };
-          void syncMessage(row.message_id);
+          const row = payload.new as { message_id?: string; user_id?: string };
+          // Kendi makbuz satırım yalnızca benim okuma durumumdur; gönderen
+          // tarafın tikini değiştirmez, mesajı yeniden okumak gereksizdir.
+          if (!row?.message_id || row.user_id === myId) {
+            return;
+          }
+          enqueue(row.message_id, 90);
         },
       )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'message_media' },
-        (payload) => {
-          const row = payload.new as { message_id?: string };
-          void syncMessage(row.message_id);
-        },
-      )
+      // `message_media` olayları ayrı okuma başlatmıyordu: medya satırları
+      // mesajla aynı işlemde yazıldığı için `messages` olayındaki okuma onları
+      // zaten getirir. Dinlemek tek gönderimde N fazladan RPC demekti.
       .subscribe();
 
     return () => {
+      disposed = true;
+      if (listTimer) {
+        clearTimeout(listTimer);
+      }
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+      }
       void supabase.removeChannel(channel);
     };
-  }, [conversationId, queryClient]);
+  }, [conversationId, myId, queryClient]);
 }
 
 // -----------------------------------------------------------------------------

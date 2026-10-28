@@ -1,20 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import { FlashList } from '@shopify/flash-list';
+import { FlashList, type ViewToken } from '@shopify/flash-list';
 import { useRouter } from '@/utils/router';
 import { useCallback, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 
-import { AppText, IconButton, Logo, Screen, Skeleton, Wordmark } from '@/components/ui';
-import { useUnreadMessageCount } from '@/features/messaging/hooks/use-chat';
-import { useDrawer } from '@/features/navigation/drawer-context';
-import { useUnreadNotifications } from '@/features/notifications/hooks/use-notifications';
+import { FeedHeader } from '@/components/navigation/FeedHeader';
+import { AppText, Screen, Skeleton } from '@/components/ui';
 import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
 import { PROVINCES } from '@/features/profile/constants/regions';
 import { SelectSheet } from '@/components/ui/SelectSheet';
@@ -27,6 +18,7 @@ import { StoryViewer } from '@/features/feed/components/StoryViewer';
 import { useFeed } from '@/features/feed/hooks/use-feed';
 import type { FeedFilter, FeedPost } from '@/features/feed/services/feed-service';
 import type { StoryGroup } from '@/features/feed/services/stories-service';
+import { trackContentViews, useViewSettings } from '@/features/views/use-content-views';
 
 const FILTERS: { key: FeedFilter; label: string }[] = [
   { key: 'all', label: 'Tümü' },
@@ -38,15 +30,7 @@ const FILTERS: { key: FeedFilter; label: string }[] = [
 export default function FeedScreen() {
   const { theme } = useTheme();
   const router = useRouter();
-  const { open: openDrawer } = useDrawer();
-  // Dar ekranlarda marka kilidine yer acmak icin yalnizca birincil kisa yollar
-  // gosterilir; yolculuk ve harita zaten drawer menusunde yer aliyor.
-  const { width } = useWindowDimensions();
-  const showSecondaryShortcuts = width >= 410;
-
   const { data: profile } = useMyProfile();
-  const { data: unread } = useUnreadNotifications();
-  const unreadMessages = useUnreadMessageCount();
 
   const [filter, setFilter] = useState<FeedFilter>('all');
   const [city, setCity] = useState<string | null>(null);
@@ -55,8 +39,34 @@ export default function FeedScreen() {
 
   const effectiveCity = filter === 'nearby' ? (city ?? profile?.city ?? null) : null;
   const feed = useFeed(filter, effectiveCity);
+  const viewSettings = useViewSettings();
 
   const posts = useMemo(() => feed.data?.pages.flatMap((page) => page.items) ?? [], [feed.data]);
+
+  // Gerçek görüntüleme: kart en az %50 görünür ve eşik süresi kadar ekranda
+  // kalmalı. Arka plan sekmesinde zamanlayıcı çalışmaz; kayıt sunucuda
+  // hesap bazlı olarak tekilleştirilir.
+  const viewabilityConfig = useMemo(
+    () => ({
+      itemVisiblePercentThreshold: Math.round(
+        Math.min(Math.max(viewSettings.min_visible_ratio, 0.1), 1) * 100,
+      ),
+      minimumViewTime: Math.max(0, viewSettings.min_visible_ms),
+    }),
+    [viewSettings.min_visible_ratio, viewSettings.min_visible_ms],
+  );
+
+  const onViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken<FeedPost>[] }) => {
+      const visible = viewableItems
+        .filter((entry) => entry.isViewable && entry.item)
+        .map((entry) => ({ type: 'post' as const, id: entry.item.id, surface: 'feed' }));
+      if (visible.length > 0) {
+        void trackContentViews(visible);
+      }
+    },
+    [],
+  );
 
   const refresh = useCallback(() => {
     void feed.refetch();
@@ -192,94 +202,10 @@ export default function FeedScreen() {
   );
 
   return (
-    <Screen edges={['top', 'left', 'right']} padded={false}>
-      <View style={styles.header}>
-        <View style={styles.brandRow}>
-          <IconButton
-            name="menu"
-            accessibilityLabel="Menüyü aç"
-            variant="surface"
-            size={20}
-            onPress={() => openDrawer('main')}
-          />
-          <Logo size={26} />
-          <Wordmark size={20} gradient tracking={0.05} />
-        </View>
-
-        <View style={styles.headerActions}>
-          {showSecondaryShortcuts ? (
-            <>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Yolculuk paylaşımı"
-                hitSlop={6}
-                onPress={() => router.push('/ride' as never)}
-                style={({ pressed }) => [styles.headerIcon, { opacity: pressed ? 0.6 : 1 }]}
-              >
-                <Ionicons name="car-sport-outline" size={22} color={theme.colors.text} />
-              </Pressable>
-
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Etkileşim haritası"
-                hitSlop={6}
-                onPress={() => router.push('/map' as never)}
-                style={({ pressed }) => [styles.headerIcon, { opacity: pressed ? 0.6 : 1 }]}
-              >
-                <Ionicons name="map-outline" size={22} color={theme.colors.text} />
-              </Pressable>
-            </>
-          ) : null}
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Keşfet"
-            hitSlop={6}
-            onPress={() => router.push('/discover' as never)}
-            style={({ pressed }) => [styles.headerIcon, { opacity: pressed ? 0.6 : 1 }]}
-          >
-            <Ionicons name="search" size={21} color={theme.colors.text} />
-          </Pressable>
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              unreadMessages > 0 ? `Mesajlar, ${unreadMessages} okunmamış` : 'Mesajlar'
-            }
-            hitSlop={6}
-            onPress={() => router.navigate('/messages' as never)}
-            style={({ pressed }) => [styles.headerIcon, { opacity: pressed ? 0.6 : 1 }]}
-          >
-            <Ionicons name="chatbubble-ellipses-outline" size={22} color={theme.colors.text} />
-            {unreadMessages > 0 ? (
-              <View style={[styles.badge, { backgroundColor: theme.colors.primary }]}>
-                <AppText variant="caption" color="#FFFFFF" style={styles.badgeText}>
-                  {unreadMessages > 99 ? '99+' : unreadMessages}
-                </AppText>
-              </View>
-            ) : null}
-          </Pressable>
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              unread && unread > 0 ? `Bildirimler, ${unread} okunmamış` : 'Bildirimler'
-            }
-            hitSlop={6}
-            onPress={() => router.push('/notifications' as never)}
-            style={({ pressed }) => [styles.headerIcon, { opacity: pressed ? 0.6 : 1 }]}
-          >
-            <Ionicons name="notifications-outline" size={22} color={theme.colors.text} />
-            {unread && unread > 0 ? (
-              <View style={[styles.badge, { backgroundColor: theme.colors.danger }]}>
-                <AppText variant="caption" color="#FFFFFF" style={styles.badgeText}>
-                  {unread > 99 ? '99+' : unread}
-                </AppText>
-              </View>
-            ) : null}
-          </Pressable>
-        </View>
-      </View>
+    <Screen edges={['left', 'right']} padded={false}>
+      {/* Sabit kompakt baslik: kaydirma listesinin disinda yasar, bu yuzden
+          akis kaydirilirken yerinden oynamaz ve scroll konumu korunur. */}
+      <FeedHeader />
 
       {feed.isLoading ? (
         <View style={styles.loading}>
@@ -301,6 +227,7 @@ export default function FeedScreen() {
         <FlashList
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
+          style={styles.list}
           data={posts}
           renderItem={renderPost}
           keyExtractor={(item) => item.id}
@@ -311,6 +238,8 @@ export default function FeedScreen() {
           // Hizli kaydirirken hucrelerin bos kalmamasi icin gorunum disinda
           // biraz daha fazla icerik hazir tutulur (FlashList varsayilani 250px).
           drawDistance={450}
+          viewabilityConfig={viewabilityConfig}
+          onViewableItemsChanged={onViewableItemsChanged}
           onEndReachedThreshold={0.6}
           onEndReached={() => {
             if (feed.hasNextPage && !feed.isFetchingNextPage) {
@@ -361,30 +290,10 @@ export default function FeedScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 10,
-  },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  headerIcon: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
-  badge: {
-    position: 'absolute',
-    top: 2,
-    right: 0,
-    minWidth: 17,
-    height: 17,
-    borderRadius: 9,
-    paddingHorizontal: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badgeText: { fontSize: 9.5, lineHeight: 13 },
-  storiesWrap: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 12 },
+  // Geniş ekranlarda akış tüm pencereye yayılmaz; okunabilir bir sütunda kalır.
+  list: { width: '100%', maxWidth: 680, alignSelf: 'center' },
+  // Hikayeler basligin hemen altindan baslar; arada bos bir bant yok.
+  storiesWrap: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 10 },
   filterRow: {
     flexDirection: 'row',
     alignItems: 'center',

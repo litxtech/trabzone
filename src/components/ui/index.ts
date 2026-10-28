@@ -6,7 +6,7 @@ export { Button, type ButtonProps } from './Button';
 export { Card } from './Card';
 export { IconButton } from './IconButton';
 export { Divider, PressableRow, Row, Spacer } from './Layout';
-export { Logo, Wordmark } from './Logo';
+export { BrandWordmark, Logo, Wordmark } from './Logo';
 export { Screen } from './Screen';
 export { ScreenHeader, type ScreenHeaderProps } from './ScreenHeader';
 export { Skeleton, SkeletonBlock } from './Skeleton';

@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from '@/utils/router';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -10,6 +11,7 @@ import { ListingCard } from '@/features/marketplace/components/ListingCard';
 import { useSellerListings, useToggleFavorite } from '@/features/marketplace/hooks/use-marketplace';
 import { VideoThumbnail } from '@/features/media/components/VideoThumbnail';
 import { publicMediaUrl } from '@/features/media/media-service';
+import { newsCategoryPalette } from '@/features/news/category-theme';
 import { useUserReels } from '@/features/reels/hooks/use-reels';
 import { useMyTrips } from '@/features/ride/hooks/use-ride';
 import type { RideReservation } from '@/features/ride/types';
@@ -43,7 +45,12 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
   const news = useProfilePosts(username, 'news', 40);
   const saved = useSavedPosts();
   const listings = useSellerListings(userId || null);
-  const reels = useUserReels(username, tab === 'reels');
+  // Başka bir profile geçildiğinde haber sekmesi boş kalmasın.
+  const activeTab: TabKey =
+    tab === 'news' && !isNewsPublisher && !news.isLoading && (news.data?.length ?? 0) === 0
+      ? 'posts'
+      : tab;
+  const reels = useUserReels(username, activeTab === 'reels');
   const favorite = useToggleFavorite();
   const trips = useMyTrips(null);
 
@@ -53,7 +60,7 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
     icon: React.ComponentProps<typeof Ionicons>['name'];
   }[] = [
     { key: 'posts', label: 'Gönderiler', icon: 'grid-outline' },
-    ...((news.data?.length ?? 0) > 0
+    ...((isNewsPublisher || (news.data?.length ?? 0) > 0)
       ? ([{ key: 'news', label: 'Haberler', icon: 'newspaper-outline' }] as const)
       : []),
     { key: 'media', label: 'Medya', icon: 'images-outline' },
@@ -172,6 +179,141 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
     );
   };
 
+  const renderNewsGrid = () => {
+    if (news.isLoading) {
+      return (
+        <View style={styles.loading}>
+          <ActivityIndicator color={theme.colors.primary} />
+        </View>
+      );
+    }
+    if (news.isError) {
+      return (
+        <View style={styles.state}>
+          <Ionicons name="cloud-offline-outline" size={24} color={theme.colors.textSecondary} />
+          <AppText variant="body" color="textSecondary" align="center">
+            Haberler yüklenemedi.
+          </AppText>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Tekrar dene"
+            onPress={() => void news.refetch()}
+          >
+            <AppText variant="label" color="primaryDeep">
+              Tekrar dene
+            </AppText>
+          </Pressable>
+        </View>
+      );
+    }
+    if (!news.data || news.data.length === 0) {
+      return (
+        <View style={styles.state}>
+          <View style={[styles.stateIcon, { backgroundColor: theme.colors.primarySoft }]}>
+            <Ionicons name="newspaper-outline" size={22} color={theme.colors.primaryDeep} />
+          </View>
+          <AppText variant="bodyStrong" align="center">
+            Henüz haber yok
+          </AppText>
+          <AppText variant="body" color="textSecondary" align="center">
+            Yayımlanan yerel haberler bu vitrinde listelenir.
+          </AppText>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.newsGrid}>
+        {news.data.map((post) => {
+          const meta = post.news ?? null;
+          const title = (meta?.title ?? post.body ?? 'Haber').split('\n')[0] ?? 'Haber';
+          const palette = newsCategoryPalette(meta?.category_slug);
+          const first = post.media[0] ?? null;
+          const imageUri = first ? publicMediaUrl('posts', first.storage_path) : null;
+          const category = meta?.category_name ?? 'Trabzon Gündem';
+
+          return (
+            <Pressable
+              key={post.id}
+              accessibilityRole="button"
+              accessibilityLabel={`Haberi aç: ${title}`}
+              onPress={() => {
+                haptics.tap();
+                router.push(`/post/${post.id}` as never);
+              }}
+              style={({ pressed }) => [
+                styles.newsCell,
+                {
+                  borderColor: theme.colors.border,
+                  backgroundColor: palette.soft,
+                  opacity: pressed ? 0.86 : 1,
+                },
+              ]}
+            >
+              {imageUri ? (
+                <AppImage
+                  source={{ uri: imageUri }}
+                  style={StyleSheet.absoluteFill}
+                  contentFit={
+                    first?.display_fit === 'contain' || post.source?.url ? 'contain' : 'cover'
+                  }
+                  recycleKey={`profile-news-${post.id}`}
+                />
+              ) : (
+                <LinearGradient
+                  colors={palette.gradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={StyleSheet.absoluteFill}
+                >
+                  <View style={styles.newsFallback}>
+                    <View style={styles.newsFallbackTop}>
+                      <Ionicons name="newspaper-outline" size={13} color="rgba(255,255,255,0.9)" />
+                      <AppText variant="overline" color="rgba(255,255,255,0.85)">
+                        TRABZONE HABER
+                      </AppText>
+                    </View>
+                    <AppText
+                      variant="caption"
+                      color={palette.onGradient}
+                      numberOfLines={5}
+                      style={styles.newsFallbackTitle}
+                    >
+                      {title}
+                    </AppText>
+                    <AppText variant="caption" color="rgba(255,255,255,0.8)" numberOfLines={1}>
+                      {category}
+                    </AppText>
+                  </View>
+                </LinearGradient>
+              )}
+
+              {imageUri ? (
+                <LinearGradient
+                  colors={['rgba(6,12,26,0)', 'rgba(6,12,26,0.55)', 'rgba(6,12,26,0.92)']}
+                  style={styles.newsShade}
+                >
+                  <AppText variant="caption" color="rgba(255,255,255,0.8)" numberOfLines={1}>
+                    {category}
+                  </AppText>
+                  <AppText variant="caption" color="#FFFFFF" numberOfLines={3} style={styles.newsCellTitle}>
+                    {title}
+                  </AppText>
+                </LinearGradient>
+              ) : null}
+
+              {!imageUri ? (
+                <View style={styles.newsCorner}>
+                  <Ionicons name="arrow-forward" size={11} color="#FFFFFF" />
+                </View>
+              ) : null}
+            </Pressable>
+          );
+        })}
+      </View>
+    );
+  };
+
   const renderReels = () => {
     if (reels.isLoading) {
       return (
@@ -274,7 +416,7 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
         style={styles.tabsScroll}
       >
         {tabs.map((item) => {
-          const active = tab === item.key;
+          const active = activeTab === item.key;
           return (
             <Pressable
               key={item.key}
@@ -310,7 +452,7 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
         })}
       </ScrollView>
 
-      {tab === 'posts'
+      {activeTab === 'posts'
         ? renderPostGrid(
             posts.data,
             posts.isLoading,
@@ -321,18 +463,9 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
           )
         : null}
 
-      {tab === 'news'
-        ? renderPostGrid(
-            news.data,
-            news.isLoading,
-            news.isError,
-            'Henüz haber yok',
-            'Yayımlanan yerel haberler burada listelenir.',
-            () => void news.refetch(),
-          )
-        : null}
+      {activeTab === 'news' ? renderNewsGrid() : null}
 
-      {tab === 'media'
+      {activeTab === 'media'
         ? renderPostGrid(
             media.data,
             media.isLoading,
@@ -343,9 +476,9 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
           )
         : null}
 
-      {tab === 'reels' ? renderReels() : null}
+      {activeTab === 'reels' ? renderReels() : null}
 
-      {tab === 'saved'
+      {activeTab === 'saved'
         ? renderPostGrid(
             saved.data,
             saved.isLoading,
@@ -356,7 +489,7 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
           )
         : null}
 
-      {tab === 'listings' ? (
+      {activeTab === 'listings' ? (
         listings.isLoading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={theme.colors.primary} />
@@ -405,7 +538,7 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
         )
       ) : null}
 
-      {tab === 'trips' ? (
+      {activeTab === 'trips' ? (
         trips.isLoading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={theme.colors.primary} />
@@ -498,6 +631,39 @@ const styles = StyleSheet.create({
     minHeight: 34,
   },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
+  newsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
+  newsCell: {
+    width: '32%',
+    aspectRatio: 0.72,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  newsFallback: { flex: 1, padding: 8, justifyContent: 'space-between' },
+  newsFallbackTop: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  newsFallbackTitle: { fontFamily: 'Manrope_700Bold', lineHeight: 15 },
+  newsShade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 8,
+    paddingTop: 18,
+    paddingBottom: 8,
+    gap: 2,
+  },
+  newsCellTitle: { fontFamily: 'Manrope_700Bold', lineHeight: 15 },
+  newsCorner: {
+    position: 'absolute',
+    right: 6,
+    bottom: 6,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+  },
   cell: {
     width: '32%',
     aspectRatio: 1,

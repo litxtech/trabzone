@@ -38,6 +38,15 @@ export const ADMIN_NAV: AdminNavGroup[] = [
         permissions: ['report.view'],
         description: 'Rapor kataloğu, önizleme ve CSV/Excel dışa aktarma',
       },
+      {
+        key: 'view-analytics',
+        label: 'Görüntüleme Analitiği',
+        href: '/admin/view-analytics',
+        icon: 'eye-outline',
+        permissions: ['report.view'],
+        description:
+          'Tekil görüntüleme eşikleri, günlük/haftalık/aylık analitik, içerik türü dağılımı ve şüpheli aktivite',
+      },
     ],
   },
   {

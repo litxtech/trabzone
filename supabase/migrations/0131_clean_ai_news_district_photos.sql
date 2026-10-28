@@ -1,4 +1,4 @@
--- 0110 — AI haberlerinde görünür yapay zekâ izlerini kaldır, ilçe fotoğraflarını kullan.
+-- 0131 — AI haberlerinde görünür yapay zekâ izlerini kaldır, ilçe fotoğraflarını kullan.
 --
 --  * Gövde metnindeki "AI destekli haber", "Trabzone AI Haber Merkezi" ve
 --    kategori görseli açıklamaları temizlenir.
@@ -144,6 +144,14 @@ set body = left(
   )
 from targets t
 where p.id = t.post_id;
+
+-- Paragraf aralarındaki gereksiz boş satırları tek boşluğa indir.
+update public.posts p
+set body = regexp_replace(p.body, E'\n{3,}', E'\n\n', 'g')
+where exists (
+  select 1 from public.ai_news_publications pub
+  where pub.post_id = p.id and pub.status = 'published'
+);
 
 with mapping(district, slug, credit, license_code, source_url) as (
   values
@@ -358,7 +366,85 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 6. Yayıncı profili: yapay zekâ ifadesi yok.
+-- 6. Profildeki "Haberler" sekmesi hem yerel haberleri hem kaynak haberleri
+--    gösterir; yayıncı avatarına tıklandığında tüm haberler görünür.
+-- ---------------------------------------------------------------------------
+create or replace function public.feed_profile_posts(
+  p_username text,
+  p_kind     text default 'posts',
+  p_limit    integer default 18,
+  p_offset   integer default 0
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_uid    uuid := public.tz_require_uid();
+  v_author uuid;
+  v_limit  integer := least(greatest(coalesce(p_limit, 18), 1), 40);
+  v_offset integer := greatest(coalesce(p_offset, 0), 0);
+  v_kind   text := coalesce(nullif(trim(p_kind), ''), 'posts');
+begin
+  select p.id into v_author
+  from public.profiles p
+  where p.username = lower(trim(p_username));
+
+  if v_author is null or public.is_blocked(v_uid, v_author) then
+    return jsonb_build_object('items', '[]'::jsonb);
+  end if;
+
+  if not public.can_view_profile_content(v_author) then
+    raise exception 'profile_restricted' using errcode = '42501';
+  end if;
+
+  if v_kind not in ('posts', 'media', 'news') then
+    raise exception 'invalid_kind' using errcode = '22023';
+  end if;
+
+  return jsonb_build_object(
+    'items', coalesce(
+      (
+        select jsonb_agg(public.tz_post_json(x.id, v_uid) order by x.created_at desc)
+        from (
+          select p.id, p.created_at
+          from public.posts p
+          where p.author_id = v_author
+            and p.moderation_status = 'visible'
+            and (p.visibility = 'public' or v_author = v_uid or public.is_following(v_author))
+            and (
+              v_kind = 'posts'
+              or (v_kind = 'media' and exists (
+                select 1 from public.post_media m where m.post_id = p.id
+              ))
+              or (v_kind = 'news' and (
+                exists (
+                  select 1 from public.ai_news_publications pub
+                  where pub.post_id = p.id and pub.status = 'published'
+                )
+                or exists (
+                  select 1 from public.news_publication_links l
+                  where l.post_id = p.id and l.status = 'published'
+                )
+              ))
+            )
+          order by p.created_at desc
+          limit v_limit offset v_offset
+        ) x
+      ),
+      '[]'::jsonb
+    )
+  );
+end;
+$$;
+
+revoke all on function public.feed_profile_posts(text, text, integer, integer) from public, anon;
+grant execute on function public.feed_profile_posts(text, text, integer, integer) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 7. Yayıncı profili: yapay zekâ ifadesi yok.
 -- ---------------------------------------------------------------------------
 update public.profiles
 set bio = 'Trabzone’un resmî haber hesabı. Trabzon ve 18 ilçesinden güncel gelişmeler, resmî duyurular ve yerel yaşam haberleri.',

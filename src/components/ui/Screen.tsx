@@ -26,6 +26,10 @@ export type ScreenProps = {
   /** Rendered outside the scroll area, pinned to the bottom (composers, CTAs). */
   footer?: ReactNode;
   refreshControl?: React.ReactElement;
+  /** Okuma ekranları için kaydırma konumunu izlemeye izin verir. */
+  scrollRef?: React.Ref<React.ComponentRef<typeof ScrollView>>;
+  onScroll?: React.ComponentProps<typeof ScrollView>['onScroll'];
+  scrollEventThrottle?: number;
 };
 
 export function Screen({
@@ -41,6 +45,9 @@ export function Screen({
   style,
   footer,
   refreshControl,
+  scrollRef,
+  onScroll,
+  scrollEventThrottle,
 }: ScreenProps) {
   const { theme } = useTheme();
   const { height, isVisible } = useKeyboard();
@@ -71,6 +78,9 @@ export function Screen({
 
   const content = scroll ? (
     <ScrollView
+      ref={scrollRef}
+      onScroll={onScroll}
+      scrollEventThrottle={scrollEventThrottle}
       style={styles.flex}
       contentContainerStyle={[
         padding,

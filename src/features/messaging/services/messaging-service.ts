@@ -46,6 +46,11 @@ export type MessageMediaItem = {
   height: number | null;
   duration_ms: number | null;
   sort_order: number;
+  /**
+   * Gönderim sürerken cihazdaki dosya. Sunucu bu alanı bilmez; yalnızca iyimser
+   * satırın beklemeden görünmesini sağlar.
+   */
+  local_uri?: string | null;
 };
 
 export type MessageMediaInput = {
@@ -58,7 +63,20 @@ export type MessageMediaInput = {
   mime?: string | null;
   name?: string | null;
   size?: number | null;
+  /** İyimser görünüm için yerel dosya adresi. */
+  local_uri?: string | null;
 };
+
+/** İyimser satırda sunucu yolu henüz olmayan medya işareti. */
+const LOCAL_MEDIA_PREFIX = 'local:';
+
+export function isLocalMediaPath(path: string | null | undefined): boolean {
+  return typeof path === 'string' && path.startsWith(LOCAL_MEDIA_PREFIX);
+}
+
+export function localMediaPath(uri: string): string {
+  return `${LOCAL_MEDIA_PREFIX}${uri}`;
+}
 
 export type ChatMessage = {
   id: string;

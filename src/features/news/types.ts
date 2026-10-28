@@ -167,6 +167,24 @@ export type NewsSettings = {
   publish_window_start: number;
   publish_window_end: number;
   auto_min_gap_minutes: number;
+  // Editoryal kalite ayarları (0133)
+  body_format_default: 'auto' | 'short' | 'standard' | 'extended';
+  short_min_words: number;
+  short_max_words: number;
+  standard_min_words: number;
+  standard_max_words: number;
+  extended_min_words: number;
+  extended_max_words: number;
+  title_min_chars: number;
+  title_max_chars: number;
+  spot_min_chars: number;
+  spot_max_chars: number;
+  preview_lines: number;
+  auto_subheads: boolean;
+  require_source_verification: boolean;
+  quality_check_enabled: boolean;
+  source_display_mode: 'card' | 'inline' | 'both';
+  reading_min_words: number;
 };
 
 export type NewsSettingsProgress = {
@@ -194,6 +212,23 @@ export type NewsSettingsProgress = {
   publish_window_start?: number;
   publish_window_end?: number;
   auto_min_gap_minutes?: number;
+  body_format_default?: NewsSettings['body_format_default'];
+  short_min_words?: number;
+  short_max_words?: number;
+  standard_min_words?: number;
+  standard_max_words?: number;
+  extended_min_words?: number;
+  extended_max_words?: number;
+  title_min_chars?: number;
+  title_max_chars?: number;
+  spot_min_chars?: number;
+  spot_max_chars?: number;
+  preview_lines?: number;
+  auto_subheads?: boolean;
+  require_source_verification?: boolean;
+  quality_check_enabled?: boolean;
+  source_display_mode?: NewsSettings['source_display_mode'];
+  reading_min_words?: number;
 };
 
 export type NewsReviewItem = {
@@ -336,12 +371,15 @@ export type NewsReviewAction =
 
 export type NewsAssistAction =
   | 'rewrite'
+  | 'expand'
   | 'recheck_sources'
   | 'find_photo'
   | 'improve_title'
+  | 'prepare_spot'
   | 'simplify'
   | 'proofread'
   | 'check_conflicts'
+  | 'check_quality'
   | 'social_copy';
 
 export type NewsSourceKind = 'official' | 'trusted_media' | 'unknown' | 'low_trust';
@@ -483,4 +521,101 @@ export type NewsPublicList = {
   total: number;
   limit: number;
   offset: number;
+};
+
+/** ---------------------------------------------------------------------------
+ * Uygulama içi premium haber okuma modeli (`news_post_detail` RPC'si).
+ * ------------------------------------------------------------------------- */
+
+export type NewsDetailMedia = {
+  id: string;
+  storage_path: string;
+  thumbnail_path: string | null;
+  media_type: 'image' | 'video';
+  width: number | null;
+  height: number | null;
+  duration_ms: number | null;
+  display_fit: 'auto' | 'cover' | 'contain';
+  alt_text: string | null;
+  credit: string | null;
+  license_code: string | null;
+  attribution: string | null;
+  is_placeholder: boolean;
+};
+
+export type NewsDetailSource = {
+  domain: string;
+  kind: string;
+  url: string;
+  title: string | null;
+  retrieved_at: string | null;
+  name?: string | null;
+};
+
+export type NewsDetail = {
+  post_id: string;
+  kind: 'ai' | 'source';
+  title: string;
+  subtitle: string | null;
+  summary: string | null;
+  lead: string | null;
+  body: string;
+  body_notice: string | null;
+  body_format: 'short' | 'standard' | 'extended' | string;
+  word_count: number;
+  reading_minutes: number;
+  category_slug: string | null;
+  category_name: string | null;
+  district: string | null;
+  published_at: string | null;
+  updated_at: string | null;
+  published_by: string;
+  publisher: {
+    username: string;
+    display_name: string | null;
+    avatar_path: string | null;
+    is_verified: boolean;
+  };
+  ai_generated: boolean;
+  disclosure: string | null;
+  sources: NewsDetailSource[];
+  source_count: number;
+  source_card: Record<string, unknown> | null;
+  media: NewsDetailMedia[];
+  editorial_checks: Record<string, unknown> | null;
+  counts: {
+    like: number;
+    comment: number;
+    save: number;
+    share: number;
+  };
+};
+
+export type NewsRelatedItem = {
+  post_id: string;
+  title: string;
+  category_name: string | null;
+  district: string | null;
+  published_at: string;
+  media_path: string | null;
+  media_fit: 'auto' | 'cover' | 'contain' | null;
+  kind: 'ai' | 'source';
+  word_count: number;
+};
+
+export type NewsEditorialQueueItem = {
+  post_id: string;
+  kind: 'ai' | 'source';
+  title: string;
+  word_count: number;
+  body_format: string;
+  source_url: string | null;
+  source_name: string | null;
+  published_at: string;
+  needs_review: boolean;
+  risk_level: string;
+};
+
+export type NewsEditorialQueue = {
+  items: NewsEditorialQueueItem[];
 };

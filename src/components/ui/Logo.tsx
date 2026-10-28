@@ -180,6 +180,53 @@ export function Wordmark({
   );
 }
 
+type BrandWordmarkProps = {
+  /** Yazinin punto boyutu (dp). */
+  size?: number;
+  /** Ana harf rengi; verilmezse tema metin rengi kullanilir. */
+  color?: string;
+  /** Sondaki marka noktasinin rengi; verilmezse premium mavi kullanilir. */
+  accentColor?: string;
+};
+
+/**
+ * Ana akis icin kompakt marka yazisi: "trabzone."
+ *
+ * Buyuk logo yerine kullanilan bu surum, ayni marka kimligini (Sora Bold ve
+ * mavi vurgu) korurken basligi tek satirda tutar. Sondaki nokta marka
+ * vurgusudur; boylece ek bir ikon olmadan yazi kendi basina kimlik tasir.
+ */
+export function BrandWordmark({ size = 21, color, accentColor }: BrandWordmarkProps) {
+  const { theme } = useTheme();
+  const baseColor = color ?? theme.colors.text;
+  const accent = accentColor ?? theme.colors.primary;
+  // Kucuk puntoda normal harf araligi dagilmis gorunur; optik olarak sikilastir.
+  const letterSpacing = size * -0.012;
+
+  return (
+    <Text
+      accessibilityRole="image"
+      accessibilityLabel="Trabzone"
+      allowFontScaling={false}
+      numberOfLines={1}
+      style={[
+        styles.brandWord,
+        {
+          color: baseColor,
+          fontSize: size,
+          lineHeight: size * 1.16,
+          letterSpacing,
+          // Son harften sonra eklenen araligi kirp; yazi sola kaymis gorunmesin.
+          marginRight: -letterSpacing,
+        },
+      ]}
+    >
+      trabzone
+      <Text style={[styles.brandDot, { color: accent }]}>.</Text>
+    </Text>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
@@ -189,6 +236,13 @@ const styles = StyleSheet.create({
     fontFamily: fontFamilies.displayBold,
     textTransform: 'uppercase',
     includeFontPadding: false,
+  },
+  brandWord: {
+    fontFamily: fontFamilies.displayBold,
+    includeFontPadding: false,
+  },
+  brandDot: {
+    fontFamily: fontFamilies.displayBold,
   },
   // Marka harfi: ayni agirlikta kalir; yalnizca rengi degisir.
   accent: {

@@ -122,13 +122,23 @@ function readImageSize(uri: string): Promise<{ width: number; height: number } |
   });
 }
 
+/** Görselin yeniden kodlanmadan yüklenebileceği üst sınırlar. */
+const IMAGE_MAX_SIDE = 1600;
+const IMAGE_SKIP_BYTES = 1_500_000;
+/** Yeniden kodlamadan geçirilebilecek (her cihazda görüntülenen) biçimler. */
+const SKIPPABLE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const SKIPPABLE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp']);
+
 /**
  * Görseli tek geçişte boyutlandırıp JPEG'e çevirir. Önceden iki kez render
  * ediliyordu (boyut okuma + yeniden boyutlandırma); çoklu fotoğraf
  * gönderilerinde bu, sıkıştırma süresini ikiye katlıyordu.
  */
-async function compressImage(uri: string, maxSize: number): Promise<string> {
-  const dims = await readImageSize(uri);
+async function compressImage(
+  uri: string,
+  maxSize: number,
+  dims: { width: number; height: number } | null,
+): Promise<string> {
   const context = ImageManipulator.manipulate(uri);
 
   if (dims) {
@@ -141,6 +151,56 @@ async function compressImage(uri: string, maxSize: number): Promise<string> {
   const rendered = await context.renderAsync();
   const saved = await rendered.saveAsync({ compress: 0.84, format: SaveFormat.JPEG });
   return saved.uri;
+}
+
+type PreparedImage = {
+  uri: string;
+  mime: string;
+  extension: string;
+  width: number | null;
+  height: number | null;
+  size: number | null;
+};
+
+/**
+ * Fotoğrafı yüklemeye hazırlar.
+ *
+ * Küçük ve zaten evrensel biçimde olan görseller (sohbet ekran görüntüleri,
+ * indirilmiş fotoğraflar) hiç yeniden kodlanmaz: cihazda render + JPEG encode
+ * etmek yükleme başlamadan önce yüzlerce milisaniye kaybettiriyordu. HEIC gibi
+ * her platformda açılmayan biçimler ve büyük fotoğraflar ise küçültülür.
+ */
+async function prepareImage(
+  uri: string,
+  mime: string,
+  fileSize: number | null,
+): Promise<PreparedImage> {
+  const dims = await readImageSize(uri);
+  const extension = extensionFor(mime, uri);
+  const size = fileSize ?? (await localFileSize(uri));
+  const longest = dims ? Math.max(dims.width, dims.height) : 0;
+
+  if (
+    dims &&
+    longest <= IMAGE_MAX_SIDE &&
+    SKIPPABLE_IMAGE_TYPES.has(mime) &&
+    SKIPPABLE_EXTENSIONS.has(extension) &&
+    size !== null &&
+    size <= IMAGE_SKIP_BYTES
+  ) {
+    return { uri, mime, extension, width: dims.width, height: dims.height, size };
+  }
+
+  const compressed = await compressImage(uri, IMAGE_MAX_SIDE, dims);
+  const compressedSize = await localFileSize(compressed);
+  return {
+    uri: compressed,
+    mime: 'image/jpeg',
+    extension: 'jpg',
+    width: dims?.width ?? null,
+    height: dims?.height ?? null,
+    size: compressedSize ?? size,
+  };
 }
 
 function fileNameFor(
@@ -189,9 +249,13 @@ export async function uploadMedia(input: UploadInput): Promise<Result<UploadedMe
 
   if (kind === 'image' && input.compressImages !== false) {
     try {
-      preparedUri = await compressImage(input.uri, 1600);
-      contentType = 'image/jpeg';
-      extension = 'jpg';
+      const prepared = await prepareImage(input.uri, guessedMime, input.fileSize ?? null);
+      preparedUri = prepared.uri;
+      contentType = prepared.mime;
+      extension = prepared.extension;
+      width = prepared.width ?? width;
+      height = prepared.height ?? height;
+      size = prepared.size ?? size;
     } catch {
       return fail(appError('unknown', 'Görsel işlenemedi. Başka bir fotoğraf dene.'));
     }
@@ -377,11 +441,38 @@ export async function removeMedia(bucket: MediaBucket, paths: string[]) {
 }
 
 /**
+ * İmzalı sohbet medyası adresleri süreç içinde önbelleklenir.
+ *
+ * Sohbet ekranı her yeni mesajda tüm medya yollarını yeniden imzalıyordu. URL
+ * ömrü bir saat olduğu için aynı dosyayı tekrar tekrar imzalamak, yeni gelen
+ * bir fotoğrafın görünmesini saniyelerce geciktiren gereksiz bir ağ turuydu.
+ */
+const SIGNED_URL_CACHE_LIMIT = 800;
+/** Süresi dolmaya bu kadar kala yeniden imzalanır. */
+const SIGNED_URL_SAFETY_MS = 5 * 60_000;
+const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
+
+function cacheSignedUrl(path: string, url: string, ttlMs: number) {
+  if (!path || !url) {
+    return;
+  }
+  signedUrlCache.set(path, { url, expiresAt: Date.now() + ttlMs });
+  while (signedUrlCache.size > SIGNED_URL_CACHE_LIMIT) {
+    const oldest = signedUrlCache.keys().next();
+    if (oldest.done) {
+      break;
+    }
+    signedUrlCache.delete(oldest.value);
+  }
+}
+
+/**
  * Gizli sohbet medyasını imzalar.
  *
  * Yeni medya R2'deki private bucket'ta durur ve `r2-sign` üzerinden tek turda
  * toplu imzalanır. Eski (R2 öncesi) mesajlar Supabase Storage'da kaldığı için
- * onlar da imzalanır; iki yol aynı haritada birleşir.
+ * onlar da imzalanır; iki yol aynı haritada birleşir. Önbellekte geçerli adresi
+ * olan yollar hiç istemez: yeni gelen tek bir fotoğraf için tek yol imzalanır.
  */
 export async function signedMessageUrls(
   paths: string[],
@@ -392,9 +483,25 @@ export async function signedMessageUrls(
     return {};
   }
 
-  const r2Paths = unique.filter((path) => isR2Path(path));
-  const legacyPaths = unique.filter((path) => !isR2Path(path));
+  const ttlMs = Math.max(60, expiresIn) * 1000;
   const map: Record<string, string> = {};
+  const missing: string[] = [];
+  const now = Date.now();
+  for (const path of unique) {
+    const cached = signedUrlCache.get(path);
+    if (cached && cached.expiresAt - SIGNED_URL_SAFETY_MS > now) {
+      map[path] = cached.url;
+    } else {
+      missing.push(path);
+    }
+  }
+
+  if (missing.length === 0) {
+    return map;
+  }
+
+  const r2Paths = missing.filter((path) => isR2Path(path));
+  const legacyPaths = missing.filter((path) => !isR2Path(path));
 
   if (r2Paths.length > 0) {
     Object.assign(map, await signedR2GetUrls('message-media', r2Paths));
@@ -415,6 +522,10 @@ export async function signedMessageUrls(
     } catch {
       // Eski medya imzalanamazsa yeni medya yine gösterilir.
     }
+  }
+
+  for (const [path, url] of Object.entries(map)) {
+    cacheSignedUrl(path, url, ttlMs);
   }
 
   return map;

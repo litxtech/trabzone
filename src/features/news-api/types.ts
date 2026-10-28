@@ -392,6 +392,14 @@ export type NewsSettings = {
   queue_pending: number;
   queue_blocked: number;
   active_sources: number;
+  /** Kaç aktif kaynak onaysız (otomatik) yayın yapıyor. */
+  sources_auto_publish: number;
+  /** Onaysız yayına uygun (keşif dışı) aktif kaynak sayısı. */
+  sources_auto_total: number;
+  /** AI haber motorunun otomatik yayın durumu. */
+  ai_auto_publish: boolean;
+  /** Tüm kaynaklar + AI motoru birlikte onaysız yayın yapıyor mu. */
+  auto_publish_all: boolean;
   updated_at: string;
 };
 

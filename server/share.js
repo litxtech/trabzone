@@ -93,7 +93,7 @@ function normalizeCard(raw) {
 
   return {
     type,
-    label: TYPE_LABELS[type] || 'Trabzone',
+    label: raw.label || TYPE_LABELS[type] || 'Trabzone',
     title,
     description,
     image: raw.image_path ? mediaUrl(raw.bucket, raw.image_path) : null,

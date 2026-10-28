@@ -31,6 +31,12 @@ export const hitSlop = {
 export const layout = {
   screenPadding: spacing.xl,
   maxContentWidth: 560,
+  /** Web'de sosyal akış sütunu; Instagram benzeri okunabilir genişlik. */
+  feedMaxWidth: 680,
+  /** Haber okuma ekranı; uzun metinlerde satır uzunluğunu sınırlar. */
+  readerMaxWidth: 760,
+  /** Kurumsal profil ve haber vitrini. */
+  profileMaxWidth: 980,
   inputHeight: 54,
   buttonHeight: 54,
   tabBarHeight: 64,

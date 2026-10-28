@@ -175,6 +175,10 @@ export type ProfileView = {
   blocked: boolean;
   blocked_by_me: boolean;
   accepts_friend_requests: boolean;
+  /** Kurumsal haber hesabı alanları (0133). */
+  is_news_publisher?: boolean;
+  news_count?: number;
+  news_notifications?: boolean;
 };
 
 export async function fetchProfileView(username: string): Promise<Result<ProfileView | null>> {

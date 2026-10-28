@@ -246,6 +246,15 @@ export function useNewsApiSetPublishMode() {
   });
 }
 
+export function useNewsApiSetAutoPublishAll() {
+  const invalidate = useInvalidateNewsApi();
+  return useMutation({
+    mutationFn: async (input: { enabled: boolean; includeAi?: boolean }) =>
+      unwrap(await newsApi.setNewsAutoPublishAll(input.enabled, input.includeAi ?? true)),
+    onSuccess: invalidate,
+  });
+}
+
 export function useNewsApiRunRequest() {
   const invalidate = useInvalidateNewsApi();
   return useMutation({

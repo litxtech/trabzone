@@ -14,6 +14,38 @@ export type PostMedia = {
   width: number | null;
   height: number | null;
   duration_ms: number | null;
+  /** Sunucunun önerdiği çerçeveleme; 'auto' ise istemci orana göre karar verir. */
+  display_fit?: 'auto' | 'cover' | 'contain' | null;
+};
+
+export type PostNewsMeta = {
+  post_id?: string;
+  kind: 'ai' | 'source' | string;
+  slug?: string | null;
+  title: string;
+  subtitle?: string | null;
+  spot?: string | null;
+  lead?: string | null;
+  preview?: string | null;
+  body_format?: 'short' | 'standard' | 'extended' | string | null;
+  word_count?: number | null;
+  reading_minutes?: number | null;
+  /** Admin > Haber kalitesi ayarından gelen akış önizleme satır sayısı. */
+  preview_lines?: number | null;
+  category_slug?: string | null;
+  category_name?: string | null;
+  district?: string | null;
+  published_at?: string | null;
+  updated_at?: string | null;
+  ai_generated?: boolean;
+  source_count?: number | null;
+  sources?: {
+    domain: string;
+    kind: string;
+    url: string;
+    title: string | null;
+    retrieved_at?: string | null;
+  }[] | null;
 };
 
 export type PostSource = {
@@ -29,6 +61,24 @@ export type PostSource = {
   license_status: string | null;
   same_as_author: boolean;
   published_at: string | null;
+  /** Kaynak haberlerinde akış kartı için birleşik haber meta'sı. */
+  post_id?: string;
+  kind?: string;
+  slug?: string | null;
+  title?: string | null;
+  subtitle?: string | null;
+  spot?: string | null;
+  lead?: string | null;
+  preview?: string | null;
+  body_format?: string | null;
+  word_count?: number | null;
+  preview_lines?: number | null;
+  category_slug?: string | null;
+  category_name?: string | null;
+  district?: string | null;
+  updated_at?: string | null;
+  ai_generated?: boolean;
+  source_count?: number | null;
 };
 
 export type FeedPost = {
@@ -47,12 +97,17 @@ export type FeedPost = {
   comment_count: number;
   save_count: number;
   share_count: number;
+  /** Hesap bazlı tekil görüntüleme (cihazdan bağımsız). */
+  view_count?: number;
+  /** Geçmişte tekil doğrulanmamış toplam; ayrı metrik olarak tutulur. */
+  view_legacy_count?: number;
   is_edited: boolean;
   created_at: string;
   updated_at: string;
   liked: boolean;
   saved: boolean;
   is_mine: boolean;
+  news?: PostNewsMeta | null;
   source?: PostSource | null;
   media: PostMedia[];
 };

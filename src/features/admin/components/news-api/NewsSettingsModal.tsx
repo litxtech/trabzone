@@ -6,7 +6,7 @@ import { errorMessage } from '@/services/errors';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatDateTimeTr } from '@/utils/date';
 
-import { useNewsApiSaveSettings, useNewsApiSettings } from '../../hooks/use-admin-news-api';
+import { useNewsApiSaveSettings, useNewsApiSetAutoPublishAll, useNewsApiSettings } from '../../hooks/use-admin-news-api';
 import { useAdminToast } from '../AdminToast';
 import type { NewsSettings } from '@/features/news-api/types';
 
@@ -29,8 +29,23 @@ export function NewsSettingsModal({ visible, onClose }: { visible: boolean; onCl
   const toast = useAdminToast();
   const settings = useNewsApiSettings();
   const save = useNewsApiSaveSettings();
+  const autoPublishAll = useNewsApiSetAutoPublishAll();
   const [form, setForm] = useState<ReturnType<typeof formFromSettings> | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const toggleAutoPublishAll = async (enabled: boolean) => {
+    setError(null);
+    try {
+      await autoPublishAll.mutateAsync({ enabled, includeAi: true });
+      toast.success(
+        enabled
+          ? 'Onaysız yayın açıldı: kaynaklar ve AI haberleri kendiliğinden yayımlanacak.'
+          : 'Onaysız yayın kapatıldı: yeni haberler inceleme kuyruğunda bekleyecek.',
+      );
+    } catch (toggleError) {
+      setError(errorMessage(toggleError, 'Onaysız yayın anahtarı değiştirilemedi.'));
+    }
+  };
 
   // Sunucudan gelen güncel ayarları forma yansıt.
   const data = settings.data;
@@ -107,6 +122,17 @@ export function NewsSettingsModal({ visible, onClose }: { visible: boolean; onCl
             </View>
           </View>
 
+          <ToggleRow
+            title="Onaysız yayın (tüm kaynaklar)"
+            description={
+              data.auto_publish_all
+                ? `Açık: ${data.sources_auto_publish}/${data.sources_auto_total} kaynak ve AI haberleri editör onayı beklemeden yayımlanıyor. Kapatmak için dokun.`
+                : `Kapalı: haberler inceleme kuyruğunda bekler. ${data.sources_auto_publish}/${data.sources_auto_total} kaynakta otomatik yayın açık.`
+            }
+            value={data.auto_publish_all}
+            disabled={autoPublishAll.isPending}
+            onValueChange={(value) => void toggleAutoPublishAll(value)}
+          />
           <ToggleRow
             title="Haber API merkezi etkin"
             description="Kapatıldığında zamanlanmış çekim ve otomatik yayın turu çalışmaz."

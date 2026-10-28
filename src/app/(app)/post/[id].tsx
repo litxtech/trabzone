@@ -8,6 +8,9 @@ import { AppText, Screen, ScreenHeader } from '@/components/ui';
 import { CommentsSheet } from '@/features/comments/components/CommentsSheet';
 import { PostCard } from '@/features/feed/components/PostCard';
 import { usePost } from '@/features/feed/hooks/use-feed';
+import { NewsReaderScreen } from '@/features/news/components/NewsReaderScreen';
+import { useNewsDetail } from '@/features/news/hooks/use-news-reader';
+import { useContentViewRegistration } from '@/features/views/use-content-views';
 import { useTheme } from '@/theme/ThemeProvider';
 
 export default function PostDetailScreen() {
@@ -18,14 +21,27 @@ export default function PostDetailScreen() {
   const initialCommentId = typeof params.comment === 'string' ? params.comment : undefined;
 
   const post = usePost(postId);
+  const news = useNewsDetail(postId);
+  // Detay ekranı gerçekten yüklendiğinde tekil görüntüleme kaydedilir.
+  useContentViewRegistration({
+    type: 'post',
+    id: postId || null,
+    surface: news.data ? 'news_detail' : 'post_detail',
+    enabled: Boolean(post.data || news.data),
+  });
   // Paylaşılan yorum bağlantısı doğrudan aynı premium yorum kartını açar.
   const [commentsOpen, setCommentsOpen] = useState(Boolean(initialCommentId));
+
+  // Haber gönderileri sosyal kart yerine ayrı editoryal okuma ekranında açılır.
+  if (news.data) {
+    return <NewsReaderScreen detail={news.data} initialCommentsOpen={Boolean(initialCommentId)} />;
+  }
 
   return (
     <Screen edges={['top', 'left', 'right', 'bottom']} scroll keyboardAware>
       <ScreenHeader title="Gönderi" onBack={() => router.back()} />
 
-      {post.isLoading ? (
+      {post.isLoading || (post.data && news.isLoading) ? (
         <View style={styles.loading}>
           <ActivityIndicator color={theme.colors.primary} />
         </View>

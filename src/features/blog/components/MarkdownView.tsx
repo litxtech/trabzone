@@ -230,9 +230,29 @@ export function extractHeadings(markdown: string): { id: string; text: string }[
     .map((heading) => ({ id: heading.id, text: heading.text }));
 }
 
-export function MarkdownView({ markdown }: { markdown: string }) {
+export function MarkdownView({
+  markdown,
+  textScale = 1,
+}: {
+  markdown: string;
+  /** Okuma ekranındaki yazı boyutu ayarı; 1 = varsayılan. */
+  textScale?: number;
+}) {
   const { theme } = useTheme();
   const blocks = useMemo(() => parse(markdown), [markdown]);
+  const scale = Math.min(Math.max(textScale, 0.85), 1.5);
+  const bodyStyle = useMemo(
+    () => ({ fontSize: 17.5 * scale, lineHeight: 29 * scale }),
+    [scale],
+  );
+  const heading2Style = useMemo(
+    () => ({ fontSize: 22 * scale, lineHeight: 30 * scale }),
+    [scale],
+  );
+  const heading3Style = useMemo(
+    () => ({ fontSize: 19 * scale, lineHeight: 26 * scale }),
+    [scale],
+  );
 
   return (
     <View style={styles.root}>
@@ -243,14 +263,19 @@ export function MarkdownView({ markdown }: { markdown: string }) {
           const variant = block.level === 2 ? 'h2' : block.level === 3 ? 'h3' : 'title';
           return (
             <View key={key} nativeID={Platform.OS === 'web' ? block.id : undefined} style={styles.heading}>
-              <AppText variant={variant}>{renderInline(block.text, key)}</AppText>
+              <AppText
+                variant={variant}
+                style={block.level === 2 ? heading2Style : block.level === 3 ? heading3Style : undefined}
+              >
+                {renderInline(block.text, key)}
+              </AppText>
             </View>
           );
         }
 
         if (block.type === 'paragraph') {
           return (
-            <AppText key={key} variant="body" color="textSecondary" style={styles.paragraph}>
+            <AppText key={key} variant="body" color="textSecondary" style={[styles.paragraph, bodyStyle]}>
               {renderInline(block.text, key)}
             </AppText>
           );
@@ -261,10 +286,10 @@ export function MarkdownView({ markdown }: { markdown: string }) {
             <View key={key} style={styles.list}>
               {block.items.map((item, itemIndex) => (
                 <View key={`${key}-${itemIndex}`} style={styles.listRow}>
-                  <AppText variant="body" color="textTertiary" style={styles.bullet}>
+                  <AppText variant="body" color="textTertiary" style={[styles.bullet, bodyStyle]}>
                     {block.ordered ? `${itemIndex + 1}.` : '•'}
                   </AppText>
-                  <AppText variant="body" color="textSecondary" style={styles.flex}>
+                  <AppText variant="body" color="textSecondary" style={[styles.flex, bodyStyle]}>
                     {renderInline(item, `${key}-${itemIndex}`)}
                   </AppText>
                 </View>
@@ -283,7 +308,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
               ]}
             >
               {block.lines.map((line, lineIndex) => (
-                <AppText key={`${key}-${lineIndex}`} variant="body" color="textSecondary">
+                <AppText key={`${key}-${lineIndex}`} variant="body" color="textSecondary" style={bodyStyle}>
                   {renderInline(line, `${key}-${lineIndex}`)}
                 </AppText>
               ))}

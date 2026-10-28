@@ -226,6 +226,12 @@ export const setNewsAutoPublish = (id: string, enabled: boolean) =>
 export const setNewsPublishMode = (id: string, mode: string) =>
   rpc<NewsConnection>('admin_news_connection_set_publish_mode', { p_id: id, p_mode: mode });
 
+export const setNewsAutoPublishAll = (enabled: boolean, includeAi = true) =>
+  rpc<NewsSettings>('admin_news_auto_publish_all', {
+    p_enabled: enabled,
+    p_include_ai: includeAi,
+  });
+
 export const requestNewsRun = (id: string) =>
   rpc<{ requested: boolean }>('admin_news_run_request', { p_id: id });
 

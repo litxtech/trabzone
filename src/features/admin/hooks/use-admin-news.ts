@@ -166,6 +166,38 @@ export function useAdminNewsPublisherBind() {
   });
 }
 
+export function useAdminNewsEditorialQueue(limit = 40) {
+  return useQuery({
+    queryKey: adminNewsKeys.editorial,
+    queryFn: async () => unwrap(await news.fetchNewsEditorialQueue(limit)),
+    staleTime: 20_000,
+  });
+}
+
+export function useAdminNewsSourceBodySave() {
+  const invalidate = useInvalidateNews();
+  return useMutation({
+    mutationFn: async (input: {
+      postId: string;
+      payload: Record<string, unknown>;
+      reason?: string | null;
+    }) =>
+      unwrap(
+        await news.saveNewsSourceBody(input.postId, input.payload, input.reason ?? null),
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useAdminNewsSourceEnrich() {
+  const invalidate = useInvalidateNews();
+  return useMutation({
+    mutationFn: async (postId: string) =>
+      unwrap(await news.invokeNewsSourceEnrich(postId)),
+    onSuccess: invalidate,
+  });
+}
+
 /** Edge function üzerinden AI düzenleme yardımı; anahtar istemciye inmez. */
 export function useAdminNewsAssist() {
   const invalidate = useInvalidateNews();

@@ -26,8 +26,7 @@ export function ScreenHeader({ title, subtitle, onBack, right, left }: ScreenHea
             <IconButton
               name="chevron-back"
               accessibilityLabel="Geri"
-              variant="surface"
-              size={20}
+              size={22}
               onPress={onBack}
             />
           ) : (

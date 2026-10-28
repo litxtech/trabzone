@@ -12,10 +12,13 @@ import {
   Avatar,
   Button,
   Card,
+  Logo,
   Screen,
   ScreenHeader,
   Skeleton,
 } from '@/components/ui';
+import { NewsBrandCover } from '@/features/news/components/NewsBrandCover';
+import { useNewsNotifications } from '@/features/news/hooks/use-news-reader';
 import { useCanMessage, useStartDirectConversation } from '@/features/messaging/hooks/use-chat';
 import { profileShareLink } from '@/features/share/links';
 import { shareContent } from '@/features/share/share-action';
@@ -32,6 +35,7 @@ import { useBlockUser, useUnblockUser } from '@/features/profile/hooks/use-profi
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import type { ConnectionKind } from '@/features/profile/services/social-service';
 import { useReportSheet } from '@/features/safety/components/ReportSheetProvider';
+import { useContentViewCount, useContentViewRegistration } from '@/features/views/use-content-views';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 
@@ -43,6 +47,14 @@ export default function PublicProfileScreen() {
   const { openReport } = useReportSheet();
 
   const { data: profile, isLoading, isError, refetch } = useProfileView(handle);
+  // Profil görüntülemesi de hesap bazlı tekilleştirilir; sahibi +0 üretir.
+  const profileViewCount = useContentViewCount({ type: 'profile', id: profile?.id ?? null });
+  useContentViewRegistration({
+    type: 'profile',
+    id: profile?.id ?? null,
+    surface: 'profile',
+    enabled: Boolean(profile) && !profile?.is_me,
+  });
   const toggleFollow = useToggleFollow();
   const sendRequest = useSendFriendRequest();
   const respondRequest = useRespondFriendRequest();
@@ -53,6 +65,8 @@ export default function PublicProfileScreen() {
   const canMessage = useCanMessage(
     profile && !profile.is_me && !profile.blocked ? profile.id : null,
   );
+  const newsNotifications = useNewsNotifications();
+  const [notificationOverride, setNotificationOverride] = useState<boolean | null>(null);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [connections, setConnections] = useState<ConnectionKind | null>(null);
@@ -140,8 +154,28 @@ export default function PublicProfileScreen() {
     blockUser.isPending ||
     unblockUser.isPending;
 
+  const isNewsPublisher =
+    Boolean(profile?.is_news_publisher) ||
+    profile?.username.toLocaleLowerCase('tr-TR') === 'trabzonehaber';
+  const notificationsOn = notificationOverride ?? profile?.news_notifications ?? false;
+  const corporateBio =
+    'Trabzone’un resmî haber hesabı. Trabzon ve 18 ilçesinden güncel gelişmeler, doğrulanmış yerel haberler, resmî duyurular ve şehir yaşamından haberler.';
+  const displayBio = profile?.bio?.trim() ? profile.bio : isNewsPublisher ? corporateBio : null;
+
+  const toggleNotifications = () => {
+    if (!profile) return;
+    setActionError(null);
+    newsNotifications.mutate(!notificationsOn, {
+      onSuccess: (enabled) => {
+        setNotificationOverride(enabled);
+        haptics.success();
+      },
+      onError: (error) => setActionError(error.message),
+    });
+  };
+
   return (
-    <Screen edges={['top', 'left', 'right']} scroll>
+    <Screen edges={['top', 'left', 'right']} scroll contentContainerStyle={styles.page}>
       <ScreenHeader
         title={profile ? `@${profile.username}` : 'Profil'}
         onBack={() => router.back()}
@@ -217,32 +251,47 @@ export default function PublicProfileScreen() {
         </Card>
       ) : (
         <>
-          <View style={styles.cover}>
-            {profile.cover_path ? (
-              <Image
-                source={{ uri: mediaPublicUrl('cover', profile.cover_path) ?? undefined }}
-                style={StyleSheet.absoluteFill}
-                contentFit="cover"
-                transition={200}
-                cachePolicy="memory-disk"
-              />
-            ) : (
-              <LinearGradient
-                colors={theme.gradients.aurora}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFill}
-              />
-            )}
-          </View>
+          {isNewsPublisher ? (
+            <NewsBrandCover />
+          ) : (
+            <View style={styles.cover}>
+              {profile.cover_path ? (
+                <Image
+                  source={{ uri: mediaPublicUrl('cover', profile.cover_path) ?? undefined }}
+                  style={StyleSheet.absoluteFill}
+                  contentFit="cover"
+                  transition={200}
+                  cachePolicy="memory-disk"
+                />
+              ) : (
+                <LinearGradient
+                  colors={theme.gradients.aurora}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={StyleSheet.absoluteFill}
+                />
+              )}
+            </View>
+          )}
 
           <View style={styles.avatarRow}>
-            <Avatar
-              uri={mediaPublicUrl('avatar', profile.avatar_path)}
-              name={fullName}
-              size={92}
-              ring
-            />
+            {isNewsPublisher ? (
+              <View
+                style={[
+                  styles.corporateAvatar,
+                  { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                ]}
+              >
+                <Logo size={84} />
+              </View>
+            ) : (
+              <Avatar
+                uri={mediaPublicUrl('avatar', profile.avatar_path)}
+                name={fullName}
+                size={92}
+                ring
+              />
+            )}
             {profile.follows_me ? (
               <View
                 style={[
@@ -271,6 +320,15 @@ export default function PublicProfileScreen() {
               @{profile.username}
             </AppText>
 
+            {isNewsPublisher ? (
+              <View style={[styles.officialBadge, { backgroundColor: theme.colors.primarySoft }]}>
+                <Ionicons name="newspaper" size={12} color={theme.colors.primaryDeep} />
+                <AppText variant="caption" color="primaryDeep">
+                  Resmî haber hesabı · doğrulanmış kaynaklar
+                </AppText>
+              </View>
+            ) : null}
+
             {profile.restricted ? (
               <View
                 style={[
@@ -285,9 +343,9 @@ export default function PublicProfileScreen() {
                     : 'Bu hesap yalnızca takipçilerine açık. Takip ederek içerikleri görebilirsin.'}
                 </AppText>
               </View>
-            ) : profile.bio ? (
+            ) : displayBio ? (
               <AppText variant="body" style={styles.bio}>
-                {profile.bio}
+                {displayBio}
               </AppText>
             ) : null}
 
@@ -315,6 +373,69 @@ export default function PublicProfileScreen() {
                 onPress={() => router.push('/settings/edit-profile')}
                 style={styles.selfButton}
               />
+            ) : isNewsPublisher ? (
+              <>
+                <View style={styles.actions}>
+                  <Button
+                    label={profile.i_follow ? 'Takibi bırak' : 'Takip et'}
+                    variant={profile.i_follow ? 'outline' : 'primary'}
+                    onPress={toggleFollowAction}
+                    loading={toggleFollow.isPending}
+                    disabled={busy && !toggleFollow.isPending}
+                    leftIcon={
+                      profile.i_follow ? undefined : (
+                        <Ionicons name="add" size={17} color="#FFFFFF" />
+                      )
+                    }
+                    style={styles.actionButton}
+                  />
+                  <Button
+                    label={notificationsOn ? 'Bildirimler açık' : 'Bildirimleri aç'}
+                    variant="secondary"
+                    onPress={toggleNotifications}
+                    loading={newsNotifications.isPending}
+                    disabled={busy || newsNotifications.isPending}
+                    leftIcon={
+                      <Ionicons
+                        name={notificationsOn ? 'notifications' : 'notifications-outline'}
+                        size={16}
+                        color={theme.colors.primaryDeep}
+                      />
+                    }
+                    style={styles.actionButton}
+                  />
+                </View>
+
+                <View style={styles.actions}>
+                  <Button
+                    label="Profili paylaş"
+                    variant="outline"
+                    onPress={() => void shareProfile()}
+                    leftIcon={
+                      <Ionicons name="share-social-outline" size={16} color={theme.colors.text} />
+                    }
+                    style={styles.actionButton}
+                  />
+                  {canMessage.data === false ? null : (
+                    <Button
+                      label="Mesaj gönder"
+                      variant="outline"
+                      onPress={messageProfile}
+                      loading={startChat.isPending}
+                      disabled={busy && !startChat.isPending}
+                      leftIcon={
+                        <Ionicons name="chatbubble-outline" size={16} color={theme.colors.text} />
+                      }
+                      style={styles.actionButton}
+                    />
+                  )}
+                </View>
+
+                <AppText variant="caption" color="textTertiary" style={styles.requestNote}>
+                  Kurumsal haber hesabı: haber bildirimleri yalnızca yayınlanan doğrulanmış
+                  içerikler için gönderilir.
+                </AppText>
+              </>
             ) : (
               <>
                 <View style={styles.actions}>
@@ -451,7 +572,10 @@ export default function PublicProfileScreen() {
           </View>
 
           <View style={[styles.statsRow, { borderColor: theme.colors.divider }]}>
-            <Stat value={profile.posts_count} label="Gönderi" />
+            <Stat
+              value={isNewsPublisher ? profile.news_count ?? 0 : profile.posts_count}
+              label={isNewsPublisher ? 'Haber' : 'Gönderi'}
+            />
             <View style={[styles.statDivider, { backgroundColor: theme.colors.divider }]} />
             <Stat
               value={profile.followers_count}
@@ -463,6 +587,19 @@ export default function PublicProfileScreen() {
               value={profile.following_count}
               label="Takip"
               onPress={() => setConnections('following')}
+            />
+            <View style={[styles.statDivider, { backgroundColor: theme.colors.divider }]} />
+            <Stat
+              value={profileViewCount ?? 0}
+              label="Görüntüleme"
+              onPress={
+                profile.is_me
+                  ? () =>
+                      router.push(
+                        `/content-stats?type=profile&id=${profile.id}` as never,
+                      )
+                  : undefined
+              }
             />
           </View>
 
@@ -580,6 +717,8 @@ function formatJoined(iso: string): string {
 }
 
 const styles = StyleSheet.create({
+  // Web'de kapak, kimlik ve haber vitrini tek editoryal sütunda toplanır.
+  page: { width: '100%', maxWidth: 980, alignSelf: 'center' },
   flex: { flex: 1 },
   menuButton: {
     width: 40,
@@ -619,6 +758,25 @@ const styles = StyleSheet.create({
   identity: { paddingTop: 10, gap: 3 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   name: { flexShrink: 1 },
+  officialBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 999,
+    marginTop: 6,
+  },
+  corporateAvatar: {
+    width: 96,
+    height: 96,
+    borderRadius: 28,
+    borderWidth: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
   bio: { marginTop: 8 },
   restricted: {
     flexDirection: 'row',

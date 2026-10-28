@@ -116,9 +116,99 @@ type Settings = {
   notify_enabled: boolean;
 };
 
+type BodyFormat = 'short' | 'standard' | 'extended';
+
+type EditorialSettings = {
+  body_format_default: 'auto' | BodyFormat;
+  short_min_words: number;
+  short_max_words: number;
+  standard_min_words: number;
+  standard_max_words: number;
+  extended_min_words: number;
+  extended_max_words: number;
+  title_min_chars: number;
+  title_max_chars: number;
+  spot_min_chars: number;
+  spot_max_chars: number;
+  preview_lines: number;
+  auto_subheads: boolean;
+  require_source_verification: boolean;
+  quality_check_enabled: boolean;
+  source_display_mode: string;
+  reading_min_words: number;
+};
+
+const DEFAULT_EDITORIAL: EditorialSettings = {
+  body_format_default: 'auto',
+  short_min_words: 120,
+  short_max_words: 200,
+  standard_min_words: 250,
+  standard_max_words: 450,
+  extended_min_words: 500,
+  extended_max_words: 800,
+  title_min_chars: 40,
+  title_max_chars: 120,
+  spot_min_chars: 90,
+  spot_max_chars: 300,
+  preview_lines: 4,
+  auto_subheads: true,
+  require_source_verification: true,
+  quality_check_enabled: true,
+  source_display_mode: 'card',
+  reading_min_words: 3,
+};
+
+function normalizeEditorial(row: Json | null | undefined): EditorialSettings {
+  const raw = row ?? {};
+  const format = asString(raw.body_format_default, 'auto');
+  const editorial: EditorialSettings = {
+    body_format_default:
+      format === 'short' || format === 'standard' || format === 'extended' ? format : 'auto',
+    short_min_words: clamp(asNumber(raw.short_min_words, 120), 40, 400),
+    short_max_words: clamp(asNumber(raw.short_max_words, 200), 80, 600),
+    standard_min_words: clamp(asNumber(raw.standard_min_words, 250), 100, 900),
+    standard_max_words: clamp(asNumber(raw.standard_max_words, 450), 150, 1200),
+    extended_min_words: clamp(asNumber(raw.extended_min_words, 500), 200, 1600),
+    extended_max_words: clamp(asNumber(raw.extended_max_words, 800), 300, 2000),
+    title_min_chars: clamp(asNumber(raw.title_min_chars, 40), 10, 160),
+    title_max_chars: clamp(asNumber(raw.title_max_chars, 120), 20, 180),
+    spot_min_chars: clamp(asNumber(raw.spot_min_chars, 90), 20, 380),
+    spot_max_chars: clamp(asNumber(raw.spot_max_chars, 300), 60, 400),
+    preview_lines: clamp(asNumber(raw.preview_lines, 4), 2, 6),
+    auto_subheads: raw.auto_subheads !== false,
+    require_source_verification: raw.require_source_verification !== false,
+    quality_check_enabled: raw.quality_check_enabled !== false,
+    source_display_mode: asString(raw.source_display_mode, 'card'),
+    reading_min_words: clamp(asNumber(raw.reading_min_words, 3), 1, 10),
+  };
+  editorial.standard_max_words = Math.max(editorial.standard_max_words, editorial.standard_min_words + 50);
+  editorial.short_max_words = Math.max(editorial.short_max_words, editorial.short_min_words + 20);
+  editorial.extended_max_words = Math.max(editorial.extended_max_words, editorial.extended_min_words + 100);
+  editorial.title_max_chars = Math.max(editorial.title_max_chars, editorial.title_min_chars + 10);
+  editorial.spot_max_chars = Math.max(editorial.spot_max_chars, editorial.spot_min_chars + 20);
+  return editorial;
+}
+
+async function loadEditorial(): Promise<EditorialSettings> {
+  try {
+    const rows = await svcSelect<Json>(
+      'ai_news_settings',
+      'select=body_format_default,short_min_words,short_max_words,standard_min_words,' +
+        'standard_max_words,extended_min_words,extended_max_words,title_min_chars,title_max_chars,' +
+        'spot_min_chars,spot_max_chars,preview_lines,auto_subheads,require_source_verification,' +
+        'quality_check_enabled,source_display_mode,reading_min_words&id=eq.true&limit=1',
+    );
+    return normalizeEditorial(rows[0]);
+  } catch {
+    return { ...DEFAULT_EDITORIAL };
+  }
+}
+
+
 type RunContext = {
   runId: string | null;
   settings: Settings;
+  editorial: EditorialSettings;
   budgetExhausted: boolean;
   stats: {
     searches: number;
@@ -1558,26 +1648,196 @@ Yanıtı yalnızca şu JSON olarak ver:
 }
 
 /**
- * Veritabanı spotu 40-400 karakter arasında kabul eder. Model bazen uzun
- * yazar; cümle sınırında kısaltılır, çok kısaysa gövdeden tamamlanır.
+ * Veritabanı spotu 40-400 karakter arasında kabul eder. Editoryal ayarlardaki
+ * hedef aralık uygulanır; cümle sınırında kısaltılır, çok kısaysa gövdeden
+ * tamamlanır. Kaynakta olmayan bilgi eklenmez.
  */
-function normalizeSpot(value: string, body: string): string {
+function normalizeSpot(value: string, body: string, editorial: EditorialSettings): string {
+  const maxChars = Math.min(Math.max(editorial.spot_max_chars, 60), 400);
+  const minChars = Math.min(Math.max(editorial.spot_min_chars, 40), maxChars - 20);
   let spot = value.replace(/\s+/g, ' ').trim();
-  if (spot.length > 300) {
-    const cut = spot.slice(0, 300);
+  if (spot.length > maxChars) {
+    const cut = spot.slice(0, maxChars);
     const sentenceEnd = Math.max(
       cut.lastIndexOf('. '),
       cut.lastIndexOf('! '),
       cut.lastIndexOf('? '),
     );
-    spot = (sentenceEnd >= 60 ? cut.slice(0, sentenceEnd + 1) : cut.replace(/\s+\S*$/, '')).trim();
+    spot = (sentenceEnd >= minChars ? cut.slice(0, sentenceEnd + 1) : cut.replace(/\s+\S*$/, '')).trim();
   }
-  if (spot.length < 40) {
+  if (spot.length < minChars) {
     const fallback = body.replace(/\s+/g, ' ').trim();
     const sentenceEnd = fallback.search(/[.!?](\s|$)/);
-    spot = (sentenceEnd >= 40 ? fallback.slice(0, sentenceEnd + 1) : fallback).slice(0, 260).trim();
+    spot = (sentenceEnd >= minChars ? fallback.slice(0, sentenceEnd + 1) : fallback)
+      .slice(0, maxChars)
+      .trim();
   }
   return spot;
+}
+
+function countWords(text: string): number {
+  const clean = text.trim();
+  if (!clean) return 0;
+  return clean.split(/\s+/).length;
+}
+
+function formatRange(editorial: EditorialSettings, format: BodyFormat): { min: number; max: number } {
+  if (format === 'short') return { min: editorial.short_min_words, max: editorial.short_max_words };
+  if (format === 'extended') return { min: editorial.extended_min_words, max: editorial.extended_max_words };
+  return { min: editorial.standard_min_words, max: editorial.standard_max_words };
+}
+
+/**
+ * Kaynakların gerçekten desteklediği bilgi miktarına göre haber biçimini seçer.
+ * Az kaynak varken kapsamlı haber zorlanmaz; bu, metnin uydurma ayrıntıyla
+ * şişirilmesini engeller.
+ */
+function chooseFormat(
+  editorial: EditorialSettings,
+  factsCount: number,
+  sourceChars: number,
+  independentSources: number,
+): BodyFormat {
+  if (editorial.body_format_default !== 'auto') return editorial.body_format_default;
+  if (sourceChars < 1800 || factsCount < 3) return 'short';
+  if (independentSources >= 3 || factsCount >= 8 || sourceChars >= 7000) return 'extended';
+  return 'standard';
+}
+
+type EvidenceRow = {
+  source_domain: string;
+  source_kind: string;
+  url: string;
+  title: string | null;
+  excerpt: string | null;
+};
+
+async function loadEventEvidence(eventId: string): Promise<EvidenceRow[]> {
+  try {
+    return await svcSelect<EvidenceRow>(
+      'ai_news_evidence',
+      `select=source_domain,source_kind,url,title,excerpt&event_id=eq.${encodeURIComponent(eventId)}` +
+        '&order=created_at.asc&limit=12',
+    );
+  } catch {
+    return [];
+  }
+}
+
+type DraftShape = {
+  title: string;
+  subtitle: string | null;
+  spot: string;
+  lead: string | null;
+  body: string;
+};
+
+/**
+ * Yayın öncesi editoryal denetim: başlık-gövde uyumu, kaynak dışı olgular,
+ * alıntılar, tarih/yer tutarlılığı ve kaynaklar arası çelişkiler.
+ * Model yalnızca kaynak metinlerini görür; yeni bilgi üretmesi istenmez.
+ */
+async function reviewDraft(
+  ctx: RunContext,
+  draft: DraftShape,
+  sourceText: string,
+): Promise<{
+  checks: Json;
+  unsupported: string[];
+  conflicts: string[];
+  quality: number;
+}> {
+  if (!ctx.editorial.quality_check_enabled) {
+    return { checks: { skipped: true }, unsupported: [], conflicts: [], quality: 1 };
+  }
+
+  const prompt = `Aşağıdaki haber taslağını yalnızca verilen kaynak metinleriyle karşılaştırarak denetle.
+
+BAŞLIK: ${draft.title}
+ALT BAŞLIK: ${draft.subtitle ?? '-'}
+SPOT: ${draft.spot}
+GİRİŞ: ${draft.lead ?? '-'}
+GÖVDE:
+${draft.body.slice(0, 9000)}
+
+KAYNAK METİNLERİ:
+${sourceText.slice(0, 12000)}
+
+Denetim kuralları:
+- Gövdedeki her olgu (kişi, unvan, kurum, sayı, tarih, yer, fiyat, iddia) kaynaklarda açıkça geçiyor mu?
+- Kişi isimleri ve unvanları kaynakla birebir uyumlu mu? Uydurma isim/unvan varsa unsupported_claims'e yaz.
+- Kaynaklarda olmayan ya da kaynaktan çıkarılamayacak cümleleri unsupported_claims listesine yaz.
+- Yalnızca kaynakta tırnak içinde verilmiş sözler doğrudan alıntı sayılır.
+- Aynı cümle veya aynı bilgi gereksiz yere tekrar ediyor mu?
+- Başlık gövdeyle uyumlu mu, abartı var mı?
+- Tarih, yer ve kurum adları tutarlı mı?
+- Kaynaklar birbiriyle çelişiyor mu?
+- Yazım/dil hatası varsa not et ama olgu uydurma.
+
+Yanıtı yalnızca şu JSON olarak ver:
+{"unsupported_claims":[],"conflicts":[],"quotes_ok":true,"title_ok":true,"date_ok":true,"location_ok":true,"names_ok":true,"repetition_ok":true,"writing_issues":[],"notes":"kısa gerekçe"}`;
+
+  let judged: Json = {};
+  try {
+    const raw = await chat(ctx, {
+      model: ctx.settings.reasoning_model,
+      system:
+        'Sen Trabzone Haber için çalışan titiz bir editoryal denetçisin. Kaynakta açıkça ' +
+        'bulunmayan hiçbir olguyu doğrulanmış saymazsın. Yalnızca JSON yanıt verirsin.',
+      user: prompt,
+      maxTokens: 1300,
+    });
+    judged = parseJsonObject(raw);
+  } catch (error) {
+    await logError(ctx, 'quality', 'quality_review_failed', String(error), {});
+    return {
+      checks: { skipped: false, error: 'review_failed' },
+      unsupported: [],
+      conflicts: [],
+      // Denetim çalıştırılamadıysa otomatik yayın güvenli tarafta kalır.
+      quality: 0.5,
+    };
+  }
+
+  const unsupported = asStringArray(judged.unsupported_claims, 20);
+  const conflicts = asStringArray(judged.conflicts, 10);
+  const quotesOk = judged.quotes_ok !== false;
+  const titleOk = judged.title_ok !== false;
+  const dateOk = judged.date_ok !== false;
+  const locationOk = judged.location_ok !== false;
+  const namesOk = judged.names_ok !== false;
+  const repetitionOk = judged.repetition_ok !== false;
+
+  let quality = 1;
+  quality -= Math.min(unsupported.length, 6) * 0.12;
+  quality -= Math.min(conflicts.length, 4) * 0.15;
+  if (!quotesOk) quality -= 0.2;
+  if (!titleOk) quality -= 0.15;
+  if (!dateOk) quality -= 0.15;
+  if (!locationOk) quality -= 0.1;
+  if (!namesOk) quality -= 0.15;
+  if (!repetitionOk) quality -= 0.1;
+
+  return {
+    checks: {
+      kind: 'editorial_review',
+      unsupported_claims: unsupported.length,
+      unsupported_items: unsupported,
+      conflicts,
+      quotes_ok: quotesOk,
+      title_ok: titleOk,
+      date_ok: dateOk,
+      location_ok: locationOk,
+      names_ok: namesOk,
+      repetition_ok: repetitionOk,
+      writing_issues: asStringArray(judged.writing_issues, 10),
+      notes: asString(judged.notes).slice(0, 600),
+      checked_at: new Date().toISOString(),
+    },
+    unsupported,
+    conflicts,
+    quality: clamp(quality, 0.2, 1),
+  };
 }
 
 async function writeDraft(
@@ -1586,7 +1846,50 @@ async function writeDraft(
   classification: Classification,
   candidate: Candidate,
   sourceInfo: Source | undefined,
-): Promise<{ draftId: string | null; quality: number }> {
+): Promise<{ draftId: string | null; quality: number; format: BodyFormat | null }> {
+  const evidence = await loadEventEvidence(eventId);
+  const eventSourceText = evidence
+    .map((item, index) =>
+      `[${index + 1}] ${item.source_domain} (${item.source_kind}) — ${item.title ?? ''}\n${
+        (item.excerpt ?? '').slice(0, 1800)
+      }`)
+    .join('\n\n');
+  const primaryText = candidate.content.slice(0, 9000) || candidate.summary || candidate.snippet;
+  const sourceText = [primaryText, eventSourceText].filter(Boolean).join('\n\n');
+  const independentSources = new Set(evidence.map((item) => item.source_domain)).size;
+  const format = chooseFormat(
+    ctx.editorial,
+    classification.facts.length,
+    sourceText.length,
+    independentSources,
+  );
+  const target = formatRange(ctx.editorial, format);
+  const formatLabel = format === 'short' ? 'Kısa haber' : format === 'extended' ? 'Kapsamlı haber' : 'Standart haber';
+  const subheadRule = ctx.editorial.auto_subheads
+    ? '- Gövde 3+ paragraf ise en az bir kısa alt başlık kullan; alt başlıkları "## Başlık" satırı olarak yaz.'
+    : '- Alt başlık kullanma; gövdeyi düz paragraflar halinde yaz.';
+
+  const sourceReferences = [
+    {
+      url: candidate.url,
+      domain: candidate.source_domain,
+      kind: candidate.source_kind,
+      title: candidate.title,
+      role: 'primary',
+      retrieved_at: new Date().toISOString(),
+    },
+    ...evidence
+      .filter((item) => item.url !== candidate.url)
+      .map((item) => ({
+        url: item.url,
+        domain: item.source_domain,
+        kind: item.source_kind,
+        title: item.title,
+        role: 'supporting',
+        retrieved_at: new Date().toISOString(),
+      })),
+  ];
+
   const prompt = `Doğrulanmış bir Trabzon haberi için özgün Türkçe haber metni yaz.
 
 OLAY: ${candidate.title}
@@ -1595,27 +1898,43 @@ OLAY TARIHI: ${classification.eventDate ?? 'belirtilmemiş'}
 KATEGORI: ${classification.category}
 ANA KAYNAK: ${candidate.source_domain}${sourceInfo?.name ? ` (${sourceInfo.name})` : ''}
 ANA METIN:
-${candidate.content.slice(0, 9000) || candidate.summary || candidate.snippet}
+${primaryText}
 ${classification.facts.length ? `\nDOĞRULANMIŞ BİLGİLER:\n- ${classification.facts.join('\n- ')}` : ''}
+${eventSourceText ? `\nEK KAYNAKLAR:\n${eventSourceText}` : ''}
+
+HABER BİÇİMİ: ${formatLabel}
+HEDEF UZUNLUK: ${target.min}-${target.max} kelime. Bu bir hedef aralıktır; kaynaklar yetmiyorsa
+alt sınıra yakın kal, ASLA bilgi uydurarak uzatma. Kaynak üç doğrulanmış bilgi içeriyorsa üçünü yaz ve dur.
+
+EDİTORYAL YAPI:
+- spot: haberin en önemli gelişmesini 1-2 cümlede anlatır (${ctx.editorial.spot_min_chars}-${ctx.editorial.spot_max_chars} karakter).
+- lead: ne oldu, nerede, ne zaman, kimleri ilgilendiriyor sorusunu yanıtlayan giriş paragrafı.
+- body: doğrulanmış bilgileri mantıklı sırayla veren paragraflar; gerekiyorsa arka plan ve
+  okuyucuyu ilgilendiren bilgiler (etkinlik yeri/saati, ulaşım, başvuru tarihi) ayrı paragraflarda.
+- Kaynakta olmayan arka plan, yorum, olasılık veya sonuç cümlesi yazma.
 
 Kurallar:
 - Sadece yukarıdaki metinlerdeki doğrulanmış bilgileri kullan.
-- Uydurma alıntı, tanık, rakam, tarih, fiyat veya kurum ekleme.
+- Uydurma alıntı, tanık, rakam, tarih, fiyat, unvan veya kurum ekleme.
+- Doğrudan alıntıyı yalnızca kaynak metninde tırnak içinde geçiyorsa kullan; kendi cümleni alıntı yapma.
 - Kaynağın cümlelerini kopyalama; kendi gazetecilik dilinle, olguları koruyarak yaz.
 - Sansasyon yok, abartı yok, başlıkla içerik birebir uyumlu.
-- Başlık 40-120 karakter, spot 90-300 karakter, gövde 180-350 kelime.
-- Gövde 3-5 paragraf olsun; gerekiyorsa kısa bir bağlam paragrafı ver.
+- Başlık ${ctx.editorial.title_min_chars}-${ctx.editorial.title_max_chars} karakter; gereksiz büyük harf yok.
+- ${subheadRule}
 - Türkçe yazım kurallarına uy; resmî kurum adlarını doğru yaz.
 - SEO başlığı en fazla 60 karakter, SEO açıklaması 140-160 karakter.
 - social_copy: 1-2 cümle, sosyal akışta paylaşılabilir, abartısız.
-- Metnin hiçbir yerinde "yapay zekâ", "AI", "otomatik", "bot", "derleme", "özet" veya haberin nasıl hazırlandığına dair açıklama kullanma.
-- Okuyucuya doğrudan seslenen yapay zekâ notu, editör notu veya şeffaflık paragrafı ekleme; metin doğrudan haber gibi başlasın.
+- Metnin hiçbir yerinde "yapay zekâ", "AI", "otomatik", "bot", "derleme" veya haberin nasıl
+  hazırlandığına dair açıklama kullanma. Şeffaflık bilgisi ayrı alanda gösterilir.
+- source_facts: metinde kullandığın ve kaynakta açıkça geçen olguları kısa maddeler halinde yaz.
+- quotes: yalnızca gerçek doğrudan alıntılar; yoksa boş dizi.
 
 Yanıtı yalnızca şu JSON olarak ver:
-{"title":"...","spot":"...","body":"paragraflar \\n\\n ile ayrılmış","social_copy":"...","seo_title":"...","seo_description":"...","quality_score":0.8}`;
+{"title":"...","subtitle":"... veya boş","spot":"...","lead":"...","body":"paragraflar \\n\\n ile ayrılmış","social_copy":"...","seo_title":"...","seo_description":"...","source_facts":["..."],"quotes":[{"text":"...","source_url":"..."}],"quality_score":0.8}`;
 
   let parsed: Json = {};
   let model = ctx.settings.reasoning_model;
+  const maxTokens = format === 'short' ? 1700 : format === 'extended' ? 4000 : 2800;
 
   for (const attemptModel of [ctx.settings.reasoning_model, ctx.settings.fast_model]) {
     try {
@@ -1623,9 +1942,10 @@ Yanıtı yalnızca şu JSON olarak ver:
         model: attemptModel,
         system:
           'Sen Trabzone Haber için çalışan deneyimli bir Türkçe haber editörüsün. ' +
-          'Doğrulanmamış tek bir cümle bile yazmazsın. Yalnızca JSON yanıt verirsin.',
+          'Doğrulanmamış tek bir cümle bile yazmazsın; kaynak yetmediğinde metni uzatmazsın. ' +
+          'Yalnızca JSON yanıt verirsin.',
         user: prompt,
-        maxTokens: 2200,
+        maxTokens,
       });
       parsed = parseJsonObject(raw);
       model = attemptModel;
@@ -1636,9 +1956,14 @@ Yanıtı yalnızca şu JSON olarak ver:
   }
 
   const rawTitle = asString(parsed.title);
-  const title = (rawTitle.length >= 15 ? rawTitle : candidate.title).slice(0, 180);
-  const spot = normalizeSpot(asString(parsed.spot), asString(parsed.body));
+  const title = (rawTitle.length >= 15 ? rawTitle : candidate.title).slice(
+    0,
+    ctx.editorial.title_max_chars,
+  );
+  const spot = normalizeSpot(asString(parsed.spot), asString(parsed.body), ctx.editorial);
   const body = asString(parsed.body).slice(0, 11900);
+  const lead = asString(parsed.lead).slice(0, 1600) || null;
+  const subtitle = asString(parsed.subtitle).slice(0, 220) || null;
   if (!title || !spot || body.length < 350) {
     await logError(ctx, 'draft', 'draft_incomplete', 'Model yeterli uzunlukta metin üretmedi', {
       eventId,
@@ -1646,13 +1971,51 @@ Yanıtı yalnızca şu JSON olarak ver:
       spot_length: spot.length,
       body_length: body.length,
     });
-    return { draftId: null, quality: 0 };
+    return { draftId: null, quality: 0, format: null };
   }
 
+  const words = countWords(body);
+  const effectiveFormat: BodyFormat =
+    words <= ctx.editorial.short_max_words
+      ? 'short'
+      : words < ctx.editorial.extended_min_words
+        ? 'standard'
+        : 'extended';
+  const effectiveTarget = formatRange(ctx.editorial, effectiveFormat);
+  const review = await reviewDraft(ctx, { title, subtitle, spot, lead, body }, sourceText);
+  const modelFacts = asStringArray(parsed.source_facts, 12);
+  const sourceFacts = [...new Set([...classification.facts, ...modelFacts])].slice(0, 16);
+  const quotes = asArray(parsed.quotes)
+    .map((entry) => (entry && typeof entry === 'object' ? entry as Json : null))
+    .filter((entry): entry is Json => Boolean(entry))
+    .map((entry) => ({
+      text: asString(entry.text).slice(0, 400),
+      source_url: asString(entry.source_url),
+    }))
+    .filter((entry) => entry.text.length > 0);
+
+  const lengthOk =
+    words >= Math.round(effectiveTarget.min * 0.6) &&
+    words <= Math.round(effectiveTarget.max * 1.25);
   const quality = Math.min(
     clamp(asNumber(parsed.quality_score, 0.7), 0, 1),
     heuristicQuality({ title, spot, body }),
+    review.quality,
   );
+
+  const editorialChecks: Json = {
+    ...review.checks,
+    format: effectiveFormat,
+    target_words: effectiveTarget,
+    word_count: words,
+    length_ok: lengthOk,
+    source_fact_count: sourceFacts.length,
+    source_count: sourceReferences.length,
+    independent_sources: independentSources,
+    quotes,
+    ai_disclosure_shown: true,
+    checked_at: new Date().toISOString(),
+  };
 
   const { data, error } = await svc<{ draft_id: string; version: number; risk_level: string }>(
     'ai_news_draft_save',
@@ -1660,8 +2023,11 @@ Yanıtı yalnızca şu JSON olarak ver:
       p_event_id: eventId,
       p_payload: {
         title,
+        subtitle,
         spot,
+        lead,
         body,
+        body_format: effectiveFormat,
         social_copy: asString(parsed.social_copy).slice(0, 500),
         category_slug: classification.category,
         district: classification.district,
@@ -1672,18 +2038,26 @@ Yanıtı yalnızca şu JSON olarak ver:
         plagiarism_score: 0,
         risk_level: classification.risk,
         ai_model: model,
+        editorial_checks: editorialChecks,
+        source_facts: sourceFacts,
+        source_references: sourceReferences,
+        ai_disclosure:
+          'Bu haber, kamuya açık kaynaklardan doğrulanan bilgilerle Trabzone Haber editoryası ' +
+          'tarafından hazırlanmıştır. Metin yapay zekâ desteğiyle yazılmış; yayın kararı kaynak ' +
+          'doğrulaması ve risk kurallarına göre verilmiştir.',
       },
     },
   );
 
   if (error || !data) {
     await logError(ctx, 'draft', 'draft_save_failed', error ?? 'unknown', { eventId });
-    return { draftId: null, quality: 0 };
+    return { draftId: null, quality: 0, format: null };
   }
 
   ctx.stats.drafts += 1;
-  return { draftId: data.draft_id, quality };
+  return { draftId: data.draft_id, quality, format: effectiveFormat };
 }
+
 
 async function saveDistrictPhoto(
   ctx: RunContext,
@@ -1810,7 +2184,7 @@ async function resolveMedia(
 
   // 3) Lisansı ve olay ilişkisi doğrulanmış gerçek fotoğraf (Openverse / Wikimedia).
   try {
-    const photo = await findLicensedPhoto(ctx, title, candidate.district ?? null, category);
+    const photo = await findLicensedPhoto(ctx, title, district, category);
     if (photo) {
       const image = await fetch(photo.imageUrl, {
         headers: { 'User-Agent': 'TrabzoneNewsBot/1.0 (+https://trabzone.app)' },
@@ -2397,12 +2771,93 @@ spotu netleştir, gövdeyi sadeleştir, yazım hatalarını düzelt. Aynı JSON 
     };
   }
 
+  if (action === 'check_quality') {
+    const evidenceText = evidence
+      .map((item, index) =>
+        `[${index + 1}] ${asString(item.domain)}: ${asString(item.title)}\n${asString(item.excerpt).slice(0, 1400)}`)
+      .join('\n\n');
+    const checks = await reviewDraft(
+      ctx,
+      {
+        title: asString(draft.title),
+        subtitle: asString(draft.subtitle) || null,
+        spot: asString(draft.spot),
+        lead: asString(draft.lead) || null,
+        body: asString(draft.body),
+      },
+      evidenceText,
+    );
+    return { checks: checks.checks, unsupported: checks.unsupported, conflicts: checks.conflicts, quality: checks.quality };
+  }
+
+  if (action === 'expand') {
+    // Genişletme yalnızca YENİ doğrulanmış kaynak bilgisi bulunduğunda yapılır.
+    const title = asString(draft.title) || asString(event.title);
+    const district = asString(event.district) || null;
+    const knownUrls = new Set(evidence.map((item) => asString(item.url)));
+    const bundle = await gatherEvidence(ctx, title, district, null);
+    const fresh = bundle.items.filter((item) => !knownUrls.has(item.url));
+    if (fresh.length === 0) {
+      return {
+        suggestion: null,
+        reason: 'no_new_verified_information',
+        message:
+          'Yeni doğrulanmış kaynak bilgisi bulunamadı. Haber metni, kaynakta olmayan ayrıntıyla genişletilmedi.',
+      };
+    }
+
+    const sourceText = [
+      `ORİJİNAL HABER:\n${asString(draft.body).slice(0, 8000)}`,
+      ...fresh.map((item, index) =>
+        `[${index + 1}] ${item.domain} (${item.kind}): ${item.title}\n${item.excerpt.slice(0, 1800)}`),
+    ].join('\n\n');
+
+    const target = formatRange(ctx.editorial, 'standard');
+    const raw = await chat(ctx, {
+      model: ctx.settings.reasoning_model,
+      system:
+        'Sen Trabzone Haber için çalışan deneyimli bir Türkçe haber editörüsün. Yalnızca verilen ' +
+        'kaynaklardaki doğrulanmış bilgileri kullanırsın; kaynakta olmayan tek bir cümle bile eklemezsin. ' +
+        'Yalnızca JSON yanıt verirsin.',
+      user: `Aşağıdaki haberi YENİ doğrulanmış kaynaklarla genişlet.
+
+MEVCUT BAŞLIK: ${asString(draft.title)}
+MEVCUT SPOT: ${asString(draft.spot)}
+MEVCUT GÖVDE:
+${asString(draft.body).slice(0, 8000)}
+
+YENİ KAYNAKLAR:
+${fresh.map((item, index) =>
+        `[${index + 1}] ${item.domain}: ${item.title}\n${item.excerpt.slice(0, 1800)}`).join('\n\n')}
+
+Kurallar:
+- Orijinal haberin anlamını koru; yeni kaynakların doğruladığı bilgileri ekle.
+- Yeni kaynaklarda olmayan bilgi, yorum, olasılık veya alıntı ekleme.
+- Yeni bilgi eklemek için cümle şişirme yapma; yeterli bilgi yoksa mevcut metni koru.
+- Hedef ${target.min}-${target.max} kelime; kaynak yetmiyorsa altında kal.
+- Gövdede gerekiyorsa "## Alt Başlık" kullan. "yapay zekâ", "AI" gibi ifade kullanma.
+- Metinde geçen her yeni olgu için source_url ver.
+
+Yanıt: {"title":"...","subtitle":"...","spot":"...","lead":"...","body":"...","social_copy":"...","seo_title":"...","seo_description":"...","source_facts":["..."],"quotes":[{"text":"...","source_url":"..."}],"quality_score":0.8}`,
+      maxTokens: 3200,
+    });
+    const parsed = parseJsonObject(raw);
+    return {
+      suggestion: parsed,
+      new_sources: fresh.map((item) => ({ url: item.url, domain: item.domain, title: item.title })),
+      added_source_count: fresh.length,
+    };
+  }
+
   // Editör için tek amaçlı metin işlemleri. Hepsi yalnızca kayıtlı kaynaklara
   // dayanır; doğrulama ve kaynak kayıtları değiştirilmez.
   const textActions: Record<string, string> = {
     improve_title:
       'Yalnızca başlığı iyileştir: içerikle birebir uyumlu, sansasyonsuz, 60-120 karakter. ' +
       'Yanıt: {"title":"..."}',
+    prepare_spot:
+      'Haber gövdesine dayanarak 1-2 cümlelik, en önemli gelişmeyi veren bir spot yaz. ' +
+      'Yeni bilgi ekleme. Yanıt: {"spot":"..."}',
     simplify:
       'Gövdeyi ve spotu sadeleştir: gereksiz uzun cümleleri kısalt, anlamı ve olguları koru. ' +
       'Yanıt: {"spot":"...","body":"..."}',
@@ -2439,6 +2894,222 @@ ${evidence.map((item, index) => `[${index + 1}] ${asString(item.domain)}: ${asSt
   }
 
   throw new Error('invalid_assist_action');
+}
+
+/**
+ * Kaynak haberini güvenli biçimde genişletir: yalnızca kaynakta bulunan
+ * doğrulanmış bilgiler kullanılır. Yeni bilgi yoksa metin şişirilmez ve
+ * kayıt değiştirilmez. Sonuç sürüm geçmişine yazılır.
+ */
+async function enrichSourcePost(
+  postId: string,
+  payload: Json,
+  ctx: RunContext,
+): Promise<Json> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(postId)) {
+    throw new Error('invalid_post_id');
+  }
+
+  const links = await svcSelect<Json>(
+    'news_source_items',
+    'select=id,title,summary,body,lead,canonical_url,source_name,district,category_slug,' +
+      'license_snapshot,news_publication_links!inner(post_id,status)' +
+      `&news_publication_links.post_id=eq.${encodeURIComponent(postId)}` +
+      '&news_publication_links.status=eq.published&limit=1',
+  );
+  const item = links[0];
+  if (!item) throw new Error('source_item_not_found');
+
+  const posts = await svcSelect<{ body: string; created_at: string }>(
+    'posts',
+    `select=body,created_at&id=eq.${encodeURIComponent(postId)}&limit=1`,
+  );
+  const originalTitle = asString(item.title);
+  const originalBody = asString(item.body);
+  const originalSummary = asString(item.summary);
+  const originalLead = asString(item.lead);
+  const sourceUrl = asString(item.canonical_url);
+  const district = asString(item.district) || null;
+  const domain = sourceUrl.replace(/^https?:\/\//, '').split('/')[0] ?? 'kaynak';
+
+  const bundle = originalBody.length < 5000
+    ? await gatherEvidence(ctx, originalTitle, district, null)
+    : { items: [] as Array<{ url: string; domain: string; kind: string; title: string; excerpt: string }> };
+
+  const references = [
+    {
+      url: sourceUrl,
+      domain,
+      kind: 'source',
+      title: originalTitle,
+      role: 'primary',
+      retrieved_at: new Date().toISOString(),
+    },
+    ...bundle.items
+      .filter((entry) => entry.url && entry.url !== sourceUrl)
+      .map((entry) => ({
+        url: entry.url,
+        domain: entry.domain,
+        kind: entry.kind,
+        title: entry.title,
+        role: 'supporting',
+        retrieved_at: new Date().toISOString(),
+      })),
+  ];
+
+  const supportingText = bundle.items
+    .filter((entry) => entry.url !== sourceUrl)
+    .map((entry, index) => `[${index + 1}] ${entry.domain} (${entry.kind}): ${entry.title}\n${entry.excerpt.slice(0, 1800)}`)
+    .join('\n\n');
+
+  const verifiedInformation = originalBody.length >= 2500 || references.length >= 2 || supportingText.length >= 1200;
+  if (!verifiedInformation) {
+    return {
+      ok: false,
+      reason: 'insufficient_verified_sources',
+      message:
+        'Haber için yeterli doğrulanmış kaynak bilgisi bulunamadı. Metin tahminle genişletilmedi.',
+      source_count: references.length,
+    };
+  }
+
+  const words = countWords(originalBody);
+  const format: BodyFormat = words >= 420 || originalBody.length >= 3200
+    ? 'extended'
+    : 'standard';
+  const target = formatRange(ctx.editorial, format);
+
+  const sourceText = [
+    `ORİJİNAL HABER BAŞLIĞI: ${originalTitle}`,
+    `ORİJİNAL ÖZET: ${originalSummary}`,
+    originalLead ? `ORİJİNAL GİRİŞ: ${originalLead}` : '',
+    `ORİJİNAL METİN:\n${originalBody.slice(0, 12000)}`,
+    supportingText ? `EK DOĞRULANMIŞ KAYNAKLAR:\n${supportingText}` : '',
+  ].filter(Boolean).join('\n\n');
+
+  const prompt = `Aşağıdaki kaynak haberi, yalnızca verilen doğrulanmış bilgileri kullanarak
+Trabzone Haber için özgün ve profesyonel bir haber metnine dönüştür.
+
+BAŞLIK: ${originalTitle}
+İLÇE: ${district ?? 'Trabzon'}
+KATEGORİ: ${asString(item.category_slug, 'trabzon-gundem')}
+KAYNAK: ${asString(item.source_name, domain)}
+HEDEF BİÇİM: ${format} (${target.min}-${target.max} kelime)
+
+KAYNAK METİNLERİ:
+${sourceText.slice(0, 16000)}
+
+Kurallar:
+- Orijinal haberin anlamını ve olgularını koru; yeni olgu, yorum, olasılık, alıntı veya sonuç ekleme.
+- Kaynak metnini kopyalama; kendi gazetecilik dilinle yeniden yaz.
+- Kaynak yetersizse metni uzatma; hedefin altında kalabilirsin.
+- Editoryal yapı: spot, giriş paragrafı, gövde, gerekirse "## Alt Başlık", okuyucuyu ilgilendiren bilgiler.
+- Başlık ${ctx.editorial.title_min_chars}-${ctx.editorial.title_max_chars} karakter, sansasyonsuz.
+- Aynı cümlelerin tekrarını temizle; kaynaklar arasında çelişki varsa metne çelişki olarak yansıtma, çelişkili bilgiyi kullanma.
+- Metinde "yapay zekâ", "AI", "otomatik" gibi ifade kullanma; AI desteği ayrı alanda gösterilir.
+- Kaynakta tırnak içinde olmayan sözü doğrudan alıntı yapma.
+
+Yanıt: {"title":"...","subtitle":"...","summary":"...","spot":"...","lead":"...","body":"...","body_format":"standard","quality_score":0.8,"source_facts":["..."],"quotes":[{"text":"...","source_url":"..."}]}`;
+
+  const raw = await chat(ctx, {
+    model: ctx.settings.reasoning_model,
+    system:
+      'Sen Trabzone Haber için çalışan deneyimli bir Türkçe haber editörüsün. Kaynak dışı bilgi ' +
+      'üretmezsin; kaynak yetersizse metni kısaltırsın. Yalnızca JSON yanıt verirsin.',
+    user: prompt,
+    maxTokens: format === 'extended' ? 4000 : 3000,
+  });
+  const parsed = parseJsonObject(raw);
+
+  const title = (asString(parsed.title) || originalTitle).slice(0, ctx.editorial.title_max_chars);
+  const summarySource = asString(parsed.summary) || asString(parsed.spot) || originalSummary;
+  const spot = normalizeSpot(asString(parsed.spot) || summarySource, asString(parsed.body), ctx.editorial);
+  const body = asString(parsed.body).slice(0, 11900);
+  const lead = asString(parsed.lead).slice(0, 1600) || null;
+  const subtitle = asString(parsed.subtitle).slice(0, 220) || null;
+
+  if (body.length < 600) {
+    return {
+      ok: false,
+      reason: 'generated_body_too_short',
+      message: 'Model yeterli uzunlukta doğrulanmış metin üretemedi; kayıt değiştirilmedi.',
+    };
+  }
+
+  const review = await reviewDraft(
+    ctx,
+    { title, subtitle, spot, lead, body },
+    sourceText,
+  );
+
+  if (
+    review.unsupported.length > 0 ||
+    review.conflicts.length > 0 ||
+    review.checks.quotes_ok === false ||
+    review.checks.names_ok === false
+  ) {
+    return {
+      ok: false,
+      reason: 'editorial_check_failed',
+      message:
+        'Metin kaynaklarla tam doğrulanamadı. Kayıt değiştirilmedi; taslak editör incelemesine ayrıldı.',
+      checks: review.checks,
+      unsupported: review.unsupported,
+      conflicts: review.conflicts,
+    };
+  }
+
+  const quality = Math.min(
+    clamp(asNumber(parsed.quality_score, 0.75), 0, 1),
+    heuristicQuality({ title, spot, body }),
+    review.quality,
+  );
+  if (quality < Math.max(0.6, ctx.settings.min_quality_score - 0.1)) {
+    return {
+      ok: false,
+      reason: 'quality_below_threshold',
+      message: 'Metin kalite eşiğini geçmedi; kayıt değiştirilmedi.',
+      quality,
+      checks: review.checks,
+    };
+  }
+
+  const sourceFacts = asStringArray(parsed.source_facts, 16);
+  const result = await svc('news_source_enrich_save', {
+    p_post_id: postId,
+    p_payload: {
+      title,
+      subtitle,
+      summary: summarySource.slice(0, 800),
+      lead,
+      body,
+      body_format: format,
+      body_source: 'ai',
+      quality_score: Number(quality.toFixed(3)),
+      editorial_checks: {
+        ...review.checks,
+        format,
+        target_words: target,
+        word_count: countWords(body),
+        source_fact_count: sourceFacts.length,
+        source_count: references.length,
+        ai_disclosure_shown: true,
+        enrichment: 'controlled',
+        checked_at: new Date().toISOString(),
+      },
+      source_references: references,
+      change_reason: asString(payload.reason) || 'Kontrollü editoryal genişletme',
+    },
+  });
+
+  return {
+    ok: true,
+    post_id: postId,
+    saved: result.data ?? null,
+    quality,
+    quality_checks: review.checks,
+    source_count: references.length,
+  };
 }
 
 async function bootstrapPublisher(bearer: string, isAdmin: boolean): Promise<Json> {
@@ -2566,7 +3237,7 @@ async function bindPublisher(
   isAdmin: boolean,
 ): Promise<Json> {
   if (isAdmin) {
-    return (await rpcAs('admin_ai_news_bind_publisher', { p_username: username }, bearer)).data ?? {};
+    return ((await rpcAs('admin_ai_news_bind_publisher', { p_username: username }, bearer)).data ?? {}) as Json;
   }
   await svcUpdate(
     'ai_news_settings',
@@ -2704,6 +3375,7 @@ Deno.serve(async (req: Request) => {
           price_fetch_per_call: asNumber(settings.price_fetch_per_call, 0.00075),
           notify_enabled: settings.notify_enabled !== false,
         },
+        editorial: await loadEditorial(),
         budgetExhausted: false,
         stats: {
           searches: 0,
@@ -2808,6 +3480,7 @@ Deno.serve(async (req: Request) => {
         price_fetch_per_call: asNumber(settings.price_fetch_per_call, 0.00075),
         notify_enabled: false,
       },
+      editorial: await loadEditorial(),
       budgetExhausted: false,
       stats: {
         searches: 0,
@@ -2835,6 +3508,63 @@ Deno.serve(async (req: Request) => {
       return json(200, { ok: true, ...result });
     } catch (error) {
       return json(500, { error: preview(String(error), 400) });
+    }
+  }
+
+  if (action === 'enrich_source') {
+    if (!adminAuthorized) return json(403, { error: 'admin_required' });
+
+    const settings = await readSettings();
+    if (!settings || Object.keys(settings).length === 0) {
+      return json(500, { error: 'settings_unavailable' });
+    }
+
+    const editorial = await loadEditorial();
+    const ctx: RunContext = {
+      runId: null,
+      settings: {
+        max_events_per_run: 1,
+        max_article_age_hours: asNumber(settings.max_article_age_hours, 72),
+        min_quality_score: asNumber(settings.min_quality_score, 0.72),
+        duplicate_title_threshold: asNumber(settings.duplicate_title_threshold, 0.45),
+        min_media_match: asNumber(settings.min_media_match, 0.6),
+        fast_model: asString(settings.fast_model, 'deepseek-flash'),
+        reasoning_model: asString(settings.reasoning_model, 'deepseek-v4-pro'),
+        auto_publish_enabled: false,
+        dry_run: true,
+        price_input_per_m: asNumber(settings.price_input_per_m, 0.3),
+        price_output_per_m: asNumber(settings.price_output_per_m, 1.2),
+        price_search_per_call: asNumber(settings.price_search_per_call, 0.00075),
+        price_fetch_per_call: asNumber(settings.price_fetch_per_call, 0.00075),
+        notify_enabled: false,
+      },
+      editorial,
+      budgetExhausted: false,
+      stats: {
+        searches: 0,
+        search_results: 0,
+        new_results: 0,
+        ignored_results: 0,
+        events: 0,
+        duplicates: 0,
+        verified: 0,
+        drafts: 0,
+        published: 0,
+        queued: 0,
+        errors: 0,
+        cost_usd: 0,
+      },
+    };
+
+    try {
+      const result = await enrichSourcePost(
+        asString(body.post_id),
+        (body.payload ?? {}) as Json,
+        ctx,
+      );
+      return json(200, result);
+    } catch (error) {
+      return json(500, { ok: false, error: preview(String(error), 400) });
     }
   }
 
