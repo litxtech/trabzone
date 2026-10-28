@@ -140,7 +140,12 @@ export function WebSupportPage() {
           <AppText variant="caption" color="#8EA6D8" style={styles.eyebrow}>
             TRABZONE DESTEK MERKEZİ
           </AppText>
-          <AppText variant="h1" color="#FFFFFF" style={styles.heroTitle}>
+          <AppText
+            variant="h1"
+            color="#FFFFFF"
+            style={styles.heroTitle}
+            accessibilityRole="header"
+          >
             Yardıma mı ihtiyacın var? Buradayız.
           </AppText>
           <AppText variant="body" color="#A9BDE2" style={styles.heroSummary}>

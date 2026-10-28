@@ -7,10 +7,14 @@
  * Desteklenen sozdizimi:
  * - `## Baslik` / `### Alt baslik`
  * - `- madde` veya `* madde`
- * - `**kalin**` (isaretler temizlenir)
+ * - `**kalin**` (vurgulu metin olarak cizilir)
  * - `# Belge basligi` (baslik ekranda gosterildigi icin atlanir)
  */
 export type PolicySection = { title: string | null; paragraphs: string[] };
+
+function stripInline(value: string): string {
+  return value.replace(/\*\*/g, '').trim();
+}
 
 export function parsePolicyMarkdown(markdown: string): PolicySection[] {
   if (!markdown.trim()) {
@@ -30,14 +34,14 @@ export function parsePolicyMarkdown(markdown: string): PolicySection[] {
       if (current.paragraphs.length > 0 || current.title) {
         sections.push(current);
       }
-      current = { title: line.slice(4), paragraphs: [] };
+      current = { title: stripInline(line.slice(4)), paragraphs: [] };
       continue;
     }
     if (line.startsWith('## ')) {
       if (current.paragraphs.length > 0 || current.title) {
         sections.push(current);
       }
-      current = { title: line.slice(3), paragraphs: [] };
+      current = { title: stripInline(line.slice(3)), paragraphs: [] };
       continue;
     }
     if (line.startsWith('# ')) {
@@ -47,7 +51,7 @@ export function parsePolicyMarkdown(markdown: string): PolicySection[] {
       current.paragraphs.push(`- ${line.slice(2)}`);
       continue;
     }
-    current.paragraphs.push(line.replace(/\*\*/g, ''));
+    current.paragraphs.push(line);
   }
 
   if (current.paragraphs.length > 0 || current.title) {

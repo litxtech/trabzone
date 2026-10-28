@@ -88,7 +88,12 @@ export function WebAboutPage() {
           <AppText variant="overline" color="#9DB6FF" style={styles.eyebrow}>
             HAKKIMIZDA
           </AppText>
-          <AppText variant="display" color="#FFFFFF" style={styles.heroTitle}>
+          <AppText
+            variant="display"
+            color="#FFFFFF"
+            style={styles.heroTitle}
+            accessibilityRole="header"
+          >
             Bir şehirden daha fazlası.
           </AppText>
           <AppText variant="body" color="#A9BDE2" style={styles.heroSummary}>

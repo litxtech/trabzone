@@ -2,10 +2,11 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from '@/utils/router';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, Platform } from 'react-native';
 
 import { AppText, Button, TextField } from '@/components/ui';
 import { AuthScreen, InlineLink } from '@/features/auth/components/AuthScreen';
+import { WebLoginPage } from '@/features/web/components/WebLoginPage';
 import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons';
 import { FormError } from '@/features/auth/components/FormError';
 import { loginSchema, type LoginValues } from '@/features/auth/validators';
@@ -13,7 +14,11 @@ import { fetchMyProfile } from '@/features/profile/services/profile-service';
 import { signInWithPassword } from '@/services/supabase/auth';
 import { haptics } from '@/utils/haptics';
 
-export default function LoginScreen() {
+export default function LoginRoute() {
+  return Platform.OS === 'web' ? <WebLoginPage /> : <LoginScreen />;
+}
+
+function LoginScreen() {
   const router = useRouter();
   const [formError, setFormError] = useState<string | null>(null);
 

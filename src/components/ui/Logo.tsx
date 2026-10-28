@@ -127,7 +127,7 @@ export function Wordmark({
   return (
     <View style={styles.container}>
       <Text
-        accessibilityRole="header"
+        accessibilityRole="image"
         accessibilityLabel="Trabzone"
         allowFontScaling={false}
         numberOfLines={1}

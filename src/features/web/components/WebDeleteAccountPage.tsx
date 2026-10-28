@@ -83,7 +83,12 @@ export function WebDeleteAccountPage() {
           <AppText variant="caption" color="#8EA6D8" style={styles.eyebrow}>
             HESAP VE VERİ YÖNETİMİ
           </AppText>
-          <AppText variant="h1" color="#FFFFFF" style={styles.heroTitle}>
+          <AppText
+            variant="h1"
+            color="#FFFFFF"
+            style={styles.heroTitle}
+            accessibilityRole="header"
+          >
             Hesap Silme
           </AppText>
           <AppText variant="body" color="#A9BDE2" style={styles.heroSummary}>

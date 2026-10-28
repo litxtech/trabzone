@@ -505,6 +505,12 @@ Disallow: /settings
 Disallow: /chat
 Disallow: /call
 Disallow: /compose
+Disallow: /feed
+Disallow: /reels
+Disallow: /discover
+Disallow: /messages
+Disallow: /notifications
+Disallow: /profile
 Disallow: /login
 Disallow: /register
 Disallow: /forgot-password

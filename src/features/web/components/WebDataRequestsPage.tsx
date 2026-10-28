@@ -59,7 +59,12 @@ export function WebDataRequestsPage() {
           <AppText variant="caption" color="#8EA6D8" style={styles.eyebrow}>
             KVKK VE VERİ KORUMA
           </AppText>
-          <AppText variant="h1" color="#FFFFFF" style={styles.heroTitle}>
+          <AppText
+            variant="h1"
+            color="#FFFFFF"
+            style={styles.heroTitle}
+            accessibilityRole="header"
+          >
             Veri Talepleri Merkezi
           </AppText>
           <AppText variant="body" color="#A9BDE2" style={styles.heroSummary}>

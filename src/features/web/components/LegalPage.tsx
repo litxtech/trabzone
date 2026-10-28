@@ -40,12 +40,12 @@ export function LegalPage({ slug, document: doc, isLoading }: Props) {
     doc?.requires_acceptance && isAuthed && pending?.some((item) => item.slug === slug),
   );
 
+  const docTitle = doc?.title
+    ? doc.title.replace(/^trabzone\s+/i, '').replace(/\s+·\s+Trabzone$/i, '')
+    : null;
+
   useWebMeta({
-    title: doc
-      ? doc.title.includes('Trabzone')
-        ? doc.title
-        : `${doc.title} · Trabzone`
-      : `${catalogItem?.title ?? 'Politika'} · Trabzone`,
+    title: `${docTitle ?? catalogItem?.title ?? 'Politika'} · Trabzone`,
     description:
       doc?.summary ??
       catalogItem?.description ??
@@ -94,8 +94,13 @@ export function LegalPage({ slug, document: doc, isLoading }: Props) {
           <AppText variant="caption" color="#8EA6D8" style={styles.eyebrow}>
             TRABZONE HUKUKİ MERKEZ
           </AppText>
-          <AppText variant="h1" color="#FFFFFF" style={styles.heroTitle}>
-            {doc?.title ?? catalogItem?.title ?? 'Hukuki Belge'}
+          <AppText
+            variant="h1"
+            color="#FFFFFF"
+            style={styles.heroTitle}
+            accessibilityRole="header"
+          >
+            {docTitle ?? catalogItem?.title ?? 'Hukuki Belge'}
           </AppText>
           {doc?.summary ?? catalogItem?.description ? (
             <AppText variant="body" color="#A9BDE2" style={styles.heroSummary}>

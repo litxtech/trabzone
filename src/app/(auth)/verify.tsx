@@ -9,6 +9,7 @@ import { AuthScreen, InlineLink } from '@/features/auth/components/AuthScreen';
 import { FormError } from '@/features/auth/components/FormError';
 import { OtpInput } from '@/features/auth/components/OtpInput';
 import { fetchMyProfile } from '@/features/profile/services/profile-service';
+import { applyWebRegistrationMetadata } from '@/features/auth/web-registration';
 import { resendSignUpOtp, verifySignUpOtp } from '@/services/supabase/auth';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
@@ -47,6 +48,14 @@ export default function VerifyScreen() {
       haptics.error();
       setError(result.error.message);
       setCode('');
+      return;
+    }
+
+    const applied = await applyWebRegistrationMetadata();
+    if (!applied.ok) {
+      setSubmitting(false);
+      haptics.error();
+      setError(applied.error.message);
       return;
     }
 

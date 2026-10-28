@@ -154,5 +154,19 @@ export const adminFetchContactSubmissions = async (
   return result.ok ? ok(result.data.items ?? []) : result;
 };
 
+export const adminUpdateContactSubmission = (input: {
+  id: string;
+  status: 'received' | 'in_review' | 'answered' | 'closed' | 'spam';
+  response?: string | null;
+}) =>
+  callRpc<{ id: string; status: string; responded_at: string | null }>(
+    'admin_contact_submission_update',
+    {
+      p_id: input.id,
+      p_status: input.status,
+      p_response: input.response ?? null,
+    },
+  );
+
 export const adminFetchEmailLogs = (limit = 50) =>
   callRpc<EmailLogs>('admin_email_logs', { p_limit: limit });

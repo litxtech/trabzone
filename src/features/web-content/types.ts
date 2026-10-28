@@ -70,6 +70,9 @@ export type ContactSubmission = {
   message: string;
   status: string;
   created_at: string;
+  response_text?: string | null;
+  responded_at?: string | null;
+  priority?: 'critical' | 'normal';
 };
 
 export type AdminContactChannel = ContactChannel & {

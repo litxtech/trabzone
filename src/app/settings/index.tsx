@@ -123,6 +123,13 @@ export default function SettingsScreen() {
         </AppText>
         <Card padding={0}>
           <SettingRow
+            icon="library-outline"
+            label="Hakkında ve hukuki belgeler"
+            value="Tüm politikalar"
+            onPress={() => router.push('/settings/legal')}
+          />
+          <Divider />
+          <SettingRow
             icon="shield-checkmark-outline"
             label="Çocuk güvenliği ayarları"
             onPress={() => router.push('/settings/child-safety')}

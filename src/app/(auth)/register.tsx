@@ -4,10 +4,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from '@/utils/router';
 import { useState } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View, Platform } from 'react-native';
 
 import { AppText, Button, TextField } from '@/components/ui';
 import { AuthScreen, InlineLink } from '@/features/auth/components/AuthScreen';
+import { WebRegisterPage } from '@/features/web/components/WebRegisterPage';
 import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons';
 import { FormError } from '@/features/auth/components/FormError';
 import {
@@ -23,7 +24,11 @@ import { haptics } from '@/utils/haptics';
 
 type UsernameState = 'idle' | 'checking' | 'available' | 'taken';
 
-export default function RegisterScreen() {
+export default function RegisterRoute() {
+  return Platform.OS === 'web' ? <WebRegisterPage /> : <RegisterScreen />;
+}
+
+function RegisterScreen() {
   const router = useRouter();
   const { theme } = useTheme();
   const [formError, setFormError] = useState<string | null>(null);

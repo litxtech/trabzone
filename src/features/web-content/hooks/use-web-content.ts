@@ -112,6 +112,20 @@ export function useAdminContactSubmissions(status: string | null = null) {
   });
 }
 
+export function useAdminUpdateContactSubmission() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      id: string;
+      status: 'received' | 'in_review' | 'answered' | 'closed' | 'spam';
+      response?: string | null;
+    }) => unwrap(await web.adminUpdateContactSubmission(input)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['website', 'admin', 'submissions'] });
+    },
+  });
+}
+
 export function useAdminEmailLogs() {
   return useQuery<EmailLogs, Error>({
     queryKey: webContentKeys.emailLogs,

@@ -26,21 +26,43 @@ export function PolicyBody({ sections }: { sections: PolicySection[] }) {
               return (
                 <View key={paragraphIndex} style={styles.bulletRow}>
                   <View style={[styles.bullet, { backgroundColor: theme.colors.primary }]} />
-                  <AppText variant="body" color="textSecondary" style={styles.flex}>
-                    {paragraph.slice(2)}
-                  </AppText>
+                  <InlineText text={paragraph.slice(2)} style={styles.flex} />
                 </View>
               );
             }
-            return (
-              <AppText key={paragraphIndex} variant="body" color="textSecondary">
-                {paragraph}
-              </AppText>
-            );
+            return <InlineText key={paragraphIndex} text={paragraph} />;
           })}
         </View>
       ))}
     </View>
+  );
+}
+
+/**
+ * `**vurgu**` isaretlerini gercek kalin metne cevirir. Politika metinleri
+ * Markdown olarak saklandigi icin ham yildiz isaretleri kullaniciya
+ * gosterilmemelidir.
+ */
+function InlineText({
+  text,
+  style,
+}: {
+  text: string;
+  style?: React.ComponentProps<typeof AppText>['style'];
+}) {
+  const parts = text.split('**');
+  return (
+    <AppText variant="body" color="textSecondary" style={style}>
+      {parts.map((part, index) =>
+        index % 2 === 1 ? (
+          <AppText key={index} variant="bodyStrong" color="text">
+            {part}
+          </AppText>
+        ) : (
+          part
+        ),
+      )}
+    </AppText>
   );
 }
 

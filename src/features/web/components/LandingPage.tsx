@@ -290,7 +290,12 @@ export function LandingPage() {
             <View style={[styles.heroCopy, desktop ? styles.heroCopyDesktop : null]}>
               <View style={styles.heroChip}>
                 <View style={styles.liveDot} />
-                <AppText variant="overline" color="#9DB6FF" style={styles.heroChipText}>
+                <AppText
+                  variant="overline"
+                  color="#9DB6FF"
+                  style={styles.heroChipText}
+                  accessibilityRole="header"
+                >
                   {typeof hero?.eyebrow === 'string' ? hero.eyebrow : "TRABZON'UN DİJİTAL MERKEZİ"}
                 </AppText>
               </View>

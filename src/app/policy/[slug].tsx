@@ -23,12 +23,33 @@ import { formatDateTr } from '@/utils/date';
  * Magaza incelemesi ve yasal seffaflik icin oturum acmadan da acilabilir;
  * bu nedenle AuthGate kullanilmaz.
  */
-const ALLOWED_SLUGS = ['terms', 'privacy'] as const;
+const ALLOWED_SLUGS = [
+  'terms',
+  'privacy',
+  'kvkk',
+  'data-protection',
+  'cookies',
+  'child-safety',
+  'community-guidelines',
+  'account-deletion',
+  'marketplace-rules',
+  'real-estate-rules',
+  'vehicle-rules',
+] as const;
 type PolicySlug = (typeof ALLOWED_SLUGS)[number];
 
 const COPY: Record<PolicySlug, { title: string; icon: keyof typeof Ionicons.glyphMap }> = {
   terms: { title: 'Kullanım Koşulları', icon: 'document-text-outline' },
   privacy: { title: 'Gizlilik Politikası', icon: 'lock-closed-outline' },
+  kvkk: { title: 'KVKK Aydınlatma Metni', icon: 'shield-checkmark-outline' },
+  'data-protection': { title: 'Veri Koruma Politikası', icon: 'server-outline' },
+  cookies: { title: 'Çerez Politikası', icon: 'ellipse-outline' },
+  'child-safety': { title: 'Çocuk Koruma Politikası', icon: 'shield-half-outline' },
+  'community-guidelines': { title: 'Topluluk Kuralları', icon: 'people-outline' },
+  'account-deletion': { title: 'Hesap ve Veri Silme Politikası', icon: 'trash-outline' },
+  'marketplace-rules': { title: 'Marketplace Kuralları', icon: 'storefront-outline' },
+  'real-estate-rules': { title: 'Emlak İlan Kuralları', icon: 'home-outline' },
+  'vehicle-rules': { title: 'Araç İlan Kuralları', icon: 'car-outline' },
 };
 
 export default function LegalPolicyScreen() {
