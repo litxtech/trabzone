@@ -4,6 +4,13 @@
   "buildCommand": "npm run build:web",
   "outputDirectory": "dist",
   "installCommand": "npm install --legacy-peer-deps",
+  "functions": {
+    "api/listing.js": {
+      "includeFiles": "dist/index.html",
+      "memory": 1024,
+      "maxDuration": 15
+    }
+  },
   "redirects": [
     { "source": "/policy/terms", "destination": "/terms", "permanent": true },
     { "source": "/policy/privacy", "destination": "/privacy", "permanent": true },
@@ -26,6 +33,24 @@
     { "source": "/policy/marketplace-rules", "destination": "/seo/marketplace-rules.html" },
     { "source": "/policy/real-estate-rules", "destination": "/seo/real-estate-rules.html" },
     { "source": "/policy/vehicle-rules", "destination": "/seo/vehicle-rules.html" },
+
+    { "source": "/marketplace/real-estate/create", "destination": "/index.html" },
+    { "source": "/marketplace/real-estate/my-listings", "destination": "/index.html" },
+    { "source": "/marketplace/real-estate", "destination": "/index.html" },
+    { "source": "/marketplace/cart", "destination": "/index.html" },
+    { "source": "/marketplace/catalog", "destination": "/index.html" },
+    { "source": "/marketplace/categories", "destination": "/index.html" },
+    { "source": "/marketplace/create", "destination": "/index.html" },
+    { "source": "/marketplace/map", "destination": "/index.html" },
+    { "source": "/marketplace/my-listings", "destination": "/index.html" },
+    { "source": "/marketplace/orders", "destination": "/index.html" },
+    { "source": "/marketplace/places", "destination": "/index.html" },
+    { "source": "/marketplace/saved-searches", "destination": "/index.html" },
+    { "source": "/marketplace/search", "destination": "/index.html" },
+
+    { "source": "/marketplace/real-estate/:id", "destination": "/api/listing?kind=real_estate&id=:id" },
+    { "source": "/marketplace/:id", "destination": "/api/listing?kind=market&id=:id" },
+
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [

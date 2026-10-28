@@ -12,7 +12,9 @@ module.exports = defineConfig([
       "android/**/*",
       ".github/**/*",
       "node_modules/**/*",
-      "supabase/functions/**/*"
+      "supabase/functions/**/*",
+      "api/**/*",
+      "server/**/*"
     ],
   }
 ]);

@@ -546,12 +546,35 @@ ${urls}
 `;
 }
 
+/**
+ * Site haritası dizini: statik sayfalar + dinamik ilan haritası.
+ * `/sitemap-listings.xml` Vercel fonksiyonundan (`api/sitemap-listings.js`)
+ * yayındaki ilanları okur; burada yalnızca adresi bildirilir.
+ */
+function sitemapIndex() {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap>
+    <loc>${SITE}/sitemap-pages.xml</loc>
+    <lastmod>${TODAY}</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>${SITE}/sitemap-listings.xml</loc>
+    <lastmod>${TODAY}</lastmod>
+  </sitemap>
+</sitemapindex>
+`;
+}
+
 function robots() {
   return `# https://www.trabzoneapp.com/robots.txt
 User-agent: *
 Allow: /
 Allow: /assets/
 Allow: /_expo/static/
+
+# İlan sayfalarını sunan sunucu fonksiyonu; asıl adres /marketplace/<id>.
+Disallow: /api/
 
 # Oturum gerektiren ve arama sonucunda görünmemesi gereken alanlar
 Disallow: /admin
@@ -629,7 +652,9 @@ async function main() {
     await writeFile(path.join(seoDir, `${page.slug}.html`), html, 'utf8');
   }
 
-  await writeFile(path.join(dist, 'sitemap.xml'), sitemap(PAGES), 'utf8');
+  await writeFile(path.join(dist, 'sitemap-pages.xml'), sitemap(PAGES), 'utf8');
+  await writeFile(path.join(dist, 'sitemap.xml'), sitemapIndex(), 'utf8');
+
   await writeFile(path.join(dist, 'robots.txt'), robots(), 'utf8');
   await writeFile(path.join(dist, 'site.webmanifest'), webmanifest(), 'utf8');
 
