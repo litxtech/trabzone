@@ -11,7 +11,6 @@ import { deleteFromR2, R2_ENABLED, isR2Path, r2PublicUrl, uploadToR2 } from './r
 import {
   generateVideoPoster,
   prepareVideoForUpload,
-  VIDEO_UPLOAD_LIMIT,
   type PreparedVideo,
 } from './video-service';
 
@@ -33,9 +32,9 @@ export type UploadInput = {
   uri: string;
   mime?: string | null;
   fileName?: string | null;
-  /** Images are downscaled for mobile data. Videos are compressed to fit the storage limit unless disabled. */
+  /** Görseller mobil veri için küçültülür. Videolar yükleme hızı için sıkıştırılır. */
   compressImages?: boolean;
-  /** Varsayılan true: video paylaşılmadan önce depo sınırına sığdırılır. */
+  /** Varsayılan true: video paylaşılmadan önce hızlı yükleme için yeniden kodlanır. */
   compressVideos?: boolean;
   /** Video seçildiğinde bilinen meta (yeniden okumayı önler). */
   durationMs?: number | null;
@@ -68,12 +67,18 @@ export type UploadedVideo = {
 };
 
 /**
- * Tek dosya için pratik üst sınır: depo tarafındaki tek dosya sınırı. Ürün
- * tarafında süre/boyut sınırı yoktur; video hazırlığı bu sınıra göre bit hızı
- * seçer (bkz. `prepareVideoForUpload`). Buradaki kontrol yalnızca son güvenlik
- * ağıdır.
+ * Gizli sohbet medyası için tek dosya sınırı.
+ *
+ * Herkese açık kovalar (gönderi, hikâye, reels, ilan, işletme, emlak) Cloudflare
+ * R2'ye yazılır ve orada tek dosya sınırı yoktur. Supabase Storage'a yalnızca
+ * `message-media` gider; oradaki tavan Supabase projesinin "global file size
+ * limit" ayarıdır (Free planda 50 MB, plan yükseltilince artırılabilir) ve
+ * `EXPO_PUBLIC_MAX_UPLOAD_MB` ile istemciye yansıtılır.
+ *
+ * Bu değer bir ürün sınırı değil, depo tavanının istemci tarafındaki
+ * karşılığıdır: video bu boyuta sıkıştırılarak yüklenir, kullanıcı reddedilmez.
  */
-const MAX_UPLOAD_BYTES = VIDEO_UPLOAD_LIMIT;
+const MESSAGE_MEDIA_LIMIT_BYTES = env.maxUploadBytes;
 /** Akış yolu yoksa belleğe alınabilecek en büyük dosya (OOM koruması). */
 const MAX_IN_MEMORY_BYTES = 32 * 1024 * 1024;
 
@@ -363,6 +368,9 @@ export async function uploadMedia(input: UploadInput): Promise<Result<UploadedMe
       size,
     };
     preparedVideo = await prepareVideoForUpload(source, {
+      // Yalnızca Supabase Storage'a giden gizli sohbet medyası boyut sınırına
+      // tabidir; herkese açık içerik R2'ye sınırsız gider.
+      targetBytes: input.bucket === 'message-media' ? MESSAGE_MEDIA_LIMIT_BYTES : null,
       onProgress: (ratio) => input.onProgress?.('preparing', ratio),
     });
     preparedUri = preparedVideo.uri;
@@ -380,8 +388,9 @@ export async function uploadMedia(input: UploadInput): Promise<Result<UploadedMe
     }
   }
 
-  const limit = MAX_UPLOAD_BYTES;
-  const oversized = size !== null && size > limit;
+  // Boyut kontrolü yalnızca Supabase Storage'a giden gizli sohbet medyası için
+  // geçerlidir; R2'ye giden herkese açık içerikte tavan yoktur.
+  const oversized = size !== null && size > MESSAGE_MEDIA_LIMIT_BYTES;
 
   // Depolama politikası: herkese açık kovalardaki (ilan, gönderi, hikâye,
   // reels, işletme, emlak) bütün fotoğraf ve videolar Cloudflare R2'ye yazılır.
@@ -434,7 +443,7 @@ export async function uploadMedia(input: UploadInput): Promise<Result<UploadedMe
     return fail(
       appError(
         'invalid_input',
-        'Video sıkıştırılamadı. Bağlantını kontrol edip tekrar dene; sorun sürerse uygulamayı güncelle.',
+        'Sohbet videosu depo sınırına sığdırılamadı. Bağlantını kontrol edip tekrar dene; sorun sürerse uygulamayı güncelle.',
       ),
     );
   }
@@ -448,7 +457,7 @@ export async function uploadMedia(input: UploadInput): Promise<Result<UploadedMe
     contentType,
     extension,
     kind: kind === 'video' ? 'video' : 'image',
-    maxBytes: limit,
+    maxBytes: MESSAGE_MEDIA_LIMIT_BYTES,
     onProgress: (ratio) => input.onProgress?.('uploading', ratio),
   });
 

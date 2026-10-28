@@ -30,8 +30,10 @@ const envSchema = z.object({
   EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN: z.string().optional(),
   EXPO_PUBLIC_ENABLE_SOCIAL_AUTH: booleanFlag,
   /**
-   * Depo tarafındaki tek dosya sınırı (MB). Supabase Free planında 50'dir;
-   * plan yükseltildiğinde yalnızca ortam değişkeni güncellenir.
+   * Supabase Storage'ın tek dosya sınırı (MB). Yalnızca gizli sohbet medyası
+   * Supabase'e yazıldığı için bu değer yalnızca onu etkiler; herkese açık medya
+   * R2'ye sınırsız gider. Free planda 50'dir; plan yükseltildiğinde yalnızca
+   * ortam değişkeni güncellenir.
    */
   EXPO_PUBLIC_MAX_UPLOAD_MB: z
     .string()
@@ -70,12 +72,11 @@ export const env = {
   mapboxToken: parsed.data.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN ?? null,
   enableSocialAuth: parsed.data.EXPO_PUBLIC_ENABLE_SOCIAL_AUTH,
   /**
-   * Depo tarafındaki tek dosya sınırı. Ürün tarafında sınır yoktur; bu değer
-   * yalnızca yüklemenin reddedilmemesi için videonun otomatik sığdırılmasında
-   * kullanılır.
+   * Supabase Storage'ın tek dosya sınırı. Yalnızca gizli sohbet medyası için
+   * kullanılır; herkese açık içerikte ürün tarafında sınır yoktur.
    */
   maxUploadBytes: Math.round(parsed.data.EXPO_PUBLIC_MAX_UPLOAD_MB * 1024 * 1024),
-  /** R2 public taban adresi; tanımlıysa büyük videolar R2'ye gider. */
+  /** R2 public taban adresi; tanımlıysa herkese açık bütün medya R2'ye gider. */
   r2PublicUrl: parsed.data.EXPO_PUBLIC_R2_PUBLIC_URL ?? null,
   isDev: __DEV__,
 } as const;

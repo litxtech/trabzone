@@ -8,9 +8,13 @@ import { loadLegacyFileSystem, localFileSize } from './local-file';
 /**
  * Cloudflare R2 medya yolu.
  *
- * Supabase Storage'ın plan bazlı tek dosya sınırı vardır (Free planda 50 MB).
- * Bu sınırı aşan videolar R2'ye yüklenir; depo yolu aynı biçimde saklanır,
- * yalnızca ikinci segment `r2` olur: `<uid>/r2/video-....mp4`.
+ * Herkese açık bütün medya (gönderi, hikâye, reels, ilan, işletme, emlak)
+ * R2'ye yazılır; R2'de tek dosya boyutu sınırı yoktur ve video uzunluğu da
+ * sınırlı değildir. Depo yolu Supabase ile aynı biçimde saklanır, yalnızca
+ * ikinci segment `r2` olur: `<uid>/r2/video-....mp4`.
+ *
+ * Gizli sohbet medyası Supabase Storage'da kalır (imzalı URL + RLS gerekir);
+ * oradaki tavan proje planının "global file size limit" ayarıdır.
  *
  * İmzalı PUT adresi gizli anahtarları istemciye taşımamak için `r2-sign` edge
  * function'ından alınır. Function, anahtarın çağıran kullanıcıya ait olduğunu

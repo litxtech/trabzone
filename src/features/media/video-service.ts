@@ -1,39 +1,34 @@
 import { Platform } from 'react-native';
 
-import { env } from '@/config/env';
-
 import { releaseTempFile } from './local-file';
 
 /**
  * Video hazırlama yardımcıları.
  *
- * Ürün kuralı: süre sınırı yoktur ve hiçbir video boyutundan dolayı
- * reddedilmez. Kullanıcı kaç MB olursa olsun bir video seçebilir; video
- * paylaşılmadan önce cihazda depo sınırının altına sıkıştırılır.
+ * Ürün kuralı: süre sınırı yoktur ve hiçbir video dosya boyutundan dolayı
+ * reddedilmez. Herkese açık içerik Cloudflare R2'ye yazıldığı için depo
+ * tarafında da bir tavan yoktur; sıkıştırma yalnızca yükleme hızı ve bant
+ * genişliği için yapılır.
  *
  * Akış:
- * 1. Videoya hiç dokunmadan sığıyorsa (1080p ve altı, sınırın altında)
- *    doğrudan yüklenir — paylaşım anında başlar.
- * 2. Sığmıyorsa tek geçişte hedef boyuta göre bit hızı seçilir. Bit hızı çok
- *    düşecekse çözünürlük de kademeli düşürülür; amaç kabul edilebilir kalite.
- * 3. Tahmin tutmazsa en fazla bir düzeltme geçişi yapılır.
+ * 1. Video 1080p ve altındaysa, kalite bütçesinin içindeyse ve yeniden
+ *    kodlama gerektirmiyorsa hiç dokunulmadan yüklenir — paylaşım anında
+ *    başlar.
+ * 2. Aksi halde tek geçişte çözünürlük ve kalite hedefine göre bit hızı
+ *    seçilir. Süre uzadıkça bit hızı kademeli düşer: uzun videolar da mobil
+ *    bağlantıda hızlı yüklenir, kalite kabul edilebilir kalır.
+ * 3. Yalnızca dosya sınırı olan bir depoya yükleniyorsa (`targetBytes`) hedef
+ *    boyuta göre bit hızı hesaplanır ve gerekirse bir düzeltme geçişi yapılır.
  *
  * Sıkıştırma native bir modül gerektirir (`react-native-compressor`). Modül
  * eski bir dev-client derlemesinde yoksa hazırlık sessizce orijinal dosyayla
- * devam eder ve `exceedsLimit` ile bildirilir; yükleme katmanı R2'ye düşer.
+ * devam eder ve `compressorUnavailable` ile bildirilir; yükleme yine yapılır.
  *
  * Hazırlık sonucu URI bazında önbelleklenir: kullanıcı videoyu seçtiği anda
  * arka planda başlatılır, "Paylaş"a bastığında iş genellikle bitmiş olur.
  */
 
 export const VIDEO_LONG_SIDE = 1920;
-/**
- * Depo tarafındaki tek dosya sınırı. Ürün tarafında sınır yoktur: bu değer
- * yalnızca videonun hangi boyuta sıkıştırılacağını belirler.
- */
-export const VIDEO_UPLOAD_LIMIT = env.maxUploadBytes;
-/** Sıkıştırma hedefi: kap/paket payı için %6 boşluk bırakılır. */
-export const VIDEO_UPLOAD_TARGET = Math.floor(VIDEO_UPLOAD_LIMIT * 0.94);
 /** Ses her zaman AAC 128 kbps. */
 const AUDIO_BITRATE = 128_000;
 /**
@@ -44,11 +39,37 @@ const BITS_PER_PIXEL = 0.09;
 const MAX_VIDEO_BITRATE = 8_000_000;
 const MIN_VIDEO_BITRATE = 1_500_000;
 /**
- * Sığdırma geçişlerinde inilebilecek en düşük bit hızı. Depo sınırı sabit
- * olduğu için çok uzun videolarda kalite ister istemez düşer; sınır burada
- * reddetmek değil, kodlayıcının kabul ettiği en düşük değerde durmaktır.
+ * Sığdırma geçişlerinde inilebilecek en düşük bit hızı. Yalnızca `targetBytes`
+ * verilen (depo sınırı olan) yüklemelerde kullanılır.
  */
 const MIN_FIT_BITRATE = 60_000;
+/**
+ * Süreye göre bit hızı tavanı. Bit hızı süreden bağımsız seçilirse 20 dakikalık
+ * bir video 1080p'de gigabaytlara çıkar ve mobil yükleme dakikalarca sürer.
+ * Kademeli tavan hiçbir videoyu reddetmez; yalnızca paylaşım süresini makul
+ * tutar. Kısa videolarda tavan devreye girmez, kalite korunur.
+ */
+const DURATION_BITRATE_CEILINGS: readonly (readonly [maxSeconds: number, bitrate: number])[] = [
+  [60, 8_000_000],
+  [300, 6_000_000],
+  [900, 4_000_000],
+  [3600, 2_500_000],
+  [Number.POSITIVE_INFINITY, 1_500_000],
+];
+
+/** Süreye karşılık gelen bit hızı tavanı. */
+function durationBitrateCeiling(durationMs: number | null | undefined): number {
+  if (!durationMs || durationMs <= 0) {
+    return MAX_VIDEO_BITRATE;
+  }
+  const seconds = durationMs / 1000;
+  for (const [maxSeconds, bitrate] of DURATION_BITRATE_CEILINGS) {
+    if (seconds <= maxSeconds) {
+      return bitrate;
+    }
+  }
+  return MIN_VIDEO_BITRATE;
+}
 
 type CompressorModule = typeof import('react-native-compressor');
 
@@ -157,8 +178,8 @@ export type PreparedVideo = {
   /** Native modül bu derlemede yoksa true; orijinal dosya döner. */
   compressorUnavailable: boolean;
   /**
-   * Tüm sıkıştırma geçişlerine rağmen dosya hâlâ depo sınırının üzerinde mi?
-   * Bu durumda çağıran katman R2'ye yükler ya da son çare hatayı gösterir.
+   * Yalnızca `targetBytes` verilen yüklemelerde anlamlıdır: istenen boyutun
+   * üzerinde kalındı mı? Herkese açık (R2) yüklemelerde her zaman false.
    */
   exceedsLimit: boolean;
 };
@@ -206,16 +227,22 @@ async function readNativeMeta(
 }
 
 /**
- * Görüntü kalitesinden bit hızı hesaplar. Sabit bir dosya boyutu hedefi
- * olmadığı için süre uzadıkça kalite düşmez; yalnızca çok yüksek bit hızları
- * kodlayıcıyı zorlamasın diye üstten sınırlanır.
+ * Görüntü kalitesinden bit hızı hesaplar. Dosya boyutu hedefi yoktur; süre
+ * uzadıkça kademeli tavan devreye girer (bkz. `DURATION_BITRATE_CEILINGS`),
+ * böylece uzun videolar mobil bağlantıda hızlı yüklenebilir.
  */
-function bitrateFor(width: number | null, height: number | null): number {
+function bitrateFor(
+  width: number | null,
+  height: number | null,
+  durationMs: number | null = null,
+): number {
   const w = width ?? VIDEO_LONG_SIDE;
   const h = height ?? Math.round(VIDEO_LONG_SIDE * 0.5625);
   // 30 fps varsayımı: sabit kare hızında kalite/bit oranı dengeli kalır.
   const computed = w * h * 30 * BITS_PER_PIXEL + AUDIO_BITRATE;
-  return Math.round(Math.min(MAX_VIDEO_BITRATE, Math.max(MIN_VIDEO_BITRATE, computed)));
+  const ceiling = durationBitrateCeiling(durationMs);
+  const bounded = Math.min(computed, ceiling);
+  return Math.round(Math.min(MAX_VIDEO_BITRATE, Math.max(MIN_VIDEO_BITRATE, bounded)));
 }
 
 /**
@@ -273,6 +300,13 @@ export type PrepareVideoOptions = {
    * Varsayılan 1080p.
    */
   maxLongSide?: number;
+  /**
+   * Verilirse kodlama bu bayt bütçesine sığdırılır. Yalnızca dosya sınırı olan
+   * depolara (gizli sohbet medyası → Supabase Storage) yüklerken kullanılır.
+   * Verilmezse video boyuttan bağımsız olarak yalnızca kalite/hız için kodlanır
+   * ve hiçbir boyutta reddedilmez.
+   */
+  targetBytes?: number | null;
   /** 0..1 arası kodlama ilerlemesi. */
   onProgress?: (progress: number) => void;
 };
@@ -292,8 +326,8 @@ type PreparedEntry = {
 const preparedCache = new Map<string, PreparedEntry>();
 const PREPARED_CACHE_LIMIT = 4;
 
-function preparedKey(uri: string, maxLongSide: number) {
-  return `${uri}|${maxLongSide}`;
+function preparedKey(uri: string, maxLongSide: number, targetBytes: number | null) {
+  return `${uri}|${maxLongSide}|${targetBytes ?? 'free'}`;
 }
 
 function trimPreparedCache() {
@@ -312,18 +346,21 @@ function trimPreparedCache() {
 }
 
 /**
- * Videoyu paylaşıma hazırlar. Hangi boyutta olursa olsun video reddedilmez:
- * depo sınırının üzerindeki dosyalar cihazda sıkıştırılarak sınıra indirilir.
- * 1080p'nin üzerindeki kaynaklar da 1080p'ye çekilir. Süre sınırı yoktur.
- * Hata durumunda orijinal dosya döner ve `exceedsLimit` ile bildirilir. Aynı
- * parametrelerle ikinci çağrı yeni bir kodlama başlatmaz.
+ * Videoyu paylaşıma hazırlar. Hiçbir video boyutundan dolayı reddedilmez:
+ * herkese açık yüklemelerde depo tarafında tavan yoktur, sıkıştırma yalnızca
+ * paylaşım hızı ve bant genişliği içindir. 1080p'nin üzerindeki kaynaklar da
+ * 1080p'ye çekilir. Süre sınırı yoktur. `targetBytes` yalnızca sınırlı depolara
+ * yüklerken verilir. Hata durumunda orijinal dosya döner. Aynı parametrelerle
+ * ikinci çağrı yeni bir kodlama başlatmaz.
  */
 export function prepareVideoForUpload(
   source: VideoSource,
   options: PrepareVideoOptions = {},
 ): Promise<PreparedVideo> {
   const maxLongSide = options.maxLongSide ?? VIDEO_LONG_SIDE;
-  const key = preparedKey(source.uri, maxLongSide);
+  const targetBytes =
+    options.targetBytes && options.targetBytes > 0 ? Math.floor(options.targetBytes) : null;
+  const key = preparedKey(source.uri, maxLongSide, targetBytes);
   let entry = preparedCache.get(key);
 
   if (!entry) {
@@ -338,7 +375,7 @@ export function prepareVideoForUpload(
       ratio: 0,
       listeners: new Set(),
     };
-    created.promise = runPrepare(source, maxLongSide, (ratio) => {
+    created.promise = runPrepare(source, maxLongSide, targetBytes, (ratio) => {
       created.ratio = ratio;
       created.listeners.forEach((listener) => listener(ratio));
     }).then((prepared) => {
@@ -368,18 +405,23 @@ export function prepareVideoForUpload(
 }
 
 /** Hazırlık ilerlemesi (0..1); UI'da "hazır" etiketi için kullanılır. */
-export function videoPreparationRatio(uri: string, maxLongSide = VIDEO_LONG_SIDE): number {
-  return preparedCache.get(preparedKey(uri, maxLongSide))?.ratio ?? 0;
+export function videoPreparationRatio(
+  uri: string,
+  maxLongSide = VIDEO_LONG_SIDE,
+  targetBytes: number | null = null,
+): number {
+  return preparedCache.get(preparedKey(uri, maxLongSide, targetBytes))?.ratio ?? 0;
 }
 
 async function runPrepare(
   source: VideoSource,
   maxLongSide: number,
+  targetBytes: number | null,
   report: (ratio: number) => void,
 ): Promise<PreparedVideo> {
   const meta = normalizeMeta(source);
   try {
-    return await encodeForUpload(source, maxLongSide, report);
+    return await encodeForUpload(source, maxLongSide, targetBytes, report);
   } catch {
     // Beklenmeyen bir hata paylaşımı engellemesin: orijinal dosya yüklenir.
     return {
@@ -387,7 +429,7 @@ async function runPrepare(
       ...meta,
       compressed: false,
       compressorUnavailable: false,
-      exceedsLimit: (meta.size ?? 0) > VIDEO_UPLOAD_LIMIT,
+      exceedsLimit: targetBytes !== null && (meta.size ?? 0) > targetBytes,
     };
   }
 }
@@ -395,6 +437,7 @@ async function runPrepare(
 async function encodeForUpload(
   source: VideoSource,
   maxLongSide: number,
+  targetBytes: number | null,
   report: (ratio: number) => void,
 ): Promise<PreparedVideo> {
   const compressor = await loadVideoCompressor();
@@ -405,7 +448,7 @@ async function encodeForUpload(
       ...sourceMeta,
       compressed: false,
       compressorUnavailable: true,
-      exceedsLimit: (sourceMeta.size ?? 0) > VIDEO_UPLOAD_LIMIT,
+      exceedsLimit: targetBytes !== null && (sourceMeta.size ?? 0) > targetBytes,
     };
   }
 
@@ -415,19 +458,20 @@ async function encodeForUpload(
   const needsResize = maxLongSide > 0 && longSide > maxLongSide;
 
   const output = scaledSize(meta.width, meta.height, maxLongSide);
-  const qualityBitrate = bitrateFor(output?.width ?? null, output?.height ?? null);
-  const target = VIDEO_UPLOAD_TARGET;
+  const qualityBitrate = bitrateFor(output?.width ?? null, output?.height ?? null, meta.durationMs);
   const durationSeconds = meta.durationMs ? meta.durationMs / 1000 : null;
-  // Kaynak hedefe sığıyor mu? Boyut bilinmiyorsa süre ve bit hızından tahmin.
-  const exceedsTarget =
-    meta.size !== null
-      ? meta.size > target
-      : durationSeconds !== null
-        ? ((qualityBitrate + AUDIO_BITRATE) * durationSeconds) / 8 > target
-        : false;
+  // Kaynağın gerçek bit hızı: kalite hedefinin belirgin üzerindeyse yeniden
+  // kodlamak yükleme süresini kısaltır ve görünür kalite kaybı yaratmaz.
+  const sourceBitrate =
+    meta.size !== null && durationSeconds !== null ? (meta.size * 8) / durationSeconds : null;
+  const wasteful = sourceBitrate !== null && sourceBitrate > qualityBitrate * 1.1;
+  // Depo sınırı yalnızca `targetBytes` verildiğinde devreye girer.
+  const fitsStorage =
+    targetBytes === null || (meta.size !== null && meta.size <= targetBytes);
 
-  // 1080p ve altı, hedefe sığan kaynaklar olduğu gibi yüklenir: bekleme yok.
-  if (!needsResize && !exceedsTarget) {
+  // 1080p ve altı, kalite bütçesinde kalan ve sınırı aşmayan kaynaklar olduğu
+  // gibi yüklenir: bekleme yok.
+  if (!needsResize && !wasteful && fitsStorage) {
     report(1);
     return {
       uri: source.uri,
@@ -470,10 +514,10 @@ async function encodeForUpload(
     }
   };
 
-  // İlk geçiş: sığacaksa kalite odaklı, sığmayacaksa doğrudan hedefe göre
-  // sıkıştır. Bit hızı düşükse çözünürlük de düşürülür (aşırı bulanıklığı
-  // önlemek için). Hedef her durumda depo sınırının altıdır.
-  const fitted = exceedsTarget ? fitBitrate(meta.durationMs, target) : null;
+  // İlk geçiş: depo sınırı varsa hedefe göre, yoksa yalnızca kalite hedefine
+  // göre kodlanır. Bit hızı çok düşecekse çözünürlük de düşürülür (aşırı
+  // bulanıklığı önlemek için); herkese açık yüklemelerde 1080p korunur.
+  const fitted = targetBytes !== null ? fitBitrate(meta.durationMs, targetBytes) : null;
   const firstBitrate = fitted !== null ? Math.min(fitted, qualityBitrate) : qualityBitrate;
   let firstSide = maxLongSide;
   if (fitted !== null) {
@@ -482,24 +526,23 @@ async function encodeForUpload(
 
   let result = await encode(firstBitrate, firstSide);
   if (!result) {
-    const fallbackMeta = meta;
     return {
       uri: source.uri,
-      ...fallbackMeta,
+      ...meta,
       compressed: false,
       compressorUnavailable: false,
-      exceedsLimit: (fallbackMeta.size ?? 0) > VIDEO_UPLOAD_LIMIT,
+      exceedsLimit: targetBytes !== null && (meta.size ?? 0) > targetBytes,
     };
   }
 
-  // Tahmin tutmazsa düzeltme geçişleri: ölçülen boyuttan gereken bit hızı
-  // hesaplanır, gerekirse çözünürlük bir kademe daha düşürülür. Geçiş sayısı
-  // sabittir; amaç ilk denemede bitirmek, uzun videoda onlarca kodlama
-  // yapmamak.
+  // Depo sınırı varsa ve tahmin tutmazsa düzeltme geçişleri yapılır. Boyut
+  // hedefi olmayan yüklemelerde ikinci kodlama yalnızca zaman kaybıdır; tek
+  // geçişte bitirilir.
+  const target = targetBytes;
   let pass = 0;
   let currentBitrate = firstBitrate;
   let currentSide = firstSide;
-  while ((result.size ?? 0) > target && pass < 2) {
+  while (target !== null && (result.size ?? 0) > target && pass < 2) {
     pass += 1;
     const measured = result.size ?? 0;
     if (measured <= 0) {
@@ -533,7 +576,7 @@ async function encodeForUpload(
   report(1);
   return {
     ...result,
-    exceedsLimit: (result.size ?? 0) > VIDEO_UPLOAD_LIMIT,
+    exceedsLimit: target !== null && (result.size ?? 0) > target,
   };
 }
 
