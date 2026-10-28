@@ -1,4 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useLocalSearchParams, type Href } from 'expo-router';
 import { useRouter } from '@/utils/router';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
@@ -6,6 +7,7 @@ import { StyleSheet, View, Platform } from 'react-native';
 
 import { AppText, Button, TextField } from '@/components/ui';
 import { AuthScreen, InlineLink } from '@/features/auth/components/AuthScreen';
+import { safeNextPath } from '@/features/auth/next-path';
 import { WebLoginPage } from '@/features/web/components/WebLoginPage';
 import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons';
 import { env } from '@/config/env';
@@ -22,6 +24,10 @@ export default function LoginRoute() {
 
 function LoginScreen() {
   const router = useRouter();
+  // Derin baglanti / korumali sayfa yonlendirmesinden gelen hedef. Giris
+  // tamamlaninca kullanici tikladigi ilana geri doner.
+  const params = useLocalSearchParams<{ next?: string }>();
+  const next = safeNextPath(params.next);
   const [formError, setFormError] = useState<string | null>(null);
 
   const { control, handleSubmit, formState } = useForm<LoginValues>({
@@ -50,7 +56,7 @@ function LoginScreen() {
       router.replace('/legal/consent');
       return;
     }
-    router.replace('/feed');
+    router.replace((next ?? '/feed') as Href);
   });
 
   return (

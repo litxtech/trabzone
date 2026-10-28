@@ -9,6 +9,15 @@
       "includeFiles": "dist/index.html",
       "memory": 1024,
       "maxDuration": 15
+    },
+    "api/hub.js": {
+      "includeFiles": "dist/index.html",
+      "memory": 1024,
+      "maxDuration": 15
+    },
+    "api/sitemap-hubs.js": {
+      "memory": 512,
+      "maxDuration": 15
     }
   },
   "redirects": [
@@ -35,6 +44,12 @@
     { "source": "/policy/vehicle-rules", "destination": "/seo/vehicle-rules.html" },
 
     { "source": "/sitemap-listings.xml", "destination": "/api/sitemap-listings" },
+    { "source": "/sitemap-hubs.xml", "destination": "/api/sitemap-hubs" },
+
+    { "source": "/trabzon/:p1/:p2/:p3", "destination": "/api/hub?p1=:p1&p2=:p2&p3=:p3" },
+    { "source": "/trabzon/:p1/:p2", "destination": "/api/hub?p1=:p1&p2=:p2" },
+    { "source": "/trabzon/:p1", "destination": "/api/hub?p1=:p1" },
+    { "source": "/trabzon", "destination": "/api/hub" },
 
     { "source": "/marketplace/real-estate/create", "destination": "/index.html" },
     { "source": "/marketplace/real-estate/my-listings", "destination": "/index.html" },

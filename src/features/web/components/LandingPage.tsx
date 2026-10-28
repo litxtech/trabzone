@@ -27,6 +27,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 
 import { useWebMeta } from '../use-web-meta';
 import { webPhotos } from '../assets';
+import { HomeListings } from './HomeListings';
 import { WebFooter } from './WebFooter';
 import { WebHeader } from './WebHeader';
 import {
@@ -479,6 +480,9 @@ export function LandingPage() {
                 <MarketplaceTile key={tile.label} icon={tile.icon} label={tile.label} accent={tile.accent} />
               ))}
             </View>
+            {/* Yayındaki gerçek ilanlar: karta tıklayan kullanıcı giriş yapmışsa
+                ilana, yapmamışsa giriş formuna (giriş sonrası aynı ilana) gider. */}
+            <HomeListings />
             <View style={styles.photoRow}>
               {[
                 { photo: webPhotos.market, label: 'Yerel ürünler' },

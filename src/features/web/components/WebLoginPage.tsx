@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Link, type Href, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText, Button, TextField } from '@/components/ui';
 import { env } from '@/config/env';
+import { safeNextPath } from '@/features/auth/next-path';
 import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons';
 import { fetchPendingAcceptances } from '@/features/legal/services/legal-service';
 import { fetchMyProfile } from '@/features/profile/services/profile-service';
@@ -16,19 +17,22 @@ import { useRouter } from '@/utils/router';
 import { useWebMeta } from '../use-web-meta';
 import { WebAuthLayout } from './WebAuthLayout';
 
-function safeNext(value: string | undefined) {
-  if (!value || !value.startsWith('/') || value.startsWith('//')) {
-    return null;
-  }
-  return value;
-}
-
 export function WebLoginPage() {
   const router = useRouter();
   const { theme } = useTheme();
   const authStatus = useAuthStatus();
   const params = useLocalSearchParams<{ next?: string }>();
-  const next = safeNext(typeof params.next === 'string' ? params.next : undefined);
+  const next = safeNextPath(params.next);
+  const submittedRef = useRef(false);
+
+  // Oturum baska bir sekmede acildiysa veya oturum geri yuklenirken bu ekran
+  // gorunduyse kullaniciyi bekletmeden hedefe tasi. Bu formdan yapilan giris
+  // `submit` icinde yonlendirildigi icin burada tekrar ele alinmaz.
+  useEffect(() => {
+    if (next && authStatus === 'authenticated' && !submittedRef.current) {
+      router.replace(next as Href);
+    }
+  }, [authStatus, next, router]);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -44,6 +48,7 @@ export function WebLoginPage() {
   });
 
   const submit = async () => {
+    submittedRef.current = true;
     setError(null);
     setSubmitting(true);
     const result = await signInWithPassword(email, password);

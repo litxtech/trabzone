@@ -21,15 +21,15 @@ const PAGES = [
   {
     path: '/',
     slug: 'home',
-    title: "Trabzone · Trabzon'un Dijital Merkezi",
+    title: 'Trabzone | Trabzon İş İlanları, Emlak ve Marketplace',
     description:
-      "Trabzon'un sosyal keşif, marketplace, emlak, araç ve harita platformu. Paylaş, keşfet, alışveriş yap ve şehrin topluluğuna katıl.",
+      "Trabzone'da Trabzon iş ilanlarını, kiralık ve satılık evleri, ikinci el ürünleri, araçları ve işletmeleri keşfedin. İlanları inceleyin, paylaşın ve iletişim kurun.",
     type: 'website',
     priority: '1.0',
     changefreq: 'daily',
-    noscriptTitle: "Trabzon'un dijital merkezi",
+    noscriptTitle: 'Trabzon iş ilanları, emlak ve marketplace',
     noscriptBody:
-      'Trabzone; sosyal akış, Reels, mesajlaşma, marketplace, emlak ve araç ilanları ile şehir haritasını tek hesapta birleştirir.',
+      "Trabzone; Trabzon iş ilanları, kiralık ve satılık emlak, ikinci el ürünler, araçlar, yerel işletmeler ve ustalar için tek platform. İlçe ve kategoriye göre ilanları keşfedin, fiyatları karşılaştırın, satıcı ve işletmelerle iletişime geçin.",
   },
   {
     path: '/about',
@@ -560,6 +560,10 @@ function sitemapIndex() {
   </sitemap>
   <sitemap>
     <loc>${SITE}/sitemap-listings.xml</loc>
+    <lastmod>${TODAY}</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>${SITE}/sitemap-hubs.xml</loc>
     <lastmod>${TODAY}</lastmod>
   </sitemap>
 </sitemapindex>
