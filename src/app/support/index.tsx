@@ -2,10 +2,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from '@/utils/router';
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText, IconButton, TextField } from '@/components/ui';
 import { useReportSheet } from '@/features/safety/components/ReportSheetProvider';
+import { WebSupportPage } from '@/features/web/components/WebSupportPage';
 import { SafetyHeader } from '@/features/safety/components/SafetyHeader';
 import {
   SAFETY_COMMITMENTS,
@@ -22,7 +23,11 @@ import { haptics } from '@/utils/haptics';
 
 const ALL_FAQ = 'all';
 
-export default function SupportCenterScreen() {
+export default function SupportCenterRoute() {
+  return Platform.OS === 'web' ? <WebSupportPage /> : <SupportCenterScreen />;
+}
+
+function SupportCenterScreen() {
   const { theme } = useTheme();
   const router = useRouter();
   const { openReport } = useReportSheet();

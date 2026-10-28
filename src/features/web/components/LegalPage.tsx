@@ -41,7 +41,11 @@ export function LegalPage({ slug, document: doc, isLoading }: Props) {
   );
 
   useWebMeta({
-    title: doc ? `${doc.title} · Trabzone` : `${catalogItem?.title ?? 'Politika'} · Trabzone`,
+    title: doc
+      ? doc.title.includes('Trabzone')
+        ? doc.title
+        : `${doc.title} · Trabzone`
+      : `${catalogItem?.title ?? 'Politika'} · Trabzone`,
     description:
       doc?.summary ??
       catalogItem?.description ??

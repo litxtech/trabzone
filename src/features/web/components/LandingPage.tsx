@@ -24,6 +24,7 @@ import type { WebsiteSection } from '@/features/web-content/types';
 import { useReduceMotion } from '@/perf/use-reduce-motion';
 import { useTheme } from '@/theme/ThemeProvider';
 
+import { useWebMeta } from '../use-web-meta';
 import { WebFooter } from './WebFooter';
 import { WebHeader } from './WebHeader';
 import {
@@ -216,6 +217,28 @@ export function LandingPage() {
   const router = useRouter();
   const { data } = useWebsiteContent();
 
+  useWebMeta({
+    title: "Trabzone · Trabzon'un Dijital Merkezi",
+    description:
+      "Trabzon'un sosyal keşif, marketplace, emlak, araç ve harita platformu. Paylaş, keşfet, alışveriş yap ve şehrin topluluğuna katıl.",
+    path: '/',
+  });
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      return;
+    }
+    const scrollToHash = () => {
+      const id = window.location.hash.replace(/^#/, '');
+      if (id) {
+        window.setTimeout(() => scrollToId(id), 120);
+      }
+    };
+    scrollToHash();
+    window.addEventListener('hashchange', scrollToHash);
+    return () => window.removeEventListener('hashchange', scrollToHash);
+  }, []);
+
   const desktop = width >= 1024;
   const tablet = width >= 720;
   const heroSize = desktop ? 66 : tablet ? 48 : width < 380 ? 38 : 44;
@@ -390,7 +413,7 @@ export function LandingPage() {
         </View>
 
         {/* REELS */}
-        <View style={styles.darkSection}>
+        <View nativeID="reels" style={styles.darkSection}>
           <LinearGradient
             colors={['#070C18', '#0B1530', '#0A0F1F']}
             start={{ x: 0, y: 0 }}
@@ -422,7 +445,7 @@ export function LandingPage() {
         </View>
 
         {/* MARKETPLACE */}
-        <View style={[styles.section, { backgroundColor: theme.colors.surfaceMuted }]}>
+        <View nativeID="marketplace" style={[styles.section, { backgroundColor: theme.colors.surfaceMuted }]}>
           <View style={styles.sectionInner}>
             <SectionHeading
               eyebrow="MARKETPLACE"
@@ -461,7 +484,7 @@ export function LandingPage() {
         </View>
 
         {/* MAP */}
-        <View style={[styles.section, { backgroundColor: theme.colors.background }]}>
+        <View nativeID="harita" style={[styles.section, { backgroundColor: theme.colors.background }]}>
           <View style={[styles.sectionInner, desktop ? styles.twoColumn : null]}>
             <View style={styles.columnCopy}>
               <SectionHeading

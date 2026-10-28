@@ -13,6 +13,8 @@
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
+    "build:web": "expo export --platform web --clear && node scripts/generate-seo.mjs",
+    "seo": "node scripts/generate-seo.mjs",
     "db:apply": "node scripts/db-apply.mjs",
     "db:check": "node scripts/db-check.mjs",
     "verify:rpcs": "node scripts/verify-rpcs.mjs",

@@ -65,7 +65,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   web: {
     bundler: 'metro',
     output: 'single',
-    favicon: './assets/brand/icons/icon.png',
+    favicon: './assets/brand/icons/favicon-32.png',
+    name: 'Trabzone',
+    shortName: 'Trabzone',
+    lang: 'tr',
+    themeColor: '#0B1220',
+    backgroundColor: '#0B1020',
+    description:
+      "Trabzon'un sosyal keşif, marketplace, emlak, araç ve harita platformu.",
   },
   plugins: [
     'expo-router',

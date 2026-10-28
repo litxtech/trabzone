@@ -1,10 +1,33 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "buildCommand": "npx expo export --platform web",
+  "buildCommand": "npm run build:web",
   "outputDirectory": "dist",
   "installCommand": "npm install --legacy-peer-deps",
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
+  "redirects": [
+    { "source": "/policy/terms", "destination": "/terms", "permanent": true },
+    { "source": "/policy/privacy", "destination": "/privacy", "permanent": true },
+    { "source": "/real-estate", "destination": "/marketplace/real-estate", "permanent": true },
+    { "source": "/businesses", "destination": "/marketplace/places", "permanent": true }
+  ],
+  "rewrites": [
+    { "source": "/about", "destination": "/seo/about.html" },
+    { "source": "/contact", "destination": "/seo/contact.html" },
+    { "source": "/support", "destination": "/seo/support.html" },
+    { "source": "/terms", "destination": "/seo/terms.html" },
+    { "source": "/privacy", "destination": "/seo/privacy.html" },
+    { "source": "/kvkk", "destination": "/seo/kvkk.html" },
+    { "source": "/data-protection", "destination": "/seo/data-protection.html" },
+    { "source": "/cookies", "destination": "/seo/cookies.html" },
+    { "source": "/child-safety", "destination": "/seo/child-safety.html" },
+    { "source": "/community-guidelines", "destination": "/seo/community-guidelines.html" },
+    { "source": "/delete-account", "destination": "/seo/delete-account.html" },
+    { "source": "/data-requests", "destination": "/seo/data-requests.html" },
+    { "source": "/policy/marketplace-rules", "destination": "/seo/marketplace-rules.html" },
+    { "source": "/policy/real-estate-rules", "destination": "/seo/real-estate-rules.html" },
+    { "source": "/policy/vehicle-rules", "destination": "/seo/vehicle-rules.html" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
   "headers": [
     {
       "source": "/_expo/static/(.*)",
@@ -13,6 +36,90 @@
     {
       "source": "/assets/(.*)",
       "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    },
+    {
+      "source": "/og-image.png",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800, stale-while-revalidate=86400" }]
+    },
+    {
+      "source": "/favicon-32.png",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800" }]
+    },
+    {
+      "source": "/favicon-192.png",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800" }]
+    },
+    {
+      "source": "/apple-touch-icon.png",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800" }]
+    },
+    {
+      "source": "/icon-512.png",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800" }]
+    },
+    {
+      "source": "/sitemap.xml",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=3600, stale-while-revalidate=86400" }]
+    },
+    {
+      "source": "/robots.txt",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=3600, stale-while-revalidate=86400" }]
+    },
+    {
+      "source": "/site.webmanifest",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=3600, stale-while-revalidate=86400" }]
+    },
+    {
+      "source": "/admin/(.*)",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/settings/(.*)",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/chat/(.*)",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/call/(.*)",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/support/my-requests",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/login",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/register",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/forgot-password",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/verify",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/complete-profile",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/compose/(.*)",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "X-Frame-Options", "value": "SAMEORIGIN" }
+      ]
     }
   ]
 }

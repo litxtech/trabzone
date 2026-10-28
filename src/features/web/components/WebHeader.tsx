@@ -25,21 +25,20 @@ import { useTheme } from '@/theme/ThemeProvider';
 
 const NAV_ITEMS = [
   { label: 'Ana Sayfa', href: '/' },
-  { label: 'Keşfet', href: '/explore' },
-  { label: 'Reels', href: '/reels' },
-  { label: 'Marketplace', href: '/marketplace' },
-  { label: 'Emlak', href: '/real-estate' },
-  { label: 'İşletmeler', href: '/businesses' },
-  { label: 'Harita', href: '/map' },
+  { label: 'Keşfet', href: '/#kesfet' },
+  { label: 'Reels', href: '/#reels' },
+  { label: 'Marketplace', href: '/#marketplace' },
+  { label: 'Harita', href: '/#harita' },
   { label: 'Hakkımızda', href: '/about' },
   { label: 'Destek', href: '/support' },
 ] as const;
 
 function isActive(pathname: string, href: string) {
-  if (href === '/') {
+  const target = href.split('#')[0] || '/';
+  if (target === '/') {
     return pathname === '/';
   }
-  return pathname === href || pathname.startsWith(`${href}/`);
+  return pathname === target || pathname.startsWith(`${target}/`);
 }
 
 function NavLink({ label, href, onPress }: { label: string; href: string; onPress?: () => void }) {
