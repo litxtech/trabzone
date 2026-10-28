@@ -56,6 +56,7 @@ type EditorState = {
   bodyMd: string;
   docType: LegalDocType;
   requiresAcceptance: boolean;
+  requiresReacceptance: boolean;
   effectiveAt: string;
   changeSummary: string;
 };
@@ -67,6 +68,7 @@ const emptyEditor = (): EditorState => ({
   bodyMd: '',
   docType: 'policy',
   requiresAcceptance: true,
+  requiresReacceptance: false,
   effectiveAt: '',
   changeSummary: '',
 });
@@ -78,6 +80,7 @@ const editorFrom = (version: LegalAdminVersion): EditorState => ({
   bodyMd: version.body_md,
   docType: version.doc_type,
   requiresAcceptance: version.requires_acceptance,
+  requiresReacceptance: version.requires_reacceptance,
   effectiveAt: version.effective_at ? version.effective_at.slice(0, 10) : '',
   changeSummary: version.change_summary ?? '',
 });
@@ -212,6 +215,7 @@ export default function AdminLegalScreen() {
         bodyMd: state.bodyMd,
         docType: state.docType,
         requiresAcceptance: state.requiresAcceptance,
+        requiresReacceptance: state.requiresAcceptance ? state.requiresReacceptance : false,
         effectiveAt: state.effectiveAt.trim() ? `${state.effectiveAt.trim()}T00:00:00Z` : null,
         changeSummary: state.changeSummary.trim() || null,
         publish: shouldPublish,
@@ -589,7 +593,13 @@ export default function AdminLegalScreen() {
                     accessibilityRole="switch"
                     accessibilityState={{ checked: editor.requiresAcceptance }}
                     onPress={() =>
-                      setEditor({ ...editor, requiresAcceptance: !editor.requiresAcceptance })
+                      setEditor({
+                        ...editor,
+                        requiresAcceptance: !editor.requiresAcceptance,
+                        requiresReacceptance: editor.requiresAcceptance
+                          ? false
+                          : editor.requiresReacceptance,
+                      })
                     }
                     style={[
                       styles.acceptanceRow,
@@ -613,12 +623,52 @@ export default function AdminLegalScreen() {
                       }
                     />
                     <View style={styles.flex}>
-                      <AppText variant="bodyStrong">Yeniden kabul gerektirir</AppText>
+                      <AppText variant="bodyStrong">Onay zorunlu</AppText>
                       <AppText variant="caption" color="textSecondary">
-                        Yalnızca kullanıcı haklarını etkileyen sözleşme değişikliklerinde açın.
+                        Kullanıcı bu belgeyi kabul etmeden uygulamaya giremez.
                       </AppText>
                     </View>
                   </Pressable>
+
+                  {editor.requiresAcceptance ? (
+                    <Pressable
+                      accessibilityRole="switch"
+                      accessibilityState={{ checked: editor.requiresReacceptance }}
+                      onPress={() =>
+                        setEditor({
+                          ...editor,
+                          requiresReacceptance: !editor.requiresReacceptance,
+                        })
+                      }
+                      style={[
+                        styles.acceptanceRow,
+                        {
+                          backgroundColor: editor.requiresReacceptance
+                            ? theme.colors.primarySoft
+                            : theme.colors.surfaceMuted,
+                          borderColor: editor.requiresReacceptance
+                            ? theme.colors.primary
+                            : theme.colors.border,
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name={editor.requiresReacceptance ? 'checkbox' : 'square-outline'}
+                        size={20}
+                        color={
+                          editor.requiresReacceptance
+                            ? theme.colors.primaryDeep
+                            : theme.colors.textTertiary
+                        }
+                      />
+                      <View style={styles.flex}>
+                        <AppText variant="bodyStrong">Yeni sürüm için yeniden onay</AppText>
+                        <AppText variant="caption" color="textSecondary">
+                          Önceki sürümü kabul etmiş kullanıcılar da bu sürümü yeniden onaylar.
+                        </AppText>
+                      </View>
+                    </Pressable>
+                  ) : null}
 
                   <Field label="Belge içeriği (Markdown)">
                     <TextInput
@@ -778,6 +828,9 @@ export default function AdminLegalScreen() {
                         <StatusPill version={version} />
                         {version.requires_acceptance ? (
                           <Badge label="Kabul gerekli" tone="primary" />
+                        ) : null}
+                        {version.requires_reacceptance ? (
+                          <Badge label="Yeniden onay" tone="warning" />
                         ) : null}
                       </View>
                       <AppText variant="caption" color="textTertiary">

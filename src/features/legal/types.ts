@@ -81,6 +81,7 @@ export type LegalAdminVersion = {
   content_hash: string;
   is_published: boolean;
   requires_acceptance: boolean;
+  requires_reacceptance: boolean;
   change_summary: string | null;
   effective_at: string | null;
   published_at: string | null;

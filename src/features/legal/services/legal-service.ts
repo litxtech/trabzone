@@ -141,6 +141,7 @@ export const adminSaveLegalDocument = (input: {
   locale?: LegalLocale;
   docType?: 'contract' | 'policy' | 'notice' | 'rules' | 'disclosure';
   requiresAcceptance?: boolean;
+  requiresReacceptance?: boolean | null;
   effectiveAt?: string | null;
   changeSummary?: string | null;
   publish?: boolean;
@@ -156,6 +157,7 @@ export const adminSaveLegalDocument = (input: {
     p_effective_at: input.effectiveAt ?? null,
     p_change_summary: input.changeSummary ?? null,
     p_publish: input.publish ?? false,
+    p_requires_reacceptance: input.requiresReacceptance ?? null,
   });
 
 export const adminPublishLegalDocument = (id: string, effectiveAt?: string | null) =>
