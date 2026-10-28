@@ -311,7 +311,7 @@ insert into public.app_settings (key, value, description_tr, is_public) values
   ('app.marketplace_listing_enabled', 'true'::jsonb, 'Yeni marketplace ilanı açık mı?', true),
   ('app.notifications_enabled',   'true'::jsonb,  'Uygulama bildirimleri açık mı?', true),
   ('app.min_age',                 '13'::jsonb,    'Minimum kayıt yaşı', true),
-  ('support.email',               '"destek@trabzoneapp.com"'::jsonb, 'Destek e-posta adresi', true),
+  ('support.email',               '"destek@litxtech.com"'::jsonb, 'Destek e-posta adresi', true),
   ('legal.terms_version',         '"1.0"'::jsonb, 'Yürürlükteki kullanım koşulları sürümü', true),
   ('marketplace.default_commission_bps', '0'::jsonb, 'Varsayılan marketplace komisyonu (baz puan, 10000 = %100)', false),
   ('security.require_admin_mfa',  'false'::jsonb, 'Kritik yönetici işlemleri için AAL2 (MFA) zorunlu mu?', false),

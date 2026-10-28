@@ -2,10 +2,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/utils/router';
 import { useMemo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 
 import { AppText, Button, Card, Skeleton } from '@/components/ui';
 import { Screen } from '@/components/ui/Screen';
+import { LegalDocumentRoute } from '@/features/web/components/LegalDocumentRoute';
 import { SafetyHeader } from '@/features/safety/components/SafetyHeader';
 import { PolicyBody } from '@/features/safety/components/PolicyBody';
 import { useSafetyPolicy } from '@/features/safety/hooks/use-safety';
@@ -31,6 +32,15 @@ const COPY: Record<PolicySlug, { title: string; icon: keyof typeof Ionicons.glyp
 };
 
 export default function LegalPolicyScreen() {
+  return Platform.OS === 'web' ? <WebPolicyRoute /> : <NativeLegalPolicyScreen />;
+}
+
+function WebPolicyRoute() {
+  const params = useLocalSearchParams<{ slug?: string }>();
+  return <LegalDocumentRoute slug={params.slug ?? ''} />;
+}
+
+function NativeLegalPolicyScreen() {
   const { theme } = useTheme();
   const router = useRouter();
   const authStatus = useAuthStatus();
