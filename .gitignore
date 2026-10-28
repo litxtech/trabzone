@@ -46,3 +46,6 @@ tmp-admin-check.sql
 tmp-*.json
 scripts/.cache/
 supabase/_conflicting_parallel_work/
+
+# Cursor local settings
+.cursor/
