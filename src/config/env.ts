@@ -25,7 +25,7 @@ const envSchema = z.object({
   EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z
     .string()
     .min(20, 'EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY eksik veya geçersiz'),
-  EXPO_PUBLIC_APP_URL: z.string().url().default('https://trabzone.app'),
+  EXPO_PUBLIC_APP_URL: z.string().url().default('https://www.trabzoneapp.com'),
   EXPO_PUBLIC_LIVEKIT_URL: z.string().optional(),
   EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN: z.string().optional(),
   EXPO_PUBLIC_ENABLE_SOCIAL_AUTH: booleanFlag,
@@ -43,7 +43,7 @@ const envSchema = z.object({
       return Number.isFinite(parsed) && parsed > 0 ? parsed : 50;
     }),
   /**
-   * Cloudflare R2 public taban adresi (örn. `https://media.trabzone.app`).
+   * Cloudflare R2 public taban adresi (örn. `https://media.trabzoneapp.com`).
    * Tanımlıysa herkese açık kovalardaki bütün fotoğraf ve videolar R2'ye
    * yüklenir ve bu adresten sunulur. Boş bırakılırsa medya yüklemesi çalışmaz;
    * Supabase Storage'a yalnızca gizli sohbet medyası yazılır.

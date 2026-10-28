@@ -196,7 +196,7 @@ function geometryContains(geometry, lat, lng) {
 async function fetchJson(url, attempt = 0) {
   const response = await fetch(url, {
     headers: {
-      'User-Agent': 'Trabzone-OSM-Import/1.0 (business data import; contact: trabzone.app)',
+      'User-Agent': 'Trabzone-OSM-Import/1.0 (business data import; contact: trabzoneapp.com)',
       'Accept-Language': 'tr',
     },
   });

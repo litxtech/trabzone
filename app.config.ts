@@ -166,7 +166,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     typedRoutes: true,
   },
   extra: {
-    appUrl: process.env.EXPO_PUBLIC_APP_URL ?? 'https://trabzone.app',
+    appUrl: process.env.EXPO_PUBLIC_APP_URL ?? 'https://www.trabzoneapp.com',
     eas: {
       projectId: '2512ac5f-ba99-4d56-90ee-079b4211b77c',
     },

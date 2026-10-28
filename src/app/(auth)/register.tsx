@@ -177,7 +177,7 @@ export default function RegisterScreen() {
           render={({ field, fieldState }) => (
             <TextField
               label="E-posta"
-              placeholder="ornek@trabzone.app"
+              placeholder="ornek@trabzoneapp.com"
               keyboardType="email-address"
               autoCapitalize="none"
               autoComplete="email"
