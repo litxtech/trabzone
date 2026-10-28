@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState, type ComponentProps } from 'react';
-import { Linking, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import { useEffect, useState, type ComponentProps } from 'react';
+import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { AppText, Badge, Button, IconButton } from '@/components/ui';
 import {
@@ -44,7 +45,14 @@ export default function AdminReelsScreen() {
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<ContentReel | null>(null);
   const [pending, setPending] = useState<ContentAction | null>(null);
+  /** Moderasyon videosu panelin içinde oynatılır; tarayıcıya çıkılmaz. */
+  const [videoUri, setVideoUri] = useState<string | null>(null);
   const action = useContentAction();
+
+  const closeDrawer = () => {
+    setVideoUri(null);
+    setSelected(null);
+  };
 
   const reels = useAdminReels({
     query: query.trim() || undefined,
@@ -250,13 +258,13 @@ export default function AdminReelsScreen() {
         visible={Boolean(selected)}
         transparent
         animationType="fade"
-        onRequestClose={() => setSelected(null)}
+        onRequestClose={closeDrawer}
       >
         <View style={styles.modalRoot}>
           <Pressable
             accessibilityLabel="Kapat"
             style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.overlay }]}
-            onPress={() => setSelected(null)}
+            onPress={closeDrawer}
           />
           <View
             style={[
@@ -270,7 +278,7 @@ export default function AdminReelsScreen() {
                 accessibilityLabel="Kapat"
                 name="close"
                 size={18}
-                onPress={() => setSelected(null)}
+                onPress={closeDrawer}
               />
             </View>
             {selected ? (
@@ -334,11 +342,13 @@ export default function AdminReelsScreen() {
                     onPress={() => {
                       const url = publicMediaUrl('reels', selected.video_path);
                       if (url) {
-                        void Linking.openURL(url);
+                        setVideoUri(url);
                       }
                     }}
                   />
                 ) : null}
+
+                {videoUri ? <InlineReelVideo uri={videoUri} /> : null}
 
                 <View style={styles.actionGrid}>
                   <ActionButton
@@ -411,6 +421,39 @@ export default function AdminReelsScreen() {
   );
 }
 
+/**
+ * Moderasyon videosunu panelin içinde oynatır.
+ *
+ * Önceki sürüm videoyu cihaz tarayıcısında açıyordu; inceleme akışından
+ * çıkılıyor ve herkese açık medya adresi tarayıcı geçmişine düşüyordu.
+ */
+function InlineReelVideo({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, (instance) => {
+    instance.loop = false;
+    instance.muted = false;
+  });
+
+  useEffect(() => {
+    try {
+      player.play();
+    } catch {
+      // Otomatik oynatma engellenmiş olabilir; kullanıcı kontrolleri kullanır.
+    }
+  }, [player]);
+
+  return (
+    <View style={styles.videoWrap}>
+      <VideoView
+        player={player}
+        style={styles.video}
+        contentFit="contain"
+        nativeControls
+        surfaceType="textureView"
+      />
+    </View>
+  );
+}
+
 function Meta({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <View style={styles.meta}>
@@ -466,6 +509,13 @@ function ActionButton({
 
 const styles = StyleSheet.create({
   reelCell: { flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 0 },
+  videoWrap: {
+    height: 320,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#04060C',
+  },
+  video: { width: '100%', height: '100%' },
   badgeRow: { flexDirection: 'row', gap: 4, flexWrap: 'wrap' },
   searchWrap: {
     flexGrow: 1,

@@ -5,7 +5,10 @@ import { Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText, Button, Card, Screen, ScreenHeader, TextField } from '@/components/ui';
 import { useDeleteAccount, useDeletionStatus } from '@/features/account/hooks/use-account-deletion';
-import type { DeletionReceipt } from '@/features/account/services/account-deletion-service';
+import type {
+  DeletionReceipt,
+  DeletionStep,
+} from '@/features/account/services/account-deletion-service';
 import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
 import { useAuthStore } from '@/stores/auth-store';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -28,12 +31,15 @@ const REASONS = [
 ] as const;
 
 const DELETED_ITEMS = [
-  'Profilin, fotoğrafların ve biyografin',
-  'Gönderilerin, hikâyelerin, yorum ve beğenilerin',
-  'Mesajların (karşı tarafta anonimleştirilir)',
+  'Profil fotoğrafın, kapak fotoğrafın ve biyografin',
+  'Profilin, kullanıcı adın ve görünen tüm hesap bilgilerin',
+  'Gönderilerin, hikâyelerin, Reels videoların, yorum ve beğenilerin',
+  'Sohbette paylaştığın fotoğraf, video ve ses dosyaları',
   'Marketplace ilanların, favorilerin ve sipariş taleplerin',
   'Takipçilerin, takip ettiklerin ve engel listelerin',
-  'Yüklediğin tüm medya dosyaları',
+  'Yüklediğin tüm medya dosyaları (bulut deposu dahil)',
+  'Apple ile giriş yaptıysan Apple kimlik bağlantın (uygulama yetkisi geri alınır)',
+  'Bildirim tercihlerin ve aktif oturumların',
 ];
 
 const KEPT_ITEMS = [
@@ -48,17 +54,29 @@ export default function DeleteAccountScreen() {
   const signOut = useAuthStore((state) => state.signOut);
   const { data: profile } = useMyProfile();
   const { data: status } = useDeletionStatus();
-  const deleteAccount = useDeleteAccount();
 
   const [confirm, setConfirm] = useState('');
   const [password, setPassword] = useState('');
   const [reason, setReason] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<DeletionReceipt | null>(null);
+  const [step, setStep] = useState<DeletionStep | null>(null);
+
+  const deleteAccount = useDeleteAccount(setStep);
 
   const username = profile?.username ?? '';
   const confirmed = username.length > 0 && confirm.trim().toLowerCase() === username.toLowerCase();
   const pending = deleteAccount.isPending;
+  const pendingLabel =
+    step === 'verifying'
+      ? 'Hesap doğrulanıyor…'
+      : step === 'apple'
+        ? 'Apple oturum bağlantın kaldırılıyor…'
+        : step === 'media'
+          ? 'Medya dosyaların siliniyor…'
+          : step === 'account'
+            ? 'Hesabın siliniyor…'
+            : 'Hesap siliniyor…';
 
   const run = () => {
     setError(null);
@@ -119,8 +137,8 @@ export default function DeleteAccountScreen() {
           </View>
           <AppText variant="title">Hesabın kalıcı olarak silindi</AppText>
           <AppText variant="body" color="textSecondary">
-            Profilin ve içeriklerin kaldırıldı, oturumların kapatıldı. Bu hesapla tekrar giriş
-            yapılamaz.
+            Profilin, profil fotoğrafın, kapak fotoğrafın, içeriklerin ve medya dosyaların
+            kaldırıldı, oturumların kapatıldı. Bu hesapla tekrar giriş yapılamaz.
           </AppText>
 
           <View
@@ -172,8 +190,9 @@ export default function DeleteAccountScreen() {
         </View>
         <AppText variant="body" color="textSecondary">
           Hesabını sildiğinde aynı e-posta veya kullanıcı adıyla yeni bir hesap açabilirsin; ancak
-          eski içeriklerine erişemezsin. İstersen bunun yerine yalnızca çıkış yapabilir veya
-          gizlilik ayarlarını sıkılaştırabilirsin.
+          eski içeriklerine erişemezsin. Giriş yapamıyorsan tarayıcıdan
+          trabzoneapp.com/delete-account adresinden silme talebi oluşturabilirsin; uygulamayı
+          yeniden yüklemen gerekmez.
         </AppText>
       </View>
 
@@ -276,8 +295,10 @@ export default function DeleteAccountScreen() {
           leftIcon="at-outline"
         />
         <AppText variant="caption" color="textTertiary">
-          Silme işlemi öncesinde hesabına ait tüm medya dosyaları da temizlenir; bu yüzden işlem
-          birkaç saniye sürebilir.
+          Silme işlemi öncesinde hesabına ait tüm medya dosyaları (profil fotoğrafı, kapak, gönderi
+          ve sohbet dosyaları) bulut deposundan da kaldırılır. Bu yüzden işlem birkaç saniye
+          sürebilir. İşlemi uygulamayı yeniden yükleyerek veya destek ekibine yazarak tekrarlaman
+          gerekmez.
         </AppText>
       </View>
 
@@ -296,7 +317,7 @@ export default function DeleteAccountScreen() {
       ) : null}
 
       <Button
-        label={pending ? 'Hesap siliniyor…' : 'Hesabımı kalıcı olarak sil'}
+        label={pending ? pendingLabel : 'Hesabımı kalıcı olarak sil'}
         variant="danger"
         loading={pending}
         disabled={!confirmed || pending}

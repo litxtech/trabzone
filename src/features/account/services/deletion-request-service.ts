@@ -22,6 +22,8 @@ export type AdminDeletionRequest = {
   id: string;
   request_no: string;
   email: string | null;
+  user_id: string | null;
+  account_found: boolean | null;
   status: string;
   identity_verified: boolean;
   reason: string | null;
@@ -30,6 +32,13 @@ export type AdminDeletionRequest = {
   updated_at: string;
   completed_at: string | null;
   assigned_name: string | null;
+};
+
+export type DeletionExecutionResult = {
+  status: string;
+  account_found?: boolean;
+  reference_code: string;
+  already_completed?: boolean;
 };
 
 function errorMessage(message: string | undefined, fallback: string) {
@@ -108,3 +117,11 @@ export async function adminUpdateDeletionRequest(input: {
   }
   return ok(data as unknown as { id: string; status: string });
 }
+
+/**
+ * Kimliği doğrulanmış talebi gerçekten uygular: hedef kullanıcının medyası
+ * (R2 + eski Storage nesneleri) temizlenir, ardından profil, içerik ve auth
+ * hesabı kalıcı olarak silinir. Yalnızca `privacy.request.manage` yetkisi olan
+ * personel çağırabilir.
+ */
+export { executeDeletionRequest } from './account-deletion-service';

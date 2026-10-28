@@ -36,7 +36,6 @@ export type SharingModule = typeof import('expo-sharing');
 export type LocationModule = typeof import('expo-location');
 export type DocumentPickerModule = typeof import('expo-document-picker');
 export type ImagePickerModule = typeof import('expo-image-picker');
-export type WebBrowserModule = typeof import('expo-web-browser');
 
 export const loadPrint = () => load<PrintModule>('expo-print', () => import('expo-print'));
 export const loadSharing = () => load<SharingModule>('expo-sharing', () => import('expo-sharing'));
@@ -46,11 +45,9 @@ export const loadDocumentPicker = () =>
   load<DocumentPickerModule>('expo-document-picker', () => import('expo-document-picker'));
 export const loadImagePicker = () =>
   load<ImagePickerModule>('expo-image-picker', () => import('expo-image-picker'));
-export const loadWebBrowser = () =>
-  load<WebBrowserModule>('expo-web-browser', () => import('expo-web-browser'));
 
 /**
- * Belge seçici ve görüntüleyici modüllerini ekran açılırken ısıtır.
+ * Belge seçici modülünü ekran açılırken ısıtır.
  *
  * İlk dokunuşta native modülün yüklenmesini beklemek, kullanıcıya "dosyalar
  * geç açılıyor" olarak yansıyordu. Yükleme arka planda biteceği için seçici
@@ -58,7 +55,6 @@ export const loadWebBrowser = () =>
  */
 export function preloadDocumentModules(): void {
   void loadDocumentPicker();
-  void loadWebBrowser();
 }
 
 export type PickedDocument = {

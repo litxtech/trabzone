@@ -6,6 +6,7 @@ import {
   adminFetchDeletionRequests,
   adminUpdateDeletionRequest,
   createDeletionRequest,
+  executeDeletionRequest,
   fetchDeletionRequestStatus,
   type AdminDeletionRequest,
   type DeletionRequestReceipt,
@@ -54,6 +55,22 @@ export function useAdminUpdateDeletionRequest() {
       note?: string | null;
       verifyIdentity?: boolean | null;
     }) => unwrap(await adminUpdateDeletionRequest(input)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['deletion-requests', 'admin'] });
+    },
+  });
+}
+
+/**
+ * Talebi gerçekten uygular: hedef kullanıcının medyası (R2 + eski Storage
+ * nesneleri) temizlenir, ardından profil/hesap sunucuda kalıcı olarak silinir.
+ * Yalnızca kimliği doğrulanmış talepler için çalışır.
+ */
+export function useExecuteDeletionRequest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { id: string; userId: string | null }) =>
+      unwrap(await executeDeletionRequest(input)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['deletion-requests', 'admin'] });
     },

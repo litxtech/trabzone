@@ -160,6 +160,27 @@ export default function PrivacySettingsScreen() {
           </View>
 
           <View style={styles.section}>
+            <AppText variant="h3">Engellenen kişiler</AppText>
+            <Card style={styles.card}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Engellenen kişileri yönet"
+                onPress={() => router.push('/settings/blocked' as never)}
+                style={({ pressed }) => [styles.mapRow, { opacity: pressed ? 0.7 : 1 }]}
+              >
+                <Ionicons name="ban-outline" size={20} color={theme.colors.danger} />
+                <View style={styles.mapRowText}>
+                  <AppText variant="bodyStrong">Engel listesini yönet</AppText>
+                  <AppText variant="caption" color="textTertiary">
+                    Engellediğin kişiler seni arayamaz, mesaj gönderemez ve içeriklerini göremez.
+                  </AppText>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={theme.colors.textTertiary} />
+              </Pressable>
+            </Card>
+          </View>
+
+          <View style={styles.section}>
             <AppText variant="h3">Konum ve keşif</AppText>
             <Card style={styles.card}>
               <Toggle

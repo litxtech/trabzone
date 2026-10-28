@@ -1,5 +1,4 @@
 import type { AuthError } from '@supabase/supabase-js';
-import * as Linking from 'expo-linking';
 import { Platform } from 'react-native';
 
 import { env } from '@/config/env';
@@ -7,7 +6,7 @@ import { mapAuthError, appError } from '@/services/errors';
 import { supabase } from '@/services/supabase/client';
 import { fail, ok, type Result } from '@/utils/result';
 
-import type { SocialProvider } from '@/services/supabase/auth';
+import { linkSocialIdentity, type SocialProvider } from '@/services/supabase/auth';
 
 export type LinkedProvider = 'email' | 'apple' | 'google' | 'phone';
 
@@ -128,33 +127,12 @@ export async function unlinkProvider(provider: LinkedProvider): Promise<Result<n
   return ok(null);
 }
 
-type WebBrowserModule = typeof import('expo-web-browser');
-
-async function loadWebBrowser(): Promise<WebBrowserModule | null> {
-  try {
-    return await import('expo-web-browser');
-  } catch {
-    return null;
-  }
-}
-
-function readUrlParam(url: string, key: string): string | null {
-  const pattern = new RegExp(`[?#&]${key}=([^&]*)`);
-  const match = pattern.exec(url);
-  if (!match?.[1]) {
-    return null;
-  }
-  try {
-    return decodeURIComponent(match[1].replace(/\+/g, ' '));
-  } catch {
-    return match[1];
-  }
-}
-
 /**
- * Mevcut hesaba yeni bir sosyal giriş bağlar. Akış sonunda dönen oturumun
- * aynı kullanıcıya ait olduğu doğrulanır; farklı bir hesap açılmışsa oturum
- * kapatılır ve kullanıcıya hata gösterilir.
+ * Mevcut hesaba yeni bir sosyal giriş bağlar.
+ *
+ * Bağlama, giriş akışıyla aynı native sağlayıcı penceresinde yapılır; tarayıcı
+ * açılmaz. Sağlayıcının döndürdüğü kimlik anahtarı doğrudan Supabase'e
+ * iletilir, böylece oturum başka bir hesaba kaymaz.
  */
 export async function linkProvider(provider: SocialProvider): Promise<Result<null>> {
   if (!env.enableSocialAuth) {
@@ -164,58 +142,10 @@ export async function linkProvider(provider: SocialProvider): Promise<Result<nul
     return fail(appError('oauth_unavailable', 'Hesap bağlama mobil uygulamada yapılabilir.'));
   }
 
-  const WebBrowser = await loadWebBrowser();
-  if (!WebBrowser) {
-    return fail(appError('oauth_unavailable', 'Hesap bağlamak için uygulamanın güncel sürümü gerekli.'));
-  }
-
   const current = await supabase.auth.getUser();
-  const previousUserId = current.data.user?.id;
-  if (!previousUserId) {
+  if (!current.data.user?.id) {
     return fail(appError('session_missing'));
   }
 
-  const redirectTo = Linking.createURL('auth/callback');
-  const { data, error } = await supabase.auth.linkIdentity({
-    provider,
-    options: { redirectTo, skipBrowserRedirect: true },
-  });
-
-  if (error) {
-    return readFailure(error);
-  }
-  if (!data?.url) {
-    return fail(appError('oauth_unavailable', 'Sağlayıcı bağlantısı açılamadı.'));
-  }
-
-  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo, {
-    showInRecents: false,
-  });
-
-  if (result.type !== 'success' || !result.url) {
-    return fail(appError('oauth_cancelled'));
-  }
-
-  const providerError = readUrlParam(result.url, 'error_description') ?? readUrlParam(result.url, 'error');
-  if (providerError) {
-    return fail(appError('oauth_unavailable', providerError));
-  }
-
-  const code = readUrlParam(result.url, 'code');
-  if (!code) {
-    return fail(appError('oauth_unavailable', 'Bağlama tamamlanamadı. Tekrar dene.'));
-  }
-
-  const exchanged = await supabase.auth.exchangeCodeForSession(code);
-  if (exchanged.error) {
-    return readFailure(exchanged.error);
-  }
-
-  if (exchanged.data.session?.user.id && exchanged.data.session.user.id !== previousUserId) {
-    // Güvenlik: başka bir hesabın oturumu açıldıysa geri al.
-    await supabase.auth.signOut();
-    return fail(appError('forbidden', 'Farklı bir hesap açıldı. Bağlantı iptal edildi.'));
-  }
-
-  return ok(null);
+  return linkSocialIdentity(provider);
 }

@@ -9,7 +9,6 @@ import {
   Keyboard,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   TextInput,
   View,
@@ -24,6 +23,7 @@ import { ActionSheet, AppImage, AppText, Avatar, IconButton, Screen, ScreenHeade
 import { MediaViewer, type ViewerMedia } from '@/features/feed/components/MediaViewer';
 import { VideoThumbnail } from '@/features/media/components/VideoThumbnail';
 import { useReportSheet } from '@/features/safety/components/ReportSheetProvider';
+import { shareContent } from '@/features/share/share-action';
 import { useBlockUser } from '@/features/profile/hooks/use-profile-mutations';
 import { pickMedia } from '@/features/media/media-picker';
 import {
@@ -1143,7 +1143,7 @@ export default function ChatScreen() {
               void Clipboard.setStringAsync(message.body);
             }
           } else if (key === 'share') {
-            void Share.share({
+            void shareContent({
               message:
                 message.body ??
                 (message.media.length > 0 ? 'Trabzone üzerinden paylaşılan medya' : ''),

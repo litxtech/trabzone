@@ -109,6 +109,13 @@ export function DrawerMenu({ onClose }: { onClose: () => void }) {
         />
         <DrawerDivider />
         <DrawerRow
+          icon="newspaper-outline"
+          label="Trabzon Blog"
+          hint="Gezi · Yaşam · Yerel rehberler"
+          onPress={() => go('/blog')}
+        />
+        <DrawerDivider />
+        <DrawerRow
           icon="receipt-outline"
           label="Siparişlerim"
           onPress={() => go('/marketplace/orders')}

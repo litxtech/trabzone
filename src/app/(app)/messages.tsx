@@ -32,6 +32,7 @@ import {
   usePinConversation,
 } from '@/features/messaging/hooks/use-chat';
 import type { Conversation } from '@/features/messaging/services/messaging-service';
+import { useChatDrafts } from '@/features/messaging/drafts/draft-store';
 import { useSession } from '@/stores/auth-store';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatShortDateTr, formatTimeTr } from '@/utils/date';
@@ -46,6 +47,8 @@ export default function MessagesScreen() {
 
   const { data: profile } = useMyProfile();
   const conversations = useConversations();
+  // Gönderilmemiş taslaklar listede "Taslak: ..." olarak görünür.
+  const drafts = useChatDrafts();
   useConversationListRealtime();
 
   const [query, setQuery] = useState('');
@@ -134,6 +137,7 @@ export default function MessagesScreen() {
         item.last_message_preview ??
         (item.kind === 'group' ? 'Grup oluşturuldu' : 'Sohbeti başlat');
       const isMine = item.last_message_sender_id === myId;
+      const draft = drafts[item.id]?.text.trim() ?? '';
 
       return (
         <Pressable
@@ -182,15 +186,26 @@ export default function MessagesScreen() {
             </View>
 
             <View style={styles.rowBottom}>
-              <AppText
-                variant="caption"
-                color={unread ? 'text' : 'textSecondary'}
-                numberOfLines={1}
-                style={styles.flex}
-              >
-                {isMine ? 'Sen: ' : ''}
-                {preview}
-              </AppText>
+              {draft ? (
+                <AppText
+                  variant="caption"
+                  color="danger"
+                  numberOfLines={1}
+                  style={styles.flex}
+                >
+                  Taslak: {draft}
+                </AppText>
+              ) : (
+                <AppText
+                  variant="caption"
+                  color={unread ? 'text' : 'textSecondary'}
+                  numberOfLines={1}
+                  style={styles.flex}
+                >
+                  {isMine ? 'Sen: ' : ''}
+                  {preview}
+                </AppText>
+              )}
 
               {item.is_muted ? (
                 <Ionicons
@@ -212,7 +227,7 @@ export default function MessagesScreen() {
         </Pressable>
       );
     },
-    [myId, openMenu, router, theme.colors],
+    [drafts, myId, openMenu, router, theme.colors],
   );
 
   const listEmpty = conversations.isLoading ? (

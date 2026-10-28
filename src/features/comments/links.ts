@@ -1,6 +1,6 @@
 import { Linking as NativeLinking } from 'react-native';
 
-import { env } from '@/config/env';
+import { shareLink } from '@/features/share/links';
 
 export type TextToken =
   | { type: 'text'; value: string }
@@ -63,16 +63,16 @@ function normalizeHttps(value: string): string | null {
 }
 
 /**
- * Var olan web/derin bağlantı rotasını kullanır (`/post/:id`, `/reel/:id`).
- * Yeni domain veya şema üretilmez; yalnızca yorum kimliği query'ye eklenir.
+ * Var olan web/derin bağlantı rotasını kullanır. Paylaşım adresi `/p/...`
+ * biçimindedir: uygulama yüklüyse doğrudan ilgili gönderi/reels açılır,
+ * değilse önizleme kartı ve mağaza bağlantıları görünür.
  */
 export function commentDeepLink(
   contentType: 'post' | 'reel',
   contentId: string,
   commentId: string,
 ): string {
-  const base = env.appUrl.replace(/\/+$/, '');
-  return `${base}/${contentType}/${contentId}?comment=${encodeURIComponent(commentId)}`;
+  return shareLink(contentType, contentId, { comment: commentId });
 }
 
 export async function openSafeLink(href: string): Promise<boolean> {

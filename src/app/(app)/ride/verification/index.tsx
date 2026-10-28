@@ -1,22 +1,23 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Linking,
-  Modal,
   Pressable,
   StyleSheet,
   TextInput,
   View,
 } from 'react-native';
 
-import { AppText, Badge, Button, Card } from '@/components/ui';
+import { AppText, Badge, Button, Card, TextField } from '@/components/ui';
 import { Screen } from '@/components/ui/Screen';
+import { useDocumentViewer } from '@/features/documents/viewer';
+import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
 import { errorMessage } from '@/services/errors';
 import { useTheme } from '@/theme/ThemeProvider';
 
+import { IdentityReadyBanner, VERIFIED_BLUE, VerifiedTick } from '@/features/ride/components/IdentityBadge';
 import { RideHeader } from '@/features/ride/components/RideHeader';
 import {
   useApplyDriver,
@@ -24,32 +25,40 @@ import {
   useSubmitVerification,
 } from '@/features/ride/hooks/use-ride';
 import { rideDocumentUrl, uploadRideDocument } from '@/features/ride/services/ride-service';
-import type { VerificationKind } from '@/features/ride/types';
+import type { Verification, VerificationKind } from '@/features/ride/types';
 import { VERIFICATION_LABEL, formatDate } from '@/features/ride/utils/format';
 import {
+  VERIFICATION_PURPOSE,
+  VERIFICATION_REQUIREMENT,
+  effectiveIdentityStatus,
+  effectiveVerificationStatus,
+  formatTrDateInput,
+  fullName,
+  identityExpiresAt,
+  identityVerifiedAt,
+  isoToTrDate,
+  isValidTckn,
+  latestVerification,
+  maskDocumentNo,
+  metaText,
+  trDateToIso,
+} from '@/features/ride/utils/identity';
+import {
+  NEEDS_DEV_BUILD,
   fileNameFromPath,
   formatFileSize,
   isImageDocument,
-  loadWebBrowser,
+  loadImagePicker,
   pickDocument,
   preloadDocumentModules,
   type PickedDocument,
 } from '@/features/ride/utils/native';
 import { unwrap } from '@/utils/result';
 
-const KIND_HELP: Record<VerificationKind, string> = {
-  identity:
-    'Nüfus cüzdanı, ehliyet veya pasaport. Kimlik numarası dışındaki alanlar maskelenebilir.',
-  driver_license: 'Geçerli sürücü belgesi. Sınıfı ve geçerlilik tarihi kontrol edilir.',
-  insurance: 'Aracın trafik sigortası poliçesi. Geçerlilik tarihi zorunludur.',
-  transport_license:
-    'Ticari taşımacılık yapacaksan gerekli yetki belgesi. Masraf paylaşımı için zorunlu değildir.',
-};
-
 const STATUS_LABEL: Record<string, string> = {
   unverified: 'Doğrulanmadı',
   pending: 'İnceleniyor',
-  approved: 'Onaylandı',
+  approved: 'Doğrulandı',
   rejected: 'Reddedildi',
   expired: 'Süresi doldu',
   none: 'Başvuru yok',
@@ -66,40 +75,56 @@ const TONE = (status: string): 'success' | 'warning' | 'danger' | 'neutral' =>
         : 'neutral';
 
 const EXPIRY_REQUIRED: VerificationKind[] = ['driver_license', 'insurance', 'transport_license'];
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 /** Depo sınırı: PDF'ler sıkıştırılamadığı için önden kontrol edilir. */
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
 /** İmzalı belge bağlantısı 15 dakika geçerli; önbellek 10 dakika tutulur. */
 const SIGNED_URL_TTL_SECONDS = 900;
 const SIGNED_URL_CACHE_MS = 10 * 60 * 1000;
+const DATE_PATTERN = /^\d{2}\.\d{2}\.\d{4}$/;
 
-/** YYYY-AA-GG girdisini doğrular; geçersizse kullanıcıya gösterilecek mesaj döner. */
-function validateExpiry(value: string, kind: VerificationKind): string | null {
+function validateTrDate(
+  value: string,
+  required: boolean,
+  options: { pastAllowed?: boolean; label?: string } = {},
+): string | null {
   const trimmed = value.trim();
   if (!trimmed) {
-    return EXPIRY_REQUIRED.includes(kind) ? 'Bu belge için geçerlilik tarihi zorunlu.' : null;
+    return required ? `${options.label ?? 'Geçerlilik tarihi'} zorunlu.` : null;
   }
   if (!DATE_PATTERN.test(trimmed)) {
-    return 'Geçerlilik tarihini YYYY-AA-GG biçiminde gir (örn. 2027-06-30).';
+    return 'Tarihi GG.AA.YYYY biçiminde gir (örn. 31.12.2027).';
   }
-  const parsed = new Date(`${trimmed}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) {
-    return 'Geçerlilik tarihi geçersiz.';
+  const iso = trDateToIso(trimmed);
+  if (!iso) {
+    return 'Geçersiz tarih. Gün, ay ve yılı kontrol et.';
   }
-  if (parsed.getTime() < Date.now() - 24 * 60 * 60 * 1000) {
-    return 'Geçerlilik tarihi geçmişte olamaz.';
+  if (!options.pastAllowed && new Date(`${iso}T23:59:59`).getTime() < Date.now()) {
+    return 'Tarih geçmişte olamaz.';
   }
   return null;
+}
+
+function verificationField(
+  verification: Verification | null,
+  key: string,
+): string | null {
+  return metaText(verification?.meta, key);
 }
 
 export default function RideVerificationScreen() {
   const { theme } = useTheme();
   const router = useRouter();
   const profile = useRideProfile();
+  const myProfile = useMyProfile();
   const submit = useSubmitVerification();
   const apply = useApplyDriver();
+  const viewer = useDocumentViewer();
 
-  const [active, setActive] = useState<VerificationKind>('identity');
+  const [active, setActive] = useState<VerificationKind | null>(null);
+  const [tcNo, setTcNo] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [birthDate, setBirthDate] = useState('');
   const [docNo, setDocNo] = useState('');
   const [expiry, setExpiry] = useState('');
   const [bio, setBio] = useState('');
@@ -108,35 +133,64 @@ export default function RideVerificationScreen() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [viewing, setViewing] = useState(false);
-  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
-  const [viewerLoading, setViewerLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // Render sırasında saat okumamak için tek seferlik anlık görüntü.
-  const [mountedAt] = useState(() => Date.now());
   /** İmzalı bağlantılar kısa ömürlüdür; her açılışta yeniden imzalamak gecikme yaratır. */
   const signedUrls = useRef(new Map<string, { url: string; expiresAt: number }>());
+  const prefilled = useRef(false);
 
   const data = profile.data;
-  const verificationFor = (kind: VerificationKind) =>
-    data?.verifications.find((item) => item.kind === kind) ?? null;
-
-  const current = verificationFor(active);
+  const identityStatus = effectiveIdentityStatus(data);
+  const identityApproved = identityStatus === 'approved';
+  const identityRecord = latestVerification(data, 'identity');
+  const verifiedAt = identityVerifiedAt(data);
+  const identityExpiry = identityExpiresAt(data);
+  // Ekran her zaman kimlik özetiyle açılır; onaylı kullanıcıya yeni belge
+  // formu gösterilmez, sıradaki adım yalnızca açık bir düğmeyle sunulur.
+  const currentKind = active ?? 'identity';
+  const current = latestVerification(data, currentKind);
+  const currentStatus =
+    currentKind === 'identity'
+      ? identityStatus
+      : current
+        ? effectiveVerificationStatus(current)
+        : 'unverified';
+  const currentApproved = currentStatus === 'approved';
   const currentDocument = current?.document_path ?? null;
-  const identityApproved = data?.identity_status === 'approved';
-  const driverPending = data?.driver_status === 'pending';
-  const licenseApproved = verificationFor('driver_license')?.status === 'approved';
-  const insuranceApproved = verificationFor('insurance')?.status === 'approved';
+  const isIdentity = currentKind === 'identity';
+  const licenseApproved =
+    effectiveVerificationStatus(latestVerification(data, 'driver_license')) === 'approved';
+  const insuranceApproved =
+    effectiveVerificationStatus(latestVerification(data, 'insurance')) === 'approved';
   // `ride_driver_apply` hem kimlik hem geçerli ehliyet onayı ister.
   const driverReady = identityApproved && licenseApproved;
-  // Sunucu, süresi dolmamış onaylı belgeye yeni kayıt kabul etmez.
-  const approvedLocked =
-    current?.status === 'approved' &&
-    (!current.expires_at || new Date(`${current.expires_at}T23:59:59`).getTime() > mountedAt);
+  const submitBlocked = currentStatus === 'pending';
+  const driverStatus = data?.driver_status ?? 'none';
+  const driverPending = driverStatus === 'pending';
+  const driverApproved = driverStatus === 'approved';
+
+  // Kişisel bilgiler profilden bir kez ön doldurulur; kullanıcı düzenleyebilir.
+  useEffect(() => {
+    if (prefilled.current || !myProfile.data) {
+      return;
+    }
+    prefilled.current = true;
+    setFirstName((value) => value || myProfile.data?.first_name || '');
+    setLastName((value) => value || myProfile.data?.last_name || '');
+  }, [myProfile.data]);
 
   const resetFeedback = () => {
     setError(null);
     setNotice(null);
+  };
+
+  const selectKind = (kind: VerificationKind) => {
+    setActive(kind);
+    setPicked(null);
+    setTcNo('');
+    setDocNo('');
+    setExpiry('');
+    resetFeedback();
   };
 
   /**
@@ -169,7 +223,7 @@ export default function RideVerificationScreen() {
     void documentUrl(currentDocument).catch(() => undefined);
   }, [currentDocument, documentUrl]);
 
-  const handlePick = async () => {
+  const handlePickFile = async () => {
     resetFeedback();
     setPicking(true);
     try {
@@ -181,7 +235,6 @@ export default function RideVerificationScreen() {
       if (!result.document) {
         return;
       }
-      // PDF'ler sıkıştırılamaz; sınırı aşan dosyayı yüklemeden önce uyar.
       if (!isImageDocument(result.document) && (result.document.size ?? 0) > MAX_DOCUMENT_BYTES) {
         setError('PDF boyutu 10 MB sınırını aşıyor. Daha küçük bir dosya seç.');
         return;
@@ -192,17 +245,85 @@ export default function RideVerificationScreen() {
     }
   };
 
+  const handlePickGallery = async () => {
+    resetFeedback();
+    setPicking(true);
+    try {
+      const picker = await loadImagePicker();
+      if (!picker) {
+        setError(NEEDS_DEV_BUILD);
+        return;
+      }
+      const permission = await picker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setError('Belge fotoğrafı seçmek için galeri izni gerekli.');
+        return;
+      }
+      const result = await picker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.9,
+        allowsMultipleSelection: false,
+      });
+      const asset = result.canceled ? null : result.assets[0];
+      if (!result.canceled && !asset) {
+        setError('Fotoğraf okunamadı. Başka bir görsel seç.');
+        return;
+      }
+      if (!asset) {
+        return;
+      }
+      const name = asset.fileName || `belge-${Date.now()}.jpg`;
+      setPicked({
+        uri: asset.uri,
+        name,
+        mime: asset.mimeType ?? 'image/jpeg',
+        size: asset.fileSize ?? null,
+      });
+    } catch {
+      setError('Galeri açılamadı. Tekrar dene.');
+    } finally {
+      setPicking(false);
+    }
+  };
+
   const handleSubmit = async () => {
     resetFeedback();
     if (!picked) {
-      setError('Önce bir belge seçmelisin.');
+      setError('Önce belgenin fotoğrafını galeriden seç veya PDF yükle.');
       return;
     }
-    const expiryError = validateExpiry(expiry, active);
+    const expiryError = validateTrDate(expiry, EXPIRY_REQUIRED.includes(currentKind), {
+      label: 'Geçerlilik tarihi',
+    });
     if (expiryError) {
       setError(expiryError);
       return;
     }
+    const birthIso = isIdentity ? trDateToIso(birthDate.trim()) : null;
+    if (isIdentity) {
+      if (!isValidTckn(tcNo)) {
+        setError('Geçerli bir T.C. Kimlik Numarası gir (11 hane).');
+        return;
+      }
+      if (!firstName.trim() || !lastName.trim()) {
+        setError('Kimlikteki ad ve soyadı yaz.');
+        return;
+      }
+      const birthError = validateTrDate(birthDate, true, {
+        label: 'Doğum tarihi',
+        pastAllowed: true,
+      });
+      if (birthError) {
+        setError(birthError);
+        return;
+      }
+      if (!birthIso || birthIso > new Date().toISOString().slice(0, 10)) {
+        setError('Doğum tarihi gelecekte olamaz.');
+        return;
+      }
+    }
+
+    const expiresAt = expiry.trim() ? trDateToIso(expiry.trim()) : null;
     setUploading(true);
     setUploadProgress(0);
     try {
@@ -217,16 +338,31 @@ export default function RideVerificationScreen() {
       );
       const path = (await unwrap(uploaded)).path;
       await submit.mutateAsync({
-        kind: active,
+        kind: currentKind,
         documentPath: path,
-        expiresAt: expiry.trim() ? `${expiry.trim()}T23:59:59` : null,
-        meta: docNo.trim()
-          ? { document_no: docNo.trim(), document_name: picked.name }
-          : { document_name: picked.name },
+        expiresAt,
+        meta: isIdentity
+          ? {
+              document_no: tcNo.replace(/\D/g, ''),
+              full_name: fullName(firstName, lastName),
+              first_name: firstName.trim(),
+              last_name: lastName.trim(),
+              birth_date: birthIso,
+              document_name: picked.name,
+            }
+          : {
+              ...(docNo.trim() ? { document_no: docNo.trim() } : {}),
+              document_name: picked.name,
+            },
       });
-      setNotice(`${VERIFICATION_LABEL[active]} belgesi incelemeye gönderildi.`);
+      setNotice(
+        isIdentity
+          ? 'Kimlik belgen incelemeye gönderildi. Onaylandığında mavi tik görünür ve tekrar doğrulama istenmez.'
+          : `${VERIFICATION_LABEL[currentKind]} belgesi incelemeye gönderildi.`,
+      );
       signedUrls.current.delete(path);
       setPicked(null);
+      setTcNo('');
       setDocNo('');
       setExpiry('');
     } catch (cause) {
@@ -237,27 +373,34 @@ export default function RideVerificationScreen() {
     }
   };
 
-  const handleViewDocument = async () => {
+  const handleViewDocument = async (path: string | null) => {
     resetFeedback();
-    if (!currentDocument) {
+    if (!path) {
       setError('Görüntülenecek bir belge bulunamadı.');
       return;
     }
     setViewing(true);
     try {
-      const url = await documentUrl(currentDocument);
-      const name = fileNameFromPath(currentDocument);
-      if (isImageDocument({ name, mime: '' })) {
-        setViewerLoading(true);
-        setViewerUrl(url);
-        return;
-      }
-      const WebBrowser = await loadWebBrowser();
-      if (WebBrowser) {
-        await WebBrowser.openBrowserAsync(url);
-      } else {
-        await Linking.openURL(url);
-      }
+      const url = await documentUrl(path);
+      viewer.openDocument({
+        url,
+        name: fileNameFromPath(path),
+        title: `${VERIFICATION_LABEL[currentKind]} belgesi`,
+        // İmzalı adres kısa ömürlü: görüntüleyici açıkken süresi dolarsa
+        // yeni imza üretilir, kullanıcı ekranı kapatmak zorunda kalmaz.
+        refresh: async () => {
+          const fresh = await rideDocumentUrl(path, SIGNED_URL_TTL_SECONDS);
+          if (!fresh.ok) {
+            return null;
+          }
+          const next = fresh.data.url;
+          signedUrls.current.set(path, {
+            url: next,
+            expiresAt: Date.now() + SIGNED_URL_CACHE_MS,
+          });
+          return next;
+        },
+      });
     } catch (cause) {
       setError(errorMessage(cause, 'Belge açılamadı.'));
     } finally {
@@ -283,6 +426,28 @@ export default function RideVerificationScreen() {
     }
   };
 
+  const identityDisplayName =
+    verificationField(identityRecord, 'full_name') ||
+    (myProfile.data ? fullName(myProfile.data.first_name, myProfile.data.last_name) : '');
+  const identityBirth = verificationField(identityRecord, 'birth_date');
+
+  const summaryRows = useMemo(
+    () =>
+      (['identity', 'driver_license', 'insurance', 'transport_license'] as VerificationKind[]).map(
+        (kind) => {
+          const record = latestVerification(data, kind);
+          const status =
+            kind === 'identity'
+              ? identityStatus
+              : record
+                ? effectiveVerificationStatus(record)
+                : 'unverified';
+          return { kind, record, status };
+        },
+      ),
+    [data, identityStatus],
+  );
+
   if (profile.isLoading) {
     return (
       <Screen edges={['top', 'left', 'right', 'bottom']} padded>
@@ -296,12 +461,13 @@ export default function RideVerificationScreen() {
 
   const busy = submit.isPending || uploading;
   const pickedIsImage = picked ? isImageDocument(picked) : false;
+  const activeRecord = current;
 
   return (
     <Screen edges={['top', 'left', 'right', 'bottom']} scroll padded>
       <RideHeader
-        title="Kimlik ve sürücü doğrulaması"
-        subtitle="Rezervasyon ve ilan için zorunlu"
+        title="Doğrulama"
+        subtitle="Kimlik bir kez, güven her yolculukta"
         right={
           <Pressable
             accessibilityRole="button"
@@ -317,205 +483,266 @@ export default function RideVerificationScreen() {
         }
       />
 
-      <Card padding={15} style={styles.summary}>
-        <View style={styles.summaryRow}>
-          <View style={[styles.iconWrap, { backgroundColor: theme.colors.primarySoft }]}>
-            <Ionicons name="person-circle-outline" size={26} color={theme.colors.primaryDeep} />
+      {identityApproved ? (
+        <IdentityReadyBanner
+          subtitle={
+            verifiedAt
+              ? `${formatDate(verifiedAt)} tarihinde doğrulandı. Tekrar belge istenmez.`
+              : 'Kimliğin doğrulandı; tekrar belge istenmez.'
+          }
+          onPress={() => router.navigate('/settings/verifications' as never)}
+        />
+      ) : (
+        <Card padding={15} tone="primarySoft" style={styles.intro}>
+          <View style={[styles.introIcon, { backgroundColor: theme.colors.primary }]}>
+            <Ionicons name="shield-checkmark-outline" size={22} color="#FFFFFF" />
           </View>
           <View style={styles.flex}>
-            <AppText variant="bodyStrong">Kimlik doğrulaması</AppText>
-            <AppText variant="caption" color="textTertiary">
-              Hem sürücü hem yolcu için rezervasyon öncesi zorunlu.
+            <AppText variant="bodyStrong">Rezervasyon ve ilan için kimlik doğrulaması</AppText>
+            <AppText variant="caption" color="textSecondary">
+              Belgeler gizli kovada saklanır. Kimlik onayından sonra aynı belge tekrar istenmez.
             </AppText>
           </View>
-          <Badge
-            label={STATUS_LABEL[data?.identity_status ?? 'unverified'] ?? '—'}
-            tone={TONE(data?.identity_status ?? 'unverified')}
-          />
-        </View>
-        <View style={styles.summaryRow}>
-          <View style={[styles.iconWrap, { backgroundColor: theme.colors.accentSoft }]}>
-            <Ionicons name="car-outline" size={26} color={theme.colors.accent} />
-          </View>
-          <View style={styles.flex}>
-            <AppText variant="bodyStrong">Sürücü başvurusu</AppText>
-            <AppText variant="caption" color="textTertiary">
-              Onay için kimlik ve sürücü belgesi gerekir. İlan için ayrıca onaylı araç
-              (ruhsat + sigorta) şarttır.
-            </AppText>
-          </View>
-          <Badge
-            label={STATUS_LABEL[data?.driver_status ?? 'none'] ?? '—'}
-            tone={TONE(data?.driver_status ?? 'none')}
-          />
-        </View>
-      </Card>
+        </Card>
+      )}
 
-      <Card padding={15} style={styles.form}>
-        <AppText variant="title">Belge yükle</AppText>
-        <View style={styles.chips}>
-          {(
-            ['identity', 'driver_license', 'insurance', 'transport_license'] as VerificationKind[]
-          ).map((kind) => {
-            const activeKind = active === kind;
-            const status = verificationFor(kind)?.status;
-            return (
-              <Pressable
-                key={kind}
-                accessibilityRole="button"
-                accessibilityState={{ selected: activeKind }}
-                onPress={() => {
-                  setActive(kind);
-                  setPicked(null);
-                  resetFeedback();
-                }}
+      <Card padding={15} style={styles.section}>
+        <View style={styles.sectionHead}>
+          <AppText variant="title">Doğrulama durumu</AppText>
+          <Badge
+            label={identityApproved ? 'Kimlik hazır' : 'Kimlik bekliyor'}
+            tone={identityApproved ? 'success' : 'warning'}
+          />
+        </View>
+        {summaryRows.map((row) => {
+          const selected = currentKind === row.kind;
+          const approved = row.status === 'approved';
+          return (
+            <Pressable
+              key={row.kind}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              onPress={() => selectKind(row.kind)}
+              style={[
+                styles.statusRow,
+                {
+                  borderColor: selected ? theme.colors.primary : theme.colors.border,
+                  backgroundColor: selected ? theme.colors.primarySoft : 'transparent',
+                },
+              ]}
+            >
+              <View
                 style={[
-                  styles.chip,
+                  styles.statusIcon,
                   {
-                    borderColor: activeKind ? theme.colors.primary : theme.colors.border,
-                    backgroundColor: activeKind
-                      ? theme.colors.primarySoft
+                    backgroundColor: approved
+                      ? 'rgba(29,155,240,0.12)'
                       : theme.colors.surfaceMuted,
                   },
                 ]}
               >
-                <AppText variant="caption" color={activeKind ? 'primaryDeep' : 'textSecondary'}>
-                  {VERIFICATION_LABEL[kind]}
-                  {status ? ` · ${STATUS_LABEL[status] ?? status}` : ''}
-                </AppText>
-              </Pressable>
-            );
-          })}
-        </View>
-        <AppText variant="caption" color="textTertiary">
-          {KIND_HELP[active]}
-        </AppText>
-
-        {current?.status === 'rejected' ? (
-          <View style={[styles.infoBox, { backgroundColor: theme.colors.surfaceMuted }]}>
-            <Ionicons name="alert-circle-outline" size={16} color={theme.colors.danger} />
-            <AppText variant="caption" color="textSecondary" style={styles.flex}>
-              Ret nedeni: {current?.reject_reason ?? 'Belirtilmedi'} · Belgeyi yenileyerek tekrar
-              gönderebilirsin.
-            </AppText>
-          </View>
-        ) : null}
-
-        {current ? (
-          <View style={[styles.infoBox, { backgroundColor: theme.colors.surfaceMuted }]}>
-            <Ionicons
-              name={current.status === 'approved' ? 'shield-checkmark-outline' : 'time-outline'}
-              size={16}
-              color={current.status === 'approved' ? theme.colors.success : theme.colors.warning}
-            />
-            <View style={styles.flex}>
-              <AppText variant="caption" color="textSecondary">
-                Son durum: {STATUS_LABEL[current.status] ?? current.status}
-                {current.expires_at ? ` · Geçerlilik ${formatDate(current.expires_at)}` : ''}
-              </AppText>
-              {currentDocument ? (
-                <AppText variant="caption" color="textTertiary" numberOfLines={1}>
-                  {fileNameFromPath(currentDocument)}
-                </AppText>
-              ) : null}
-            </View>
-            {currentDocument ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Gönderilen belgeyi görüntüle"
-                onPress={() => void handleViewDocument()}
-                style={[styles.viewBtn, { borderColor: theme.colors.border }]}
-              >
-                {viewing ? (
-                  <ActivityIndicator size="small" color={theme.colors.primaryDeep} />
+                {approved ? (
+                  <VerifiedTick size={20} />
                 ) : (
-                  <>
-                    <Ionicons name="eye-outline" size={15} color={theme.colors.primaryDeep} />
-                    <AppText variant="caption" color="primaryDeep">
-                      Görüntüle
-                    </AppText>
-                  </>
+                  <Ionicons
+                    name={row.kind === 'identity' ? 'id-card-outline' : 'document-text-outline'}
+                    size={18}
+                    color={theme.colors.textTertiary}
+                  />
                 )}
-              </Pressable>
+              </View>
+              <View style={styles.flex}>
+                <View style={styles.rowTitle}>
+                  <AppText variant="bodyStrong">{VERIFICATION_LABEL[row.kind]}</AppText>
+                  {approved ? <VerifiedTick size={14} /> : null}
+                </View>
+                <AppText variant="caption" color="textTertiary" numberOfLines={2}>
+                  {VERIFICATION_PURPOSE[row.kind]}
+                </AppText>
+              </View>
+              <Badge label={STATUS_LABEL[row.status] ?? row.status} tone={TONE(row.status)} />
+            </Pressable>
+          );
+        })}
+        <AppText variant="caption" color="textTertiary">
+          {identityApproved
+            ? 'Kimlik doğrulandı. Aşağıdaki eksik belgeleri tamamlayarak sürücü olabilirsin.'
+            : 'Kimlik onaylanmadan rezervasyon oluşturulamaz. Tek bir kimlik belgesi yeterlidir.'}
+        </AppText>
+      </Card>
+
+      {currentApproved ? (
+        <Card padding={15} tone="primarySoft" style={styles.section}>
+          <View style={styles.approvedHead}>
+            <VerifiedTick size={26} />
+            <View style={styles.flex}>
+              <AppText variant="title">
+                {isIdentity ? 'Kimlik doğrulandı' : `${VERIFICATION_LABEL[currentKind]} doğrulandı`}
+              </AppText>
+              <AppText variant="caption" color="textSecondary">
+                {isIdentity
+                  ? 'Yola çık. Bu kimlik için tekrar doğrulama istenmeyecek.'
+                  : 'Belge geçerli olduğu sürece yeniden yükleme gerekmez.'}
+              </AppText>
+            </View>
+          </View>
+
+          {isIdentity ? (
+            <View style={styles.detailGrid}>
+              <Detail label="Ad soyad" value={identityDisplayName || '—'} />
+              <Detail
+                label="T.C. Kimlik No"
+                value={
+                  maskDocumentNo(verificationField(identityRecord, 'document_no')) ?? '—'
+                }
+              />
+              <Detail label="Doğum tarihi" value={isoToTrDate(identityBirth) || '—'} />
+              <Detail
+                label="Doğrulama tarihi"
+                value={verifiedAt ? formatDate(verifiedAt) : '—'}
+              />
+              <Detail
+                label="Geçerlilik"
+                value={identityExpiry ? formatDate(identityExpiry) : 'Süresiz'}
+              />
+              <Detail label="Ne için?" value={VERIFICATION_PURPOSE.identity} />
+            </View>
+          ) : (
+            <View style={styles.detailGrid}>
+              <Detail
+                label="Geçerlilik"
+                value={activeRecord?.expires_at ? formatDate(activeRecord.expires_at) : '—'}
+              />
+              <Detail label="Ne için?" value={VERIFICATION_PURPOSE[currentKind]} />
+            </View>
+          )}
+
+          <View style={styles.inlineActions}>
+            {currentDocument ? (
+              <Button
+                label="Belgeyi görüntüle"
+                variant="secondary"
+                size="sm"
+                fullWidth={false}
+                loading={viewing}
+                onPress={() => void handleViewDocument(currentDocument)}
+              />
+            ) : null}
+            {isIdentity ? (
+              <Button
+                label="Doğrulama özeti"
+                variant="ghost"
+                size="sm"
+                fullWidth={false}
+                onPress={() => router.navigate('/settings/verifications' as never)}
+              />
             ) : null}
           </View>
-        ) : (
-          <AppText variant="caption" color="textTertiary">
-            Bu belge türü için henüz başvuru yok.
-          </AppText>
-        )}
-
-        {approvedLocked ? (
-          <View style={[styles.infoBox, { backgroundColor: theme.colors.primarySoft }]}>
-            <Ionicons name="shield-checkmark" size={16} color={theme.colors.success} />
-            <AppText variant="caption" color="textSecondary" style={styles.flex}>
-              Bu belge onaylı. Yeni belge göndermek için geçerlilik süresinin dolmasını bekle.
-            </AppText>
+        </Card>
+      ) : (
+        <Card padding={15} style={styles.section}>
+          <View style={styles.sectionHead}>
+            <View style={styles.flex}>
+              <AppText variant="title">
+                {isIdentity ? 'Kimliğini doğrula' : `${VERIFICATION_LABEL[currentKind]} yükle`}
+              </AppText>
+              <AppText variant="caption" color="textTertiary">
+                {VERIFICATION_REQUIREMENT[currentKind]}
+              </AppText>
+            </View>
+            <Badge label={STATUS_LABEL[currentStatus] ?? currentStatus} tone={TONE(currentStatus)} />
           </View>
-        ) : (
-          <>
-            {picked ? (
-              <View
-                style={[
-                  styles.preview,
-                  { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted },
-                ]}
-              >
-                {pickedIsImage ? (
-                  <Pressable
-                    accessibilityRole="imagebutton"
-                    accessibilityLabel="Seçilen belgeyi büyüt"
-                    onPress={() => setViewerUrl(picked.uri)}
-                  >
-                    <Image
-                      source={{ uri: picked.uri }}
-                      style={styles.previewImage}
-                      contentFit="contain"
-                      transition={150}
-                    />
-                  </Pressable>
-                ) : (
-                  <View style={styles.pdfPreview}>
-                    <View style={[styles.pdfIcon, { backgroundColor: theme.colors.dangerSoft }]}>
-                      <Ionicons name="document-text" size={26} color={theme.colors.danger} />
-                    </View>
-                    <View style={styles.flex}>
-                      <AppText variant="bodyStrong" numberOfLines={2}>
-                        {picked.name}
-                      </AppText>
-                      <AppText variant="caption" color="textTertiary">
-                        PDF · {formatFileSize(picked.size)}
-                      </AppText>
-                    </View>
+
+          {current?.status === 'rejected' ? (
+            <View style={[styles.infoBox, { backgroundColor: theme.colors.dangerSoft }]}>
+              <Ionicons name="alert-circle-outline" size={16} color={theme.colors.danger} />
+              <AppText variant="caption" color="textSecondary" style={styles.flex}>
+                Ret nedeni: {current.reject_reason ?? 'Belirtilmedi'} · Belgeyi yenileyerek tekrar
+                gönderebilirsin.
+              </AppText>
+            </View>
+          ) : null}
+
+          {current?.status === 'pending' ? (
+            <View style={[styles.infoBox, { backgroundColor: theme.colors.warningSoft }]}>
+              <Ionicons name="time-outline" size={16} color={theme.colors.warning} />
+              <AppText variant="caption" color="textSecondary" style={styles.flex}>
+                Belgen inceleniyor. Onaylandığında bildirim alacaksın; bu sırada yeni belge
+                göndermen gerekmez.
+              </AppText>
+            </View>
+          ) : null}
+
+          {picked ? (
+            <View
+              style={[
+                styles.preview,
+                { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted },
+              ]}
+            >
+              {pickedIsImage ? (
+                <Pressable
+                  accessibilityRole="imagebutton"
+                  accessibilityLabel="Seçilen belgeyi büyüt"
+                  onPress={() =>
+                    viewer.openDocument({
+                      url: picked.uri,
+                      name: picked.name,
+                      mime: picked.mime,
+                      title: 'Seçilen belge',
+                    })
+                  }
+                >
+                  <Image
+                    source={{ uri: picked.uri }}
+                    style={styles.previewImage}
+                    contentFit="contain"
+                    transition={150}
+                  />
+                </Pressable>
+              ) : (
+                <View style={styles.pdfPreview}>
+                  <View style={[styles.pdfIcon, { backgroundColor: theme.colors.dangerSoft }]}>
+                    <Ionicons name="document-text" size={26} color={theme.colors.danger} />
                   </View>
-                )}
-                <View style={styles.previewMeta}>
-                  <AppText
-                    variant="caption"
-                    color="textSecondary"
-                    numberOfLines={1}
-                    style={styles.flex}
-                  >
-                    {pickedIsImage
-                      ? `${picked.name} · ${formatFileSize(picked.size)}`
-                      : 'Göndermeden önce belgeyi kontrol et.'}
-                  </AppText>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Seçilen belgeyi kaldır"
-                    onPress={() => setPicked(null)}
-                  >
-                    <Ionicons name="close-circle" size={19} color={theme.colors.textTertiary} />
-                  </Pressable>
+                  <View style={styles.flex}>
+                    <AppText variant="bodyStrong" numberOfLines={2}>
+                      {picked.name}
+                    </AppText>
+                    <AppText variant="caption" color="textTertiary">
+                      PDF · {formatFileSize(picked.size)}
+                    </AppText>
+                  </View>
                 </View>
+              )}
+              <View style={styles.previewMeta}>
+                <AppText
+                  variant="caption"
+                  color="textSecondary"
+                  numberOfLines={1}
+                  style={styles.flex}
+                >
+                  {pickedIsImage
+                    ? `${picked.name} · ${formatFileSize(picked.size)}`
+                    : 'Göndermeden önce belgeyi kontrol et.'}
+                </AppText>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Seçilen belgeyi kaldır"
+                  onPress={() => setPicked(null)}
+                >
+                  <Ionicons name="close-circle" size={19} color={theme.colors.textTertiary} />
+                </Pressable>
               </View>
-            ) : (
+            </View>
+          ) : (
+            <View style={styles.pickRow}>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Belge seç"
-                onPress={() => void handlePick()}
+                accessibilityLabel="Galeriden belge seç"
+                onPress={() => void handlePickGallery()}
                 style={[
-                  styles.dropzone,
+                  styles.pickTile,
                   { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted },
                 ]}
               >
@@ -523,95 +750,157 @@ export default function RideVerificationScreen() {
                   <ActivityIndicator color={theme.colors.primary} />
                 ) : (
                   <>
-                    <Ionicons
-                      name="cloud-upload-outline"
-                      size={26}
-                      color={theme.colors.primaryDeep}
-                    />
-                    <AppText variant="bodyStrong">Belge seç</AppText>
-                    <AppText variant="caption" color="textTertiary" style={styles.centerText}>
-                      PDF veya görsel · en fazla 10 MB
+                    <View style={[styles.pickIcon, { backgroundColor: theme.colors.surface }]}>
+                      <Ionicons name="images-outline" size={22} color={VERIFIED_BLUE} />
+                    </View>
+                    <AppText variant="bodyStrong">Galeriden seç</AppText>
+                    <AppText variant="caption" color="textTertiary" align="center">
+                      Kimliğinin fotoğrafı
                     </AppText>
                   </>
                 )}
               </Pressable>
-            )}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="PDF belge seç"
+                onPress={() => void handlePickFile()}
+                style={[
+                  styles.pickTile,
+                  { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted },
+                ]}
+              >
+                <View style={[styles.pickIcon, { backgroundColor: theme.colors.surface }]}>
+                  <Ionicons name="document-outline" size={22} color={theme.colors.primaryDeep} />
+                </View>
+                <AppText variant="bodyStrong">Dosya seç</AppText>
+                <AppText variant="caption" color="textTertiary" align="center">
+                  PDF veya görsel · 10 MB
+                </AppText>
+              </Pressable>
+            </View>
+          )}
 
-            <TextInput
+          {isIdentity ? (
+            <View style={styles.form}>
+              <TextField
+                label="T.C. Kimlik No"
+                value={tcNo}
+                onChangeText={(value) => setTcNo(value.replace(/\D/g, '').slice(0, 11))}
+                placeholder="11 haneli kimlik numarası"
+                keyboardType="number-pad"
+                maxLength={11}
+                leftIcon="id-card-outline"
+              />
+              <View style={styles.split}>
+                <TextField
+                  label="Ad"
+                  value={firstName}
+                  onChangeText={setFirstName}
+                  placeholder="Kimlikteki ad"
+                  autoCapitalize="words"
+                  containerStyle={styles.flex}
+                />
+                <TextField
+                  label="Soyad"
+                  value={lastName}
+                  onChangeText={setLastName}
+                  placeholder="Kimlikteki soyad"
+                  autoCapitalize="words"
+                  containerStyle={styles.flex}
+                />
+              </View>
+              <TextField
+                label="Doğum tarihi"
+                value={birthDate}
+                onChangeText={(value) => setBirthDate(formatTrDateInput(value))}
+                placeholder="GG.AA.YYYY"
+                keyboardType="number-pad"
+                maxLength={10}
+                leftIcon="calendar-outline"
+              />
+            </View>
+          ) : (
+            <TextField
+              label="Belge numarası (isteğe bağlı)"
               value={docNo}
               onChangeText={setDocNo}
-              placeholder="Belge numarası (isteğe bağlı)"
-              placeholderTextColor={theme.colors.textTertiary}
-              style={[
-                styles.input,
-                {
-                  color: theme.colors.text,
-                  borderColor: theme.colors.border,
-                  backgroundColor: theme.colors.inputBackground,
-                },
-              ]}
+              placeholder="Belge üzerindeki numara"
+              autoCapitalize="characters"
             />
-            <TextInput
-              value={expiry}
-              onChangeText={setExpiry}
-              placeholder="Geçerlilik tarihi YYYY-AA-GG"
-              keyboardType="numbers-and-punctuation"
-              autoCapitalize="none"
-              placeholderTextColor={theme.colors.textTertiary}
-              style={[
-                styles.input,
-                {
-                  color: theme.colors.text,
-                  borderColor: theme.colors.border,
-                  backgroundColor: theme.colors.inputBackground,
-                },
-              ]}
-            />
-            <AppText variant="caption" color="textTertiary">
-              {EXPIRY_REQUIRED.includes(active)
-                ? 'Bu belge için geçerlilik tarihi zorunludur.'
-                : 'Geçerlilik tarihi varsa belge süresi dolmadan hatırlatma alırsın.'}
+          )}
+
+          <TextField
+            label={
+              EXPIRY_REQUIRED.includes(currentKind)
+                ? 'Geçerlilik tarihi'
+                : 'Geçerlilik tarihi (varsa)'
+            }
+            value={expiry}
+            onChangeText={(value) => setExpiry(formatTrDateInput(value))}
+            placeholder="GG.AA.YYYY"
+            keyboardType="number-pad"
+            maxLength={10}
+            leftIcon="calendar-outline"
+            hint={
+              EXPIRY_REQUIRED.includes(currentKind)
+                ? 'Belge süresi dolmadan yeni belge yüklemen gerekir.'
+                : 'Süresiz kimliklerde boş bırakabilirsin.'
+            }
+          />
+
+          <Button
+            label={
+              busy
+                ? 'Gönderiliyor…'
+                : submitBlocked
+                  ? 'Belge inceleniyor'
+                  : isIdentity
+                    ? 'Kimliği doğrula'
+                    : `${VERIFICATION_LABEL[currentKind]} belgesini gönder`
+            }
+            loading={busy}
+            disabled={!picked || busy || submitBlocked}
+            onPress={() => void handleSubmit()}
+          />
+          {!picked ? (
+            <AppText variant="caption" color="textTertiary" align="center">
+              Önce galeriden bir belge seç.
             </AppText>
+          ) : uploading ? (
+            <AppText variant="caption" color="textSecondary" align="center">
+              Yükleniyor… %{Math.round(uploadProgress * 100)}
+            </AppText>
+          ) : (
+            <AppText variant="caption" color="textTertiary" align="center">
+              {pickedIsImage
+                ? 'Fotoğraf gönderilirken küçültülür; bu yükleme süresini kısaltır.'
+                : 'PDF olduğu gibi gönderilir.'}
+            </AppText>
+          )}
 
-            <Button
-              label={picked ? 'Belgeyi gönder' : 'Belge seç ve gönder'}
-              loading={busy}
-              onPress={() => (picked ? void handleSubmit() : void handlePick())}
-              leftIcon={<Ionicons name="cloud-upload-outline" size={17} color="#FFFFFF" />}
-            />
-            {uploading ? (
-              <AppText variant="caption" color="textSecondary" style={styles.centerText}>
-                Yükleniyor… %{Math.round(uploadProgress * 100)}
-              </AppText>
-            ) : pickedIsImage ? (
-              <AppText variant="caption" color="textTertiary" style={styles.centerText}>
-                Fotoğraf gönderilirken küçültülür; bu yükleme süresini kısaltır.
-              </AppText>
-            ) : null}
-          </>
-        )}
-      </Card>
+        </Card>
+      )}
 
-      {data?.driver_status === 'none' || data?.driver_status === 'rejected' ? (
-        <Card padding={15} style={styles.form}>
+      {driverStatus === 'none' || driverStatus === 'rejected' ? (
+        <Card padding={15} style={styles.section}>
           <AppText variant="title">Sürücü başvurusu</AppText>
           <AppText variant="caption" color="textTertiary">
             {driverReady
-              ? 'Başvuruda kısa bir tanıtım yazısı istenir. Onaylandığında ilan yayınlayabilirsin.'
-              : 'Başvuru için kimlik ve geçerli sürücü belgesi onayı gerekir. Eksik belgeleri yukarıdan gönderebilirsin.'}
+              ? 'Kısa bir tanıtım yazısı yaz. Onaylandığında ilan yayınlayabilirsin.'
+              : 'Başvuru için kimlik ve geçerli sürücü belgesi onayı gerekir.'}
           </AppText>
           <View style={styles.checklist}>
             {[
               { label: 'Kimlik doğrulaması', ok: identityApproved },
               { label: 'Sürücü belgesi', ok: licenseApproved },
-              { label: 'Araç sigortası (garajda araç onayı için gerekli)', ok: insuranceApproved },
+              { label: 'Araç sigortası (garajda araç onayı için)', ok: insuranceApproved },
             ].map((item) => (
               <View key={item.label} style={styles.checkRow}>
-                <Ionicons
-                  name={item.ok ? 'checkmark-circle' : 'ellipse-outline'}
-                  size={16}
-                  color={item.ok ? theme.colors.success : theme.colors.textTertiary}
-                />
+                {item.ok ? (
+                  <VerifiedTick size={16} />
+                ) : (
+                  <Ionicons name="ellipse-outline" size={16} color={theme.colors.textTertiary} />
+                )}
                 <AppText variant="caption" color={item.ok ? 'textSecondary' : 'textTertiary'}>
                   {item.label}
                   {item.ok ? ' · onaylı' : ' · bekliyor'}
@@ -647,35 +936,40 @@ export default function RideVerificationScreen() {
           />
         </Card>
       ) : driverPending ? (
-        <Card padding={15} tone="muted">
-          <AppText variant="bodyStrong">Sürücü başvurun inceleniyor</AppText>
+        <Card padding={15} tone="muted" style={styles.section}>
+          <View style={styles.rowTitle}>
+            <Ionicons name="time-outline" size={18} color={theme.colors.warning} />
+            <AppText variant="bodyStrong">Sürücü başvurun inceleniyor</AppText>
+          </View>
           <AppText variant="caption" color="textSecondary">
             Belgelerin doğrulama ekibi tarafından kontrol ediliyor. Onaylandığında bildirim
             alacaksın.
           </AppText>
         </Card>
-      ) : data?.driver_status === 'approved' ? (
-        <Card padding={15} tone="primarySoft">
-          <View style={styles.summaryRow}>
-            <View style={[styles.iconWrap, { backgroundColor: theme.colors.surface }]}>
-              <Ionicons name="checkmark-circle" size={24} color={theme.colors.success} />
-            </View>
+      ) : driverApproved ? (
+        <Card padding={15} tone="primarySoft" style={styles.section}>
+          <View style={styles.approvedHead}>
+            <VerifiedTick size={26} />
             <View style={styles.flex}>
               <AppText variant="bodyStrong">Sürücü yetkin açık</AppText>
               <AppText variant="caption" color="textSecondary">
                 Yolculuk ilanı yayınlayabilirsin. İlan için onaylı bir araç (ruhsat + sigorta)
-                gerekir; eksikse garajdan ekleyebilirsin.
+                gerekir.
               </AppText>
             </View>
           </View>
-          <View style={styles.checklist}>
+          <View style={styles.inlineActions}>
             <Button
               label="Yolculuk paylaş"
+              size="sm"
+              fullWidth={false}
               onPress={() => router.navigate('/ride/create' as never)}
             />
             <Button
               label="Garajım"
               variant="secondary"
+              size="sm"
+              fullWidth={false}
               onPress={() => router.navigate('/ride/garage' as never)}
             />
           </View>
@@ -684,9 +978,12 @@ export default function RideVerificationScreen() {
 
       {notice ? (
         <Card padding={12} tone="primarySoft">
-          <AppText variant="caption" color="textSecondary">
-            {notice}
-          </AppText>
+          <View style={styles.inlineRow}>
+            <VerifiedTick size={16} />
+            <AppText variant="caption" color="textSecondary" style={styles.flex}>
+              {notice}
+            </AppText>
+          </View>
         </Card>
       ) : null}
       {error ? (
@@ -697,8 +994,11 @@ export default function RideVerificationScreen() {
         </Card>
       ) : null}
 
-      <Card padding={15} tone="muted">
-        <AppText variant="title">Veri güvenliği</AppText>
+      <Card padding={15} tone="muted" style={styles.section}>
+        <View style={styles.rowTitle}>
+          <Ionicons name="lock-closed-outline" size={16} color={theme.colors.primaryDeep} />
+          <AppText variant="title">Veri güvenliği</AppText>
+        </View>
         <AppText variant="caption" color="textSecondary">
           Belgeler özel `ride-documents` kovasında saklanır. Yalnızca yetkili doğrulama
           inceleyicileri ve sen kendi belgeni görebilirsin. Belge içeriği arama veya eşleştirme
@@ -709,53 +1009,25 @@ export default function RideVerificationScreen() {
           label="Gizlilik ve veri politikası"
           variant="ghost"
           size="sm"
+          fullWidth={false}
           onPress={() => router.navigate('/settings/privacy' as never)}
         />
       </Card>
 
-      <Modal
-        visible={Boolean(viewerUrl)}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          setViewerUrl(null);
-          setViewerLoading(false);
-        }}
-      >
-        <View style={styles.viewerBackdrop}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Belge önizlemesini kapat"
-            onPress={() => {
-              setViewerUrl(null);
-              setViewerLoading(false);
-            }}
-            style={styles.viewerClose}
-          >
-            <Ionicons name="close" size={20} color="#FFFFFF" />
-          </Pressable>
-          {viewerUrl ? (
-            <Image
-              source={{ uri: viewerUrl }}
-              style={styles.viewerImage}
-              contentFit="contain"
-              cachePolicy="memory-disk"
-              transition={120}
-              onLoadStart={() => setViewerLoading(true)}
-              onLoadEnd={() => setViewerLoading(false)}
-            />
-          ) : null}
-          {viewerLoading ? (
-            <View style={styles.viewerLoading} pointerEvents="none">
-              <ActivityIndicator color="#FFFFFF" />
-            </View>
-          ) : null}
-          <AppText variant="caption" style={styles.viewerHint}>
-            Belge yalnızca bu önizlemede gösterilir.
-          </AppText>
-        </View>
-      </Modal>
     </Screen>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.detail}>
+      <AppText variant="caption" color="textTertiary">
+        {label}
+      </AppText>
+      <AppText variant="bodyStrong" numberOfLines={2}>
+        {value}
+      </AppText>
+    </View>
   );
 }
 
@@ -770,45 +1042,71 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  summary: { gap: 12 },
-  summaryRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
-  iconWrap: {
+  intro: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  introIcon: {
     width: 40,
     height: 40,
     borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  form: { gap: 10 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  chip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
+  section: { gap: 10 },
+  sectionHead: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 10,
+    borderRadius: 13,
     borderWidth: StyleSheet.hairlineWidth,
   },
+  statusIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowTitle: { flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' },
+  approvedHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  detail: {
+    flexBasis: '46%',
+    flexGrow: 1,
+    gap: 1,
+    paddingVertical: 2,
+  },
+  inlineActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' },
+  inlineRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   infoBox: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 9, borderRadius: 10 },
   checklist: { gap: 6 },
   checkRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  viewBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  dropzone: {
+  form: { gap: 10 },
+  split: { flexDirection: 'row', gap: 8, alignItems: 'flex-end' },
+  pickRow: { flexDirection: 'row', gap: 8 },
+  pickTile: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
-    paddingVertical: 22,
+    paddingVertical: 18,
     borderRadius: 14,
     borderWidth: 1,
     borderStyle: 'dashed',
   },
-  centerText: { textAlign: 'center' },
+  pickIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+  },
   preview: { borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   previewImage: { width: '100%', height: 180, backgroundColor: '#0B1020' },
   pdfPreview: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
@@ -836,34 +1134,4 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   noteInput: { minHeight: 76, textAlignVertical: 'top' },
-  viewerBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(6,10,22,0.94)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 18,
-    gap: 10,
-  },
-  viewerImage: { width: '100%', height: '78%' },
-  viewerLoading: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  viewerClose: {
-    position: 'absolute',
-    top: 54,
-    right: 20,
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.14)',
-  },
-  viewerHint: { color: 'rgba(226,232,240,0.75)' },
 });

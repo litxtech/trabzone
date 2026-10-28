@@ -1,5 +1,4 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from '@/utils/router';
 import { useState } from 'react';
@@ -13,17 +12,22 @@ import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons'
 import { env } from '@/config/env';
 import { FormError } from '@/features/auth/components/FormError';
 import {
+  USERNAME_HINT,
+  USERNAME_HINT_TONE,
+  ensureUsernameAvailable,
+  useUsernameAvailability,
+} from '@/features/auth/hooks/use-username-availability';
+import {
   passwordStrength,
   registerSchema,
   type RegisterValues,
 } from '@/features/auth/validators';
-import { isUsernameAvailable } from '@/features/profile/services/profile-service';
-import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { finishSignUpFromMetadata } from '@/features/auth/signup-completion';
+import { applyWebRegistrationMetadata } from '@/features/auth/web-registration';
+import { UsernameStatusIcon } from '@/features/auth/components/UsernameStatusIcon';
 import { signUpWithPassword } from '@/services/supabase/auth';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
-
-type UsernameState = 'idle' | 'checking' | 'available' | 'taken';
 
 export default function RegisterRoute() {
   return Platform.OS === 'web' ? <WebRegisterPage /> : <RegisterScreen />;
@@ -50,33 +54,28 @@ function RegisterScreen() {
 
   const username = useWatch({ control, name: 'username' });
   const password = useWatch({ control, name: 'password' });
-  const debouncedUsername = useDebouncedValue(username, 450);
   const strength = passwordStrength(password);
-
-  const { data: isAvailable, isFetching } = useQuery({
-    queryKey: ['username-availability', debouncedUsername],
-    queryFn: () => isUsernameAvailable(debouncedUsername),
-    enabled: debouncedUsername.length >= 3,
-    staleTime: 60_000,
-    retry: 1,
-  });
-
-  const usernameState: UsernameState =
-    debouncedUsername.length < 3
-      ? 'idle'
-      : isFetching || isAvailable === undefined
-        ? 'checking'
-        : isAvailable
-          ? 'available'
-          : 'taken';
+  const usernameCheck = useUsernameAvailability(username);
+  const usernameState = usernameCheck.state;
 
   const onSubmit = handleSubmit(async (values) => {
     setFormError(null);
 
-    if (usernameState === 'taken') {
+    if (usernameState === 'taken' || usernameState === 'reserved') {
       haptics.error();
-      setFormError('Bu kullanıcı adı alınmış. Başka bir tane dene.');
+      setFormError(USERNAME_HINT[usernameState]);
       return;
+    }
+
+    // Gösterge eskiyse (yazmayı yeni bıraktı) gönderimi beklemeden taze
+    // sorgu yapılır; ağ hatasında kararı sunucu verir.
+    if (usernameState !== 'available') {
+      const check = await ensureUsernameAvailable(values.username);
+      if (check === 'taken') {
+        haptics.error();
+        setFormError(USERNAME_HINT.taken);
+        return;
+      }
     }
 
     const result = await signUpWithPassword({
@@ -94,15 +93,18 @@ function RegisterScreen() {
     }
 
     haptics.success();
-    router.push({ pathname: '/verify', params: { email: values.email } });
+
+    if (result.data.needsVerification) {
+      router.push({ pathname: '/verify', params: { email: values.email } });
+      return;
+    }
+
+    await applyWebRegistrationMetadata();
+    const destination = await finishSignUpFromMetadata();
+    router.replace(destination);
   });
 
-  const usernameHint =
-    usernameState === 'taken'
-      ? 'Bu kullanıcı adı alınmış'
-      : usernameState === 'available'
-        ? 'Kullanıcı adı uygun'
-        : 'En az 3 karakter; küçük harf, rakam, nokta, alt çizgi';
+  const usernameHint = USERNAME_HINT[usernameState];
 
   return (
     <AuthScreen
@@ -164,15 +166,8 @@ function RegisterScreen() {
               onBlur={field.onBlur}
               error={fieldState.error?.message}
               hint={usernameHint}
-              rightSlot={
-                usernameState === 'checking' ? (
-                  <Ionicons name="ellipsis-horizontal" size={18} color={theme.colors.textTertiary} />
-                ) : usernameState === 'available' ? (
-                  <Ionicons name="checkmark-circle" size={19} color={theme.colors.success} />
-                ) : usernameState === 'taken' ? (
-                  <Ionicons name="close-circle" size={19} color={theme.colors.danger} />
-                ) : undefined
-              }
+              hintTone={USERNAME_HINT_TONE[usernameState]}
+              rightSlot={<UsernameStatusIcon state={usernameState} />}
             />
           )}
         />

@@ -13,6 +13,11 @@ import { errorMessage } from '@/services/errors';
 import { useTheme } from '@/theme/ThemeProvider';
 
 import {
+  VERIFIED_BLUE,
+  VerifiedChip,
+  VerifiedTick,
+} from '@/features/ride/components/IdentityBadge';
+import {
   LevelBadge,
   PreferenceChips,
   RideEmptyState,
@@ -39,6 +44,7 @@ import {
 } from '@/features/ride/hooks/use-ride';
 import { rideVehiclePhotoUrl } from '@/features/ride/services/ride-service';
 import { formatDate, formatDuration, formatMoney, formatTime } from '@/features/ride/utils/format';
+import { isIdentityVerified } from '@/features/ride/utils/identity';
 
 const FUEL: Record<string, string> = {
   gasoline: 'Benzin',
@@ -127,6 +133,7 @@ export default function RideOfferDetailScreen() {
     : null;
   const waitlistOffer = waitlistOffers.data?.find((item) => item.offer_id === offerId) ?? null;
   const isDriver = offer?.is_driver ?? false;
+  const identityApproved = isIdentityVerified(profile.data);
   const cardEnabled = config.data?.card_payments_enabled === true;
   const selfName =
     (session?.user.user_metadata?.full_name as string | undefined) ??
@@ -176,6 +183,7 @@ export default function RideOfferDetailScreen() {
     !isDriver &&
     !myReservation &&
     !isFull &&
+    identityApproved &&
     offer.status !== 'cancelled' &&
     offer.status !== 'completed' &&
     offer.status !== 'expired' &&
@@ -268,15 +276,21 @@ export default function RideOfferDetailScreen() {
               <AppText variant="bodyStrong" numberOfLines={1}>
                 {offer.driver.first_name ?? offer.driver.username}
               </AppText>
-              {offer.driver.is_verified ? (
-                <Ionicons name="shield-checkmark" size={15} color={theme.colors.success} />
-              ) : null}
+              {offer.driver.identity_verified ? <VerifiedTick size={15} /> : null}
               <LevelBadge level={offer.driver.level} />
             </View>
             <AppText variant="caption" color="textSecondary">
               {offer.driver.completed_trips ?? 0} tamamlanmış yolculuk
               {offer.driver.rating_avg ? ` · ${offer.driver.rating_avg.toFixed(1)} ★` : ''}
             </AppText>
+            {offer.driver.identity_verified ? (
+              <View style={styles.verifiedRow}>
+                <VerifiedChip />
+                <AppText variant="caption" color={VERIFIED_BLUE}>
+                  · Yola çık
+                </AppText>
+              </View>
+            ) : null}
           </View>
           <Pressable
             accessibilityRole="button"
@@ -458,9 +472,12 @@ export default function RideOfferDetailScreen() {
                   size={34}
                 />
                 <View style={styles.flex}>
-                  <AppText variant="label" numberOfLines={1}>
-                    {reservation.passenger_first_name ?? reservation.passenger_username}
-                  </AppText>
+                  <View style={styles.nameRow}>
+                    <AppText variant="label" numberOfLines={1}>
+                      {reservation.passenger_first_name ?? reservation.passenger_username}
+                    </AppText>
+                    {reservation.passenger_identity_verified ? <VerifiedTick size={13} /> : null}
+                  </View>
                   <AppText variant="caption" color="textTertiary">
                     {reservation.seats} koltuk · {reservation.pickup_label} →{' '}
                     {reservation.dropoff_label}
@@ -790,16 +807,18 @@ export default function RideOfferDetailScreen() {
             ) : (
               <Button
                 label={
-                  offer.booking_mode === 'auto'
-                    ? `Rezervasyonu tamamla · ${formatMoney(total, offer.currency)}`
-                    : `Talep gönder · ${formatMoney(total, offer.currency)}`
+                  !identityApproved
+                    ? 'Kimlik doğrulaması gerekli'
+                    : offer.booking_mode === 'auto'
+                      ? `Rezervasyonu tamamla · ${formatMoney(total, offer.currency)}`
+                      : `Talep gönder · ${formatMoney(total, offer.currency)}`
                 }
                 loading={reserve.isPending}
                 disabled={!canReserve}
                 onPress={() => void handleReserve()}
               />
             )}
-            {profile.data?.identity_status !== 'approved' ? (
+            {!identityApproved ? (
               <Pressable
                 accessibilityRole="button"
                 onPress={() => router.navigate('/ride/verification' as never)}
@@ -856,6 +875,7 @@ const styles = StyleSheet.create({
   driverCard: { gap: 10 },
   driverRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' },
+  verifiedRow: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 1 },
   roundBtn: {
     width: 38,
     height: 38,

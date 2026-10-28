@@ -17,6 +17,7 @@ import { useWebMeta } from '../use-web-meta';
 import { flatStyle } from '../link-style';
 import { WebFooter } from './WebFooter';
 import { WebHeader } from './WebHeader';
+import { webPageRoot } from '../page-root';
 
 type Channel = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -307,7 +308,7 @@ export function WebContactPage() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { ...webPageRoot },
   flex: { flex: 1 },
   hero: { paddingVertical: 64 },
   heroInner: {

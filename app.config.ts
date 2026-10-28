@@ -16,6 +16,31 @@ const BUNDLE_ID = 'com.litxtech.trabzone';
  */
 const SOCIAL_AUTH_ENABLED = process.env.EXPO_PUBLIC_ENABLE_SOCIAL_AUTH === 'true';
 
+/**
+ * Google ile native giriş iOS'ta ters çevrilmiş istemci kimliğini URL şeması
+ * olarak Info.plist'e yazar. Kimlik tanımlı değilse config plugin hiç
+ * eklenmez; Google butonu uygulamada görünmez (bkz. SocialAuthButtons).
+ */
+const GOOGLE_IOS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim() ?? '';
+const GOOGLE_IOS_URL_SCHEME = GOOGLE_IOS_CLIENT_ID
+  ? GOOGLE_IOS_CLIENT_ID.startsWith('com.googleusercontent.apps.')
+    ? GOOGLE_IOS_CLIENT_ID
+    : `com.googleusercontent.apps.${GOOGLE_IOS_CLIENT_ID.replace(/\.apps\.googleusercontent\.com$/, '')}`
+  : null;
+
+/**
+ * Paylaşılan https bağlantılarının doğrudan uygulamada açılması (universal
+ * links / Android App Links).
+ *
+ * Varsayılan olarak **kapalı**: iOS'ta `associatedDomains` yetkisi App ID'de
+ * açılmadan ve provisioning profile yenilenmeden arşiv imzalanamaz. Bu bayrak
+ * açılmadan da paylaşım çalışır; paylaşım sayfası `trabzone://` şemasını dener
+ * ve uygulama yüklüyse ilgili içeriği açar. Apple Developer portalında
+ * "Associated Domains" yetkisi hazır olduğunda bu bayrağı true yapmak yeterli.
+ */
+const UNIVERSAL_LINKS_ENABLED = process.env.EXPO_PUBLIC_ENABLE_UNIVERSAL_LINKS === 'true';
+const LINK_HOSTS = ['www.trabzoneapp.com', 'trabzoneapp.com'];
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'Trabzone',
@@ -31,6 +56,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     bundleIdentifier: BUNDLE_ID,
     supportsTablet: false,
     usesAppleSignIn: SOCIAL_AUTH_ENABLED,
+    // Yalnızca ilgili yetki hazır olduğunda eklenir (yukarıdaki nota bakın).
+    ...(UNIVERSAL_LINKS_ENABLED
+      ? { associatedDomains: LINK_HOSTS.map((host) => `applinks:${host}`) }
+      : {}),
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
       NSCameraUsageDescription:
@@ -50,6 +79,26 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     package: BUNDLE_ID,
     predictiveBackGestureEnabled: true,
+    // Paylaşım bağlantıları `/p/*` altında toplanır; diğer web sayfaları
+    // tarayıcıda kalır. Etkinleştirmek için ortamda
+    // EXPO_PUBLIC_ENABLE_UNIVERSAL_LINKS=true olmalı ve `assetlinks.json`
+    // içinde imza parmak izi bulunmalıdır.
+    ...(UNIVERSAL_LINKS_ENABLED
+      ? {
+          intentFilters: [
+            {
+              action: 'VIEW',
+              autoVerify: true,
+              data: LINK_HOSTS.map((host) => ({
+                scheme: 'https',
+                host,
+                pathPrefix: '/p',
+              })),
+              category: ['BROWSABLE', 'DEFAULT'],
+            },
+          ],
+        }
+      : {}),
     adaptiveIcon: {
       foregroundImage: './assets/brand/icons/adaptive-foreground.png',
       backgroundColor: '#0B2A6B',
@@ -76,9 +125,17 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     'expo-router',
-    'expo-web-browser',
     // Yetki (entitlement) eklediği için yalnızca sosyal giriş açıkken eklenir.
     ...(SOCIAL_AUTH_ENABLED ? ['expo-apple-authentication' as const] : []),
+    // Google native giriş: tarayıcı yerine sistemin hesap seçicisi açılır.
+    ...(SOCIAL_AUTH_ENABLED && GOOGLE_IOS_URL_SCHEME
+      ? [
+          [
+            '@react-native-google-signin/google-signin',
+            { iosUrlScheme: GOOGLE_IOS_URL_SCHEME },
+          ] as [string, { iosUrlScheme: string }],
+        ]
+      : []),
     [
       'expo-splash-screen',
       {

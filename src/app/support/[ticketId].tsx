@@ -5,7 +5,6 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +14,7 @@ import {
 
 import { AppText, Button, Card, IconButton } from '@/components/ui';
 import { Screen } from '@/components/ui/Screen';
+import { useDocumentViewer } from '@/features/documents/viewer';
 import { AttachmentPicker } from '@/features/safety/components/AttachmentPicker';
 import { SafetyEmptyState } from '@/features/safety/components/SafetyEmptyState';
 import { SafetyHeader } from '@/features/safety/components/SafetyHeader';
@@ -43,6 +43,7 @@ export default function TicketDetailScreen() {
   const { data: ticket, isLoading, isError, refetch } = useTicket(ticketId);
   const sendMessage = useSendTicketMessage(ticketId);
   const setStatus = useSetTicketStatus(ticketId);
+  const viewer = useDocumentViewer();
 
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -76,7 +77,13 @@ export default function TicketDetailScreen() {
       setError('Ek dosya açılamadı.');
       return;
     }
-    await Linking.openURL(url).catch(() => setError('Ek dosya açılamadı.'));
+    viewer.openDocument({
+      url,
+      name: attachment.name,
+      mime: attachment.mime,
+      title: attachment.name,
+      refresh: () => getAttachmentUrl('safety-support', attachment.path),
+    });
   };
 
   const confirmClose = () => {

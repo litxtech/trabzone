@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
 import {
+  Alert,
   Modal,
   Platform,
   Pressable,
@@ -15,6 +16,7 @@ import { AppText, Badge, Button } from '@/components/ui';
 import {
   useAdminDeletionRequests,
   useAdminUpdateDeletionRequest,
+  useExecuteDeletionRequest,
 } from '@/features/account/hooks/use-deletion-request';
 import type { AdminDeletionRequest } from '@/features/account/services/deletion-request-service';
 import { AdminPage, AdminSection, FilterChips } from '@/features/admin/components/AdminPage';
@@ -66,6 +68,7 @@ export default function AdminDeletionRequestsScreen() {
     search,
   });
   const update = useAdminUpdateDeletionRequest();
+  const execute = useExecuteDeletionRequest();
 
   const items = query.data ?? [];
   const stats = useMemo(() => {
@@ -120,6 +123,56 @@ export default function AdminDeletionRequestsScreen() {
         },
       },
     );
+  };
+
+  /**
+   * Kimliği doğrulanmış talebi gerçekten uygular: medya (R2 + eski Storage)
+   * temizlenir, profil/içerik ve auth hesabı kalıcı olarak silinir. Durum
+   * değiştirmek tek başına hesabı silmediği için bu adım zorunludur.
+   */
+  const runDeletion = () => {
+    if (!selected) {
+      return;
+    }
+    if (!verify) {
+      toast.error('Önce kimlik doğrulamasını tamamlayıp işaretleyin.');
+      return;
+    }
+    const message = `#${selected.request_no} için ${selected.email ?? 'kullanıcı'} hesabı, profil fotoğrafı ve tüm medyası kalıcı olarak silinecek. Bu işlem geri alınamaz.`;
+
+    const proceed = () => {
+      execute.mutate(
+        { id: selected.id, userId: selected.user_id },
+        {
+          onSuccess: (result) => {
+            haptics.success();
+            toast.success(
+              result.account_found === false
+                ? 'Eşleşen hesap bulunmadı; talep kapatıldı.'
+                : `Hesap ve ilişkili veriler silindi. Referans: ${result.reference_code}`,
+            );
+            setSelected(null);
+          },
+          onError: (error) => {
+            haptics.error();
+            toast.error(error.message);
+          },
+        },
+      );
+    };
+
+    if (Platform.OS === 'web') {
+      const accepted = typeof window === 'undefined' ? false : window.confirm(message);
+      if (accepted) {
+        proceed();
+      }
+      return;
+    }
+
+    Alert.alert('Hesabı kalıcı olarak sil', message, [
+      { text: 'Vazgeç', style: 'cancel' },
+      { text: 'Kalıcı olarak sil', style: 'destructive', onPress: proceed },
+    ]);
   };
 
   return (
@@ -236,9 +289,9 @@ export default function AdminDeletionRequestsScreen() {
       <AdminSection title="İşlem prosedürü" subtitle="Yanlışlıkla veri kaybını önlemek için zorunlu adımlar.">
         <Step index={1} text="Talebin kullanıcıya ait olduğunu doğrulayın; yalnızca e-posta beyanı yeterli değildir." />
         <Step index={2} text="Talep sahibine e-posta ile doğrulama bağlantısı veya ek doğrulama gönderin." />
-        <Step index={3} text="Onaylı self-servis silme akışını veya yetkili arka plan işini çalıştırın." />
+        <Step index={3} text="“Hesabı kalıcı olarak sil” düğmesiyle silme işlemini uygulayın; medya, profil ve giriş hesabı birlikte kaldırılır." />
         <Step index={4} text="Medya, ilişkili tablolar ve oturumların temizlendiğini doğrulayın." />
-        <Step index={5} text="Ancak tüm adımlar başarılıysa tamamlandı olarak işaretleyin; hata varsa hatalı bırakın." />
+        <Step index={5} text="Silme uygulandığında talep otomatik olarak tamamlandı olur; hata varsa hatalı bırakıp tekrar deneyin." />
       </AdminSection>
 
       <Modal
@@ -372,6 +425,14 @@ export default function AdminDeletionRequestsScreen() {
                     Tamamlanma: {formatDateTimeTr(selected.completed_at)}
                   </AppText>
                 ) : null}
+
+                <View style={[styles.block, { backgroundColor: theme.colors.dangerSoft }]}>
+                  <AppText variant="caption" color="danger">
+                    “Hesabı kalıcı olarak sil” profil fotoğrafını, profili, içerikleri, medyayı ve
+                    giriş hesabını kaldırır. Durumu “Tamamlandı” yapmak tek başına hesabı silmez;
+                    silme ancak bu düğmeyle uygulanır.
+                  </AppText>
+                </View>
               </ScrollView>
 
               <View style={styles.modalFooter}>
@@ -381,6 +442,16 @@ export default function AdminDeletionRequestsScreen() {
                   fullWidth={false}
                   onPress={() => setSelected(null)}
                 />
+                {selected.status !== 'completed' ? (
+                  <Button
+                    label="Hesabı kalıcı olarak sil"
+                    variant="danger"
+                    fullWidth={false}
+                    loading={execute.isPending}
+                    disabled={!verify || update.isPending}
+                    onPress={runDeletion}
+                  />
+                ) : null}
                 <Button
                   label="Kaydet"
                   fullWidth={false}

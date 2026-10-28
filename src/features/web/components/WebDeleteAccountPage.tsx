@@ -12,7 +12,10 @@ import {
   useCreateDeletionRequest,
   useDeletionRequestStatus,
 } from '@/features/account/hooks/use-deletion-request';
-import type { DeletionReceipt } from '@/features/account/services/account-deletion-service';
+import type {
+  DeletionReceipt,
+  DeletionStep,
+} from '@/features/account/services/account-deletion-service';
 import type { DeletionRequestReceipt } from '@/features/account/services/deletion-request-service';
 import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
 import { useAuthStore } from '@/stores/auth-store';
@@ -22,14 +25,17 @@ import { formatDateTr } from '@/utils/date';
 import { useWebMeta } from '../use-web-meta';
 import { WebFooter } from './WebFooter';
 import { WebHeader } from './WebHeader';
+import { webPageRoot } from '../page-root';
 
 const DELETED_ITEMS = [
-  'Profil bilgileri, profil ve kapak fotoğrafı',
+  'Profil bilgileri, kullanıcı adı, profil ve kapak fotoğrafı',
   'Gönderiler, hikâyeler, Reels videoları, yorum ve beğeniler',
+  'Sohbette paylaşılan fotoğraf, video ve ses dosyaları',
   'Takip ilişkileri, favoriler ve engel listesi',
   'Marketplace ilanları ve işletme katkıları',
-  'Yüklediğin medya dosyaları',
+  'Bulut depoda (Cloudflare R2) saklanan tüm medya dosyaları',
   'Mesajlar (karşı tarafın geçmişi için anonimleştirilir)',
+  'Apple kimlik bağlantısı ve uygulama yetkisi (Apple ile giriş yaptıysan)',
   'Bildirim tercihleri ve aktif oturumlar',
 ];
 
@@ -92,8 +98,8 @@ export function WebDeleteAccountPage() {
             Hesap Silme
           </AppText>
           <AppText variant="body" color="#A9BDE2" style={styles.heroSummary}>
-            Hesabını kalıcı olarak silebilir veya giriş yapamıyorsan kimlik doğrulaması gerektiren
-            bir silme talebi oluşturabilirsin.
+            Trabzone hesabını kalıcı olarak silebilir veya giriş yapamıyorsan kimlik doğrulaması
+            gerektiren bir silme talebi oluşturabilirsin. Uygulamayı yeniden yüklemen gerekmez.
           </AppText>
           <View style={styles.pillRow}>
             <View style={styles.heroPill}>
@@ -121,6 +127,30 @@ export function WebDeleteAccountPage() {
       <View style={styles.body}>
         <View style={styles.mainColumn}>
           {isAuthed ? <AuthenticatedDeletion onSignedOut={() => void signOut()} /> : <GuestDeletionRequest />}
+
+          <Card style={styles.stepsCard}>
+            <AppText variant="bodyStrong">Hesap silme adımları</AppText>
+            <StepRow
+              index={1}
+              text="Trabzone hesabınla uygulamadan veya bu sayfadan giriş yap."
+            />
+            <StepRow
+              index={2}
+              text="Profil ayarlarından “Hesabımı sil” ekranını aç ve kullanıcı adını yazarak onayla."
+            />
+            <StepRow
+              index={3}
+              text="Silme işlemi doğrulanır, medya dosyaların bulut deposundan kaldırılır ve hesabın kalıcı olarak silinir."
+            />
+            <StepRow
+              index={4}
+              text="Hesabın silindiğinde aynı e-posta ile yeni bir hesap açabilirsin; eski içerikler geri gelmez."
+            />
+            <AppText variant="caption" color="textTertiary">
+              Giriş yapamıyorsan aşağıdaki formla talep oluştur. Talepler kimlik doğrulamasından
+              sonra en geç 30 gün içinde sonuçlandırılır; uygulama içinden silme anında uygulanır.
+            </AppText>
+          </Card>
 
           <Card tone="muted" elevated={false} style={styles.infoCard}>
             <AppText variant="bodyStrong">Hesap dondurma ile farkı</AppText>
@@ -170,17 +200,28 @@ function AuthenticatedDeletion({ onSignedOut }: { onSignedOut: () => void }) {
   const router = useRouter();
   const { data: profile } = useMyProfile();
   const { data: deletionStatus } = useDeletionStatus();
-  const deleteAccount = useDeleteAccount();
   const [confirm, setConfirm] = useState('');
   const [password, setPassword] = useState('');
   const [reason, setReason] = useState('');
   const [ack, setAck] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<DeletionReceipt | null>(null);
+  const [step, setStep] = useState<DeletionStep | null>(null);
+  const deleteAccount = useDeleteAccount(setStep);
 
   const username = profile?.username ?? '';
   const confirmed = username.length > 0 && confirm.trim().toLowerCase() === username.toLowerCase();
   const canSubmit = confirmed && ack && !deleteAccount.isPending;
+  const pendingLabel =
+    step === 'verifying'
+      ? 'Hesap doğrulanıyor…'
+      : step === 'apple'
+        ? 'Apple oturum bağlantın kaldırılıyor…'
+        : step === 'media'
+          ? 'Medya dosyaları siliniyor…'
+          : step === 'account'
+            ? 'Hesap siliniyor…'
+            : 'Hesap siliniyor…';
 
   const submit = () => {
     if (!canSubmit) return;
@@ -204,8 +245,8 @@ function AuthenticatedDeletion({ onSignedOut }: { onSignedOut: () => void }) {
         </View>
         <AppText variant="h2">Hesabın kalıcı olarak silindi</AppText>
         <AppText variant="body" color="textSecondary">
-          Profilin, içeriklerin ve medya dosyaların kaldırıldı; oturumların kapatıldı. Bu hesapla
-          tekrar giriş yapılamaz.
+          Profilin, profil fotoğrafın, kapak fotoğrafın, içeriklerin ve bulut deposundaki medya
+          dosyaların kaldırıldı; oturumların kapatıldı. Bu hesapla tekrar giriş yapılamaz.
         </AppText>
         <View style={[styles.referenceBox, { backgroundColor: theme.colors.surfaceMuted }]}>
           <AppText variant="caption" color="textTertiary">
@@ -341,15 +382,15 @@ function AuthenticatedDeletion({ onSignedOut }: { onSignedOut: () => void }) {
         ) : null}
 
         <Button
-          label={deleteAccount.isPending ? 'Hesap siliniyor…' : 'Hesabımı kalıcı olarak sil'}
+          label={deleteAccount.isPending ? pendingLabel : 'Hesabımı kalıcı olarak sil'}
           variant="danger"
           loading={deleteAccount.isPending}
           disabled={!canSubmit}
           onPress={submit}
         />
         <AppText variant="caption" color="textTertiary" align="center">
-          Silme işlemi sunucuda çalışır. Başarısız olursa hesabın silinmiş sayılmaz ve hata
-          gösterilir.
+          Silme işlemi sunucuda çalışır ve medya temizliğini de kapsar. Başarısız olursa hesabın
+          silinmiş sayılmaz ve hata gösterilir.
         </AppText>
       </View>
     </Card>
@@ -548,8 +589,23 @@ function GuestDeletionRequest() {
   );
 }
 
-function Bullet({ text, tone }: { text: string; tone: 'danger' | 'muted' }) {
+function StepRow({ index, text }: { index: number; text: string }) {
   const { theme } = useTheme();
+  return (
+    <View style={styles.stepRow}>
+      <View style={[styles.stepIndex, { backgroundColor: theme.colors.primarySoft }]}>
+        <AppText variant="caption" color="primaryDeep" style={styles.stepNumber}>
+          {index}
+        </AppText>
+      </View>
+      <AppText variant="caption" color="textSecondary" style={styles.flex}>
+        {text}
+      </AppText>
+    </View>
+  );
+}
+
+function Bullet({ text, tone }: { text: string; tone: 'danger' | 'muted' }) {  const { theme } = useTheme();
   return (
     <View style={styles.bulletRow}>
       <View
@@ -566,7 +622,7 @@ function Bullet({ text, tone }: { text: string; tone: 'danger' | 'muted' }) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { ...webPageRoot },
   flex: { flex: 1 },
   hero: { backgroundColor: '#07152E', paddingTop: 56, paddingBottom: 44, paddingHorizontal: 20 },
   heroInner: { width: '100%', maxWidth: 1160, alignSelf: 'center' },
@@ -641,6 +697,16 @@ const styles = StyleSheet.create({
   errorBox: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', padding: 12, borderRadius: 10 },
   referenceBox: { gap: 6, padding: 16, borderRadius: 14 },
   infoCard: { gap: 8, padding: 20 },
+  stepsCard: { gap: 10, padding: 20 },
+  stepRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  stepIndex: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepNumber: { fontWeight: '700' },
   sideCard: { gap: 10, padding: 18 },
   bulletRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   bullet: { width: 5, height: 5, borderRadius: 3, marginTop: 7 },

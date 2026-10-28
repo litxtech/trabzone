@@ -22,6 +22,7 @@ import { flatStyle } from '../link-style';
 import { useWebMeta } from '../use-web-meta';
 import { WebFooter } from './WebFooter';
 import { WebHeader } from './WebHeader';
+import { webPageRoot } from '../page-root';
 
 type Props = { slug: string; document?: LegalDocument | null; isLoading?: boolean };
 
@@ -354,7 +355,7 @@ function DocumentSkeleton() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { ...webPageRoot },
   flex: { flex: 1 },
   hero: {
     backgroundColor: '#07152E',

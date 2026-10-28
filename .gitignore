@@ -37,6 +37,7 @@ yarn-error.*
 coverage/
 
 # Local scratch artifacts (QA accounts, admin probes, build caches)
+.expo-verify/
 .cache-web-export/
 .prompt-dump/
 .qa-*.sql
@@ -49,3 +50,4 @@ supabase/_conflicting_parallel_work/
 
 # Cursor local settings
 .cursor/
+.vercel

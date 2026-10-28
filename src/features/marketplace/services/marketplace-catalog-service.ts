@@ -802,7 +802,18 @@ export async function setListingStatusV2(
 }
 
 export async function deleteListingV2(id: string): Promise<Result<{ id: string }>> {
-  return rpc<{ id: string }>('market_delete_listing', { p_listing_id: id });
+  // `market_delete_listing` void döner: RPC başarılı olduğunda `data` null gelir.
+  // Boş yanıtı hata saymak, silme gerçekleşmiş olsa bile arayüzde "silinemedi"
+  // göstermesine ve kullanıcının silinmiş ilan sayfasında kalmasına yol açıyordu.
+  const result = await rpc<{ id: string } | null>(
+    'market_delete_listing',
+    { p_listing_id: id },
+    true,
+  );
+  if (!result.ok) {
+    return result;
+  }
+  return ok({ id });
 }
 
 export async function fetchSavedSearches(): Promise<Result<SavedSearch[]>> {

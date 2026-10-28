@@ -29,6 +29,16 @@ const TOKENS: Record<string, Mapping> = {
   member_not_found: { code: 'not_found', message: 'Kullanıcı bulunamadı.' },
   seller_not_found: { code: 'not_found', message: 'Satıcı bulunamadı.' },
   user_not_found: { code: 'not_found', message: 'Kullanıcı bulunamadı.' },
+  not_demo_user: {
+    code: 'forbidden',
+    message: 'Bu hesap örnek kullanıcı değil. Yalnızca demo hesaplar bu ekrandan silinebilir.',
+  },
+  invalid_demo_module: { code: 'invalid_input', message: 'Geçersiz örnek veri modülü.' },
+  demo_module_required: { code: 'invalid_input', message: 'En az bir modül seçilmeli.' },
+  trabzon_city_missing: {
+    code: 'not_found',
+    message: 'Trabzon şehir kaydı bulunamadı. Coğrafi veri seed’i uygulanmamış olabilir.',
+  },
 
   empty_post: { code: 'invalid_input', message: 'Gönderi boş olamaz.' },
   body_too_long: { code: 'invalid_input', message: 'Metin çok uzun. Kısaltıp tekrar dene.' },
@@ -418,6 +428,71 @@ const TOKENS: Record<string, Mapping> = {
     code: 'rate_limited',
     message: 'Bu arama için yakın zamanda bildirim gönderildi.',
   },
+
+  // --- Haber API merkezi ---------------------------------------------------
+  connection_not_found: { code: 'not_found', message: 'Haber kaynağı bulunamadı.' },
+  connection_untested: {
+    code: 'invalid_input',
+    message: 'Kaynağı açmadan önce bağlantıyı test etmelisin. Test başarılı olmadan otomatik çekim başlamaz.',
+  },
+  mapping_incomplete: {
+    code: 'invalid_input',
+    message: 'Başlık ve haber adresi alan eşleştirmeleri zorunlu. Eksik eşleştirmeyi tamamla.',
+  },
+  connection_inactive: {
+    code: 'invalid_input',
+    message: 'Kaynak aktif değil. Önce kaynağı aç, sonra otomatik yayını etkinleştir.',
+  },
+  connection_is_deleting: {
+    code: 'invalid_input',
+    message: 'Bu kaynak silme işleminde. İşlem bitmeden düzenlenemez.',
+  },
+  publish_mode_not_permitted: {
+    code: 'forbidden',
+    message: 'Seçilen yayın modu bu kaynağın lisans ve izin durumuyla uyumlu değil.',
+  },
+  publish_mode_discovery: {
+    code: 'invalid_input',
+    message: 'Keşif modundaki kaynak yayın yapmaz. Otomatik yayın için başka bir mod seç.',
+  },
+  publisher_missing: {
+    code: 'invalid_input',
+    message: 'Yayın için bir kaynak profili veya hesap seçmelisin.',
+  },
+  confirmation_mismatch: {
+    code: 'invalid_input',
+    message: 'Onay için kaynak adını tam olarak yazmalısın.',
+  },
+  deletion_in_progress: {
+    code: 'duplicate',
+    message: 'Bu kaynak için zaten süren bir silme işlemi var. Bitmesini bekle.',
+  },
+  invalid_connector: { code: 'invalid_input', message: 'Desteklenmeyen kaynak türü.' },
+  invalid_rows: { code: 'invalid_input', message: 'Gönderilen satırlar geçersiz.' },
+  invalid_field_key: { code: 'invalid_input', message: 'Geçersiz alan anahtarı.' },
+  invalid_source_path: {
+    code: 'invalid_input',
+    message: 'Alan yolu geçersiz. Yalnızca harf, rakam, nokta, tire ve köşeli parantez kullan.',
+  },
+  item_not_found: { code: 'not_found', message: 'Haber kaydı bulunamadı.' },
+  item_not_rejectable: {
+    code: 'invalid_input',
+    message: 'Bu haber artık reddedilemez. Listeyi yenileyip tekrar dene.',
+  },
+  job_not_found: { code: 'not_found', message: 'Silme işi bulunamadı.' },
+  source_profile_unbound: {
+    code: 'invalid_input',
+    message: 'Doğrulanmış profil için önce bir Trabzone hesabı bağlamalısın.',
+  },
+  verification_note_required: {
+    code: 'invalid_input',
+    message: 'Doğrulama için kısa bir doğrulama notu yazmalısın.',
+  },
+  publisher_inactive: {
+    code: 'invalid_input',
+    message: 'Seçilen hesap aktif değil. Başka bir yayın hesabı seç.',
+  },
+  feed_url_required: { code: 'invalid_input', message: 'Feed veya API adresi zorunlu.' },
 };
 
 const RATE_LIMIT_PREFIX = 'rate_limited:';

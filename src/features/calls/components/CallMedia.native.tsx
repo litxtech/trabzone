@@ -1,24 +1,5 @@
-import {
-  AudioSession,
-  LiveKitRoom,
-  VideoTrack,
-  isTrackReference,
-  registerGlobals,
-  useLocalParticipant,
-  useParticipants,
-  useRoomContext,
-  useTracks,
-} from '@livekit/react-native';
-import { Room, Track } from 'livekit-client';
-import {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useMemo,
-  useState,
-} from 'react';
-import { StyleSheet, View } from 'react-native';
+import { forwardRef, useCallback, useEffect, useImperativeHandle } from 'react';
+import { Platform } from 'react-native';
 
 import {
   INITIAL_CALL_MEDIA_STATE,
@@ -27,159 +8,97 @@ import {
   type CallMediaState,
 } from './call-media-types';
 
-// WebRTC köprüsü (RTCPeerConnection, mediaDevices, ...) LiveKit'e bağlanmadan
-// önce kurulmalı. Modül yüklenirken bir kez çalışır.
-registerGlobals();
+type LiveKitCallMediaModule = typeof import('./CallMedia.livekit');
+
+const UNAVAILABLE_MESSAGE =
+  'Görüşme bu derlemede desteklenmiyor. Ses ve görüntü için development build (expo-dev-client) gerekiyor.';
 
 /**
- * Native görüşme katmanı: `@livekit/react-native` + native WebRTC.
- * Expo Go'da çalışmaz; development build (expo-dev-client) gerekir.
+ * Gerçek LiveKit katmanını tembel ve güvenli biçimde yükler.
+ *
+ * `@livekit/react-native` native WebRTC köprüsünü (AudioDeviceModule üzerinden
+ * `new NativeEventEmitter()`) modül değerlendirilirken kurar ve derlemede native
+ * modül yoksa (Expo Go, simülatör, yalnızca JS içeren build) **senkron** olarak
+ * fırlatır. Statik `import` bu hatayı bundle değerlendirmesine taşır: bu bileşeni
+ * içe aktaran `(app)/call/[id].tsx` rotası varsayılan export'unu hiçbir zaman
+ * tamamlayamaz ve yönlendirici "Route is missing the required default export"
+ * uyarısıyla aramayı tamamen kaybeder. Senkron `require` fırlatmayı normal
+ * try/catch ile yakalanabilir kılar; modül yoksa geri düşüş bileşeni gösterilir
+ * ve arama ekranının geri kalanı (sinyalleşme, kapatma, durum) çalışmaya devam eder.
  */
-export const CallMedia = forwardRef<CallMediaHandle, CallMediaProps>(function CallMedia(
-  { serverUrl, token, video, onStateChange },
-  ref,
-) {
-  const handleState = useCallback(
-    (next: CallMediaState) => {
-      onStateChange(next);
-    },
-    [onStateChange],
-  );
+let livekitModule: LiveKitCallMediaModule | null | undefined;
 
-  const [error, setError] = useState<string | null>(null);
-  const [connected, setConnected] = useState(false);
-
-  const room = useMemo(
-    () =>
-      new Room({
-        adaptiveStream: { pixelDensity: 'screen' },
-        dynacast: true,
-      }),
-    [],
-  );
-
-  // Hoparlör/kulaklık yönlendirmesi ve ses oturumu bağlantıdan önce açılır.
-  useEffect(() => {
-    void AudioSession.startAudioSession().catch(() => undefined);
-    return () => {
-      void AudioSession.stopAudioSession().catch(() => undefined);
-    };
-  }, []);
-
-  useImperativeHandle(
-    ref,
-    () => ({
-      setMicrophoneEnabled: async (enabled: boolean) => {
-        await room.localParticipant.setMicrophoneEnabled(enabled);
-      },
-      setCameraEnabled: async (enabled: boolean) => {
-        await room.localParticipant.setCameraEnabled(enabled);
-      },
-      disconnect: async () => {
-        await room.disconnect();
-      },
-    }),
-    [room],
-  );
-
-  return (
-    <LiveKitRoom
-      room={room}
-      serverUrl={serverUrl}
-      token={token}
-      connect
-      audio
-      video={video}
-      onConnected={() => setConnected(true)}
-      onDisconnected={() => setConnected(false)}
-      onError={(mediaError) => {
-        setError(mediaError.message);
-      }}
-    >
-      <CallStage
-        video={video}
-        connected={connected}
-        error={error}
-        onStateChange={handleState}
-      />
-    </LiveKitRoom>
-  );
-});
-
-function CallStage({
-  video,
-  connected,
-  error,
-  onStateChange,
-}: {
-  video: boolean;
-  connected: boolean;
-  error: string | null;
-  onStateChange: (state: CallMediaState) => void;
-}) {
-  const room = useRoomContext();
-  const participants = useParticipants();
-  const { isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
-  const cameraTracks = useTracks([Track.Source.Camera]);
-
-  // Susturulmuş (kapatılmış) kamera yayınları son kareyi dondurmasın diye
-  // yalnızca etkin ve abone olunmuş izler çizilir.
-  const activeCameraTracks = cameraTracks.filter(
-    (track) => isTrackReference(track) && !track.publication.isMuted,
-  );
-
-  const local = activeCameraTracks.find(
-    (track) => isTrackReference(track) && track.participant.identity === room.localParticipant.identity,
-  );
-  const remote = activeCameraTracks.find(
-    (track) => isTrackReference(track) && track.participant.identity !== room.localParticipant.identity,
-  );
-
-  const remoteCameraEnabled = Boolean(remote);
-
-  useEffect(() => {
-    onStateChange({
-      ...INITIAL_CALL_MEDIA_STATE,
-      connected,
-      micEnabled: isMicrophoneEnabled,
-      cameraEnabled: isCameraEnabled,
-      remoteCameraEnabled,
-      participantCount: participants.length,
-      error,
-    });
-  }, [
-    connected,
-    isMicrophoneEnabled,
-    isCameraEnabled,
-    remoteCameraEnabled,
-    participants.length,
-    error,
-    onStateChange,
-  ]);
-
-  return (
-    <View style={styles.stage} pointerEvents="none">
-      {remote && isTrackReference(remote) ? (
-        <VideoTrack trackRef={remote} style={styles.remote} objectFit="cover" />
-      ) : null}
-      {video && local && isTrackReference(local) ? (
-        <VideoTrack trackRef={local} style={styles.local} objectFit="cover" mirror zOrder={1} />
-      ) : null}
-    </View>
-  );
+function loadLiveKitCallMedia(): LiveKitCallMediaModule | null {
+  if (Platform.OS === 'web') {
+    return null;
+  }
+  if (livekitModule !== undefined) {
+    return livekitModule;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- native modul yoksa statik import bundle'i cokertiyor
+    livekitModule = require('./CallMedia.livekit') as LiveKitCallMediaModule;
+  } catch {
+    if (__DEV__) {
+      console.warn(
+        '[CallMedia] @livekit/react-native yuklenemedi; sesli/goruntulu gorusme bu derlemede devre disi. Development build (expo-dev-client) gerekiyor.',
+      );
+    }
+    livekitModule = null;
+  }
+  return livekitModule;
 }
 
-const styles = StyleSheet.create({
-  stage: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
-  remote: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
-  local: {
-    position: 'absolute',
-    right: 16,
-    top: 92,
-    width: 104,
-    height: 148,
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: '#141B2E',
-  },
+/**
+ * Native görüşme katmanı girişi.
+ *
+ * LiveKit native modülü varsa gerçek görüşme bileşeni, yoksa arama ekranını
+ * çökertmeyen bilgilendirici geri düşüş çizilir.
+ */
+export const CallMedia = forwardRef<CallMediaHandle, CallMediaProps>(function CallMedia(props, ref) {
+  const livekit = loadLiveKitCallMedia();
+  if (livekit) {
+    const LiveKitCallMedia = livekit.CallMedia;
+    return <LiveKitCallMedia {...props} ref={ref} />;
+  }
+  return <UnsupportedCallMedia {...props} ref={ref} />;
 });
+
+/**
+ * Native WebRTC derlemede yokken kullanılan geri düşüş.
+ *
+ * Görsel katman çizmez; arama ekranı `error` alanını bildirim olarak gösterir.
+ * Tutamaç metotları sessizce başarısız olur ki mikrofon/kamera düğmeleri
+ * aramayı kilitlemesin.
+ */
+const UnsupportedCallMedia = forwardRef<CallMediaHandle, CallMediaProps>(
+  function UnsupportedCallMedia({ onStateChange }, ref) {
+    const handleState = useCallback(
+      (next: CallMediaState) => {
+        onStateChange(next);
+      },
+      [onStateChange],
+    );
+
+    useEffect(() => {
+      handleState({
+        ...INITIAL_CALL_MEDIA_STATE,
+        micEnabled: false,
+        cameraEnabled: false,
+        error: UNAVAILABLE_MESSAGE,
+      });
+    }, [handleState]);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        setMicrophoneEnabled: async () => undefined,
+        setCameraEnabled: async () => undefined,
+        disconnect: async () => undefined,
+      }),
+      [],
+    );
+
+    return null;
+  },
+);

@@ -334,3 +334,31 @@ export async function unblockUser(userId: string): Promise<Result<null>> {
   }
   return ok(null);
 }
+
+export type BlockedUser = {
+  id: string;
+  username: string;
+  first_name: string | null;
+  last_name: string | null;
+  avatar_path: string | null;
+  is_verified: boolean;
+  blocked_at: string;
+};
+
+/**
+ * Engellediğim kişiler. Sunucu tarafı RPC'si yalnızca kendi engel listemizi
+ * döndürür; karşı taraf bu listeyi hiçbir şekilde göremez.
+ */
+export async function fetchBlockedUsers(): Promise<Result<BlockedUser[]>> {
+  const { data, error } = await supabase.rpc('list_blocked_users', {
+    p_limit: 100,
+    p_offset: 0,
+  });
+
+  if (error) {
+    return fail(appError('network'));
+  }
+
+  const payload = data as { items?: BlockedUser[] } | null;
+  return ok(payload?.items ?? []);
+}

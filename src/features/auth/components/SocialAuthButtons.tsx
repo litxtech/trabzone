@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from '@/utils/router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { AppText } from '@/components/ui';
 import { env } from '@/config/env';
+import { finishSignUpFromMetadata } from '@/features/auth/signup-completion';
 import { fetchPendingAcceptances } from '@/features/legal/services/legal-service';
 import { fetchMyProfile } from '@/features/profile/services/profile-service';
 import {
@@ -84,7 +85,10 @@ export function SocialAuthButtons({ onError, showInlineError = true }: Props) {
       const completed = profile.ok && profile.data?.onboarding_completed;
       haptics.success();
       if (!completed) {
-        router.replace('/complete-profile');
+        // Kayıt sırasında verilen bilgiler duruyorsa profil tamamlama ekranı
+        // yeniden gösterilmez; profil doğrudan tamamlanır.
+        const destination = await finishSignUpFromMetadata();
+        router.replace(destination);
         return;
       }
       if (pendingResult.ok && pendingResult.data.length > 0) {
@@ -98,62 +102,73 @@ export function SocialAuthButtons({ onError, showInlineError = true }: Props) {
 
   const disabled = pending !== null;
 
-  // OAuth sağlayıcıları yapılandırılmadan çalışmayan bir buton gösterme.
-  if (!env.enableSocialAuth) {
+  // Her sağlayıcı yalnızca uygulama içinde gerçekten açılabiliyorsa gösterilir:
+  // Apple native oturumu iOS'a özeldir; Google native girişi istemci kimliği
+  // tanımlıysa çalışır. Aksi halde kullanıcıyı tarayıcıya göndermek yerine
+  // buton hiç gösterilmez.
+  const canUseApple = env.enableSocialAuth && Platform.OS === 'ios';
+  const canUseGoogle =
+    env.enableSocialAuth && Platform.OS !== 'web' && Boolean(env.googleWebClientId);
+
+  if (!canUseApple && !canUseGoogle) {
     return null;
   }
 
   return (
     <View style={styles.wrap}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Apple ile devam et"
-        accessibilityState={{ disabled, busy: pending === 'apple' }}
-        disabled={disabled}
-        onPress={() => void run('apple')}
-        style={({ pressed }) => [
-          styles.button,
-          styles.apple,
-          {
-            opacity: disabled && pending !== 'apple' ? 0.55 : pressed ? 0.82 : 1,
-            transform: [{ scale: pressed ? 0.99 : 1 }],
-          },
-        ]}
-      >
-        {pending === 'apple' ? (
-          <ActivityIndicator size="small" color="#05070D" />
-        ) : (
-          <Ionicons name="logo-apple" size={20} color="#05070D" />
-        )}
-        <AppText variant="bodyStrong" color="#05070D" style={styles.label}>
-          Apple ile Devam Et
-        </AppText>
-      </Pressable>
+      {canUseApple ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Apple ile devam et"
+          accessibilityState={{ disabled, busy: pending === 'apple' }}
+          disabled={disabled}
+          onPress={() => void run('apple')}
+          style={({ pressed }) => [
+            styles.button,
+            styles.apple,
+            {
+              opacity: disabled && pending !== 'apple' ? 0.55 : pressed ? 0.82 : 1,
+              transform: [{ scale: pressed ? 0.99 : 1 }],
+            },
+          ]}
+        >
+          {pending === 'apple' ? (
+            <ActivityIndicator size="small" color="#05070D" />
+          ) : (
+            <Ionicons name="logo-apple" size={20} color="#05070D" />
+          )}
+          <AppText variant="bodyStrong" color="#05070D" style={styles.label}>
+            Apple ile Devam Et
+          </AppText>
+        </Pressable>
+      ) : null}
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Google ile devam et"
-        accessibilityState={{ disabled, busy: pending === 'google' }}
-        disabled={disabled}
-        onPress={() => void run('google')}
-        style={({ pressed }) => [
-          styles.button,
-          styles.google,
-          {
-            opacity: disabled && pending !== 'google' ? 0.55 : pressed ? 0.82 : 1,
-            transform: [{ scale: pressed ? 0.99 : 1 }],
-          },
-        ]}
-      >
-        {pending === 'google' ? (
-          <ActivityIndicator size="small" color="#1A1D24" />
-        ) : (
-          <GoogleMark />
-        )}
-        <AppText variant="bodyStrong" color="#1A1D24" style={styles.label}>
-          Google ile Devam Et
-        </AppText>
-      </Pressable>
+      {canUseGoogle ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Google ile devam et"
+          accessibilityState={{ disabled, busy: pending === 'google' }}
+          disabled={disabled}
+          onPress={() => void run('google')}
+          style={({ pressed }) => [
+            styles.button,
+            styles.google,
+            {
+              opacity: disabled && pending !== 'google' ? 0.55 : pressed ? 0.82 : 1,
+              transform: [{ scale: pressed ? 0.99 : 1 }],
+            },
+          ]}
+        >
+          {pending === 'google' ? (
+            <ActivityIndicator size="small" color="#1A1D24" />
+          ) : (
+            <GoogleMark />
+          )}
+          <AppText variant="bodyStrong" color="#1A1D24" style={styles.label}>
+            Google ile Devam Et
+          </AppText>
+        </Pressable>
+      ) : null}
 
       {error ? (
         <View style={styles.errorRow}>

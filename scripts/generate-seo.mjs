@@ -417,7 +417,9 @@ function headFor(page) {
 const BOOT_STYLES = `
     <style id="tz-boot-style">
       html, body { height: 100%; margin: 0; background: #0b1020; }
-      body { overflow: hidden; }
+      /* Sayfa kaydırması açık: içerik ekran yüksekliğini aştığında tekerlek,
+         klavye ve tarayıcı kaydırma çubuğu çalışır. */
+      body { overflow-x: hidden; overflow-y: auto; }
       #root { display: flex; height: 100%; flex: 1; }
       .tz-boot {
         position: fixed; inset: 0; z-index: 9999;
@@ -452,7 +454,7 @@ const BOOT_STYLES = `
        * "bazen çalışıp bazen çalışmaması" şikâyetinin ana nedeni buydu.
        */
       html, body { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
-      body { -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
+      body { -webkit-tap-highlight-color: transparent; overflow-x: hidden; overflow-y: auto; }
       *, *::before, *::after { -webkit-tap-highlight-color: transparent; }
       a, button, input[type="submit"], [role="button"], [role="link"], [role="menuitem"], [role="tab"] {
         cursor: pointer;
@@ -566,6 +568,14 @@ function sitemapIndex() {
     <loc>${SITE}/sitemap-hubs.xml</loc>
     <lastmod>${TODAY}</lastmod>
   </sitemap>
+  <sitemap>
+    <loc>${SITE}/sitemap-blog.xml</loc>
+    <lastmod>${TODAY}</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>${SITE}/sitemap-news.xml</loc>
+    <lastmod>${TODAY}</lastmod>
+  </sitemap>
 </sitemapindex>
 `;
 }
@@ -642,10 +652,67 @@ function webmanifest() {
   );
 }
 
+/**
+ * Universal links (iOS) doğrulama dosyası.
+ *
+ * Yalnızca `/p/*` (paylaşım) ve doğrudan içerik yolları taleb edilir; pazarlama
+ * ve hukuki sayfalar tarayıcıda kalır. Apple Team ID `eas.json` içindeki
+ * hesaptan gelir; farklı bir hesapta `APPLE_TEAM_ID` ile geçersiz kılınır.
+ */
+function appleAppSiteAssociation() {
+  const teamId = (process.env.APPLE_TEAM_ID || '9W6CR7KXM7').trim();
+  const bundleId = (process.env.APPLE_BUNDLE_ID || 'com.litxtech.trabzone').trim();
+  const components = [
+    { '/': '/p/*', comment: 'Paylaşım bağlantıları' },
+    { '/': '/post/*' },
+    { '/': '/reel/*' },
+    { '/': '/profile/*' },
+    { '/': '/marketplace/place/*' },
+    { '/': '/business/*' },
+  ];
+
+  return {
+    applinks: {
+      details: [
+        {
+          appIDs: [`${teamId}.${bundleId}`],
+          components,
+        },
+      ],
+    },
+  };
+}
+
+/**
+ * Android App Links doğrulama dosyası.
+ *
+ * İmza parmak izi (SHA-256) olmadan doğrulama yapılamaz; bu durumda dosya boş
+ * dizi döner ve Android bağlantıları tarayıcıda açar. Paylaşım sayfasındaki
+ * `trabzone://` denemesi sayesinde uygulama yine de açılır.
+ */
+function androidAssetLinks() {
+  const fingerprints = (process.env.ANDROID_CERT_SHA256 || '')
+    .split(/[\s,]+/)
+    .map((value) => value.trim().toUpperCase())
+    .filter((value) => /^[0-9A-F]{2}(:[0-9A-F]{2}){31}$/.test(value));
+  if (fingerprints.length === 0) {
+    return [];
+  }
+  return [
+    {
+      relation: ['delegate_permission/common.handle_all_urls'],
+      target: {
+        namespace: 'android_app',
+        package_name: (process.env.ANDROID_PACKAGE || 'com.litxtech.trabzone').trim(),
+        sha256_cert_fingerprints: fingerprints,
+      },
+    },
+  ];
+}
+
 async function main() {
   const templatePath = path.join(dist, 'index.html');
   const template = await readFile(templatePath, 'utf8');
-
   await writeFile(templatePath, inject(template, PAGES[0]), 'utf8');
 
   const seoDir = path.join(dist, 'seo');
@@ -661,6 +728,20 @@ async function main() {
 
   await writeFile(path.join(dist, 'robots.txt'), robots(), 'utf8');
   await writeFile(path.join(dist, 'site.webmanifest'), webmanifest(), 'utf8');
+
+  // Uygulama bağlantıları: iOS universal links ve Android App Links.
+  const wellKnownDir = path.join(dist, '.well-known');
+  await mkdir(wellKnownDir, { recursive: true });
+  await writeFile(
+    path.join(wellKnownDir, 'apple-app-site-association'),
+    JSON.stringify(appleAppSiteAssociation(), null, 2),
+    'utf8',
+  );
+  await writeFile(
+    path.join(wellKnownDir, 'assetlinks.json'),
+    JSON.stringify(androidAssetLinks(), null, 2),
+    'utf8',
+  );
 
   // Vercel yönlendirmeleri için rota → statik HTML eşlemesi.
   const routes = PAGES.map((page) => ({

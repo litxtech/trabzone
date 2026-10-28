@@ -17,6 +17,8 @@ type IconName = React.ComponentProps<typeof Ionicons>['name'];
 export type TextFieldProps = TextInputProps & {
   label?: string;
   hint?: string;
+  /** İpucu satırının rengi: kullanıcı adı uygun/uygun değil geri bildirimi. */
+  hintTone?: 'neutral' | 'success' | 'danger';
   error?: string | null;
   leftIcon?: IconName;
   rightSlot?: ReactNode;
@@ -25,7 +27,7 @@ export type TextFieldProps = TextInputProps & {
 };
 
 export const TextField = forwardRef<ComponentRef<typeof TextInput>, TextFieldProps>(function TextField(
-  { label, hint, error, leftIcon, rightSlot, secure = false, containerStyle, onFocus, onBlur, ...rest },
+  { label, hint, hintTone = 'neutral', error, leftIcon, rightSlot, secure = false, containerStyle, onFocus, onBlur, ...rest },
   ref,
 ) {
   const { theme } = useTheme();
@@ -114,7 +116,16 @@ export const TextField = forwardRef<ComponentRef<typeof TextInput>, TextFieldPro
           {error}
         </AppText>
       ) : hint ? (
-        <AppText variant="caption" color="textTertiary">
+        <AppText
+          variant="caption"
+          color={
+            hintTone === 'success'
+              ? 'success'
+              : hintTone === 'danger'
+                ? 'danger'
+                : 'textTertiary'
+          }
+        >
           {hint}
         </AppText>
       ) : null}

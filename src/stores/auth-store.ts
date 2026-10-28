@@ -1,6 +1,8 @@
 import type { Session } from '@supabase/supabase-js';
 import { create } from 'zustand';
 
+import { rememberAccountFromSession } from '@/features/auth/saved-accounts';
+import { clearAllChatDrafts } from '@/features/messaging/drafts/draft-store';
 import { getCurrentSession, signOut as signOutRequest } from '@/services/supabase/auth';
 import { supabase } from '@/services/supabase/client';
 
@@ -20,8 +22,18 @@ export const useAuthStore = create<AuthState>()((set) => ({
   session: null,
 
   initialize: async () => {
-    const session = await getCurrentSession();
+    // Oturum okunamazsa (depolama hatası, ağ kesintisi) uygulama "booting"
+    // durumunda kilitli kalmamalı: aksi halde AuthGate hiçbir şey çizmez ve
+    // kullanıcı boş ekranda bekler.
+    let session: Session | null = null;
+    try {
+      session = await getCurrentSession();
+    } catch {
+      session = null;
+    }
     set({ session, status: session ? 'authenticated' : 'unauthenticated' });
+    // Cihazda oturumu açık hesap, giriş ekranındaki avatarlı listede görünür.
+    rememberAccountFromSession(session);
 
     if (unsubscribe) {
       return;
@@ -29,13 +41,23 @@ export const useAuthStore = create<AuthState>()((set) => ({
 
     const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       set({ session: nextSession, status: nextSession ? 'authenticated' : 'unauthenticated' });
+      // Başka sekmede/açılışta yenilenen oturum da listeye işlenir. Çıkışta
+      // kayıt silinmez: kullanıcı hesabını tek dokunuşla yeniden seçebilir.
+      rememberAccountFromSession(nextSession);
     });
     unsubscribe = () => data.subscription.unsubscribe();
   },
 
   signOut: async () => {
-    await signOutRequest();
-    set({ session: null, status: 'unauthenticated' });
+    try {
+      await signOutRequest();
+    } finally {
+      // Sunucu isteği başarısız olsa da cihazdaki oturum kapanır; kullanıcı
+      // giriş ekranına döner.
+      set({ session: null, status: 'unauthenticated' });
+    }
+    // Başka bir hesap aynı cihazda açılabilir; yarım mesajlar cihazda kalmaz.
+    clearAllChatDrafts();
   },
 }));
 

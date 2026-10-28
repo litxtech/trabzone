@@ -15,6 +15,7 @@ import {
   RideSection,
   RideStat,
 } from '@/features/ride/components/RideBits';
+import { IdentityReadyBanner, VerifiedTick } from '@/features/ride/components/IdentityBadge';
 import { RideOfferCard } from '@/features/ride/components/RideOfferCard';
 import { RideHeader } from '@/features/ride/components/RideHeader';
 import { useMyTrips, useRideProfile, useRideSearch } from '@/features/ride/hooks/use-ride';
@@ -26,6 +27,7 @@ import {
   formatMoney,
   formatTime,
 } from '@/features/ride/utils/format';
+import { isIdentityVerified } from '@/features/ride/utils/identity';
 
 export default function RideLobbyScreen() {
   const { theme } = useTheme();
@@ -40,7 +42,8 @@ export default function RideLobbyScreen() {
     (session?.user.user_metadata?.full_name as string | undefined)?.split(' ')[0] ??
     null;
   const upcoming = trips.data?.[0] ?? null;
-  const identityApproved = profile.data?.identity_status === 'approved';
+  // Profildeki alan senkronsuz kalabildiği için onaylı belge kaydı da hesaba katılır.
+  const identityApproved = isIdentityVerified(profile.data);
   const driverApproved = profile.data?.driver_status === 'approved';
 
   const goSearch = (scope: RideScope) => {
@@ -99,10 +102,13 @@ export default function RideLobbyScreen() {
 
         <View style={styles.heroStats}>
           <RideStat
-            icon="shield-checkmark-outline"
+            icon={identityApproved ? 'checkmark-circle' : 'shield-checkmark-outline'}
             value={
               profile.data
-                ? (VERIFICATION_STATUS_LABEL[profile.data.identity_status] ?? profile.data.identity_status)
+                ? identityApproved
+                  ? 'Doğrulandı'
+                  : (VERIFICATION_STATUS_LABEL[profile.data.identity_status] ??
+                    profile.data.identity_status)
                 : '—'
             }
             label="Kimlik"
@@ -170,7 +176,12 @@ export default function RideLobbyScreen() {
         </View>
       </LinearGradient>
 
-      {!identityApproved ? (
+      {identityApproved ? (
+        <IdentityReadyBanner
+          subtitle="Kimliğin doğrulandı; rezervasyon ve ilanlarda tekrar belge istenmez."
+          onPress={() => router.navigate('/settings/verifications' as never)}
+        />
+      ) : (
         <Card
           padding={14}
           tone="primarySoft"
@@ -192,20 +203,28 @@ export default function RideLobbyScreen() {
             onPress={() => router.navigate('/ride/verification' as never)}
           />
         </Card>
-      ) : null}
+      )}
 
+      <View style={styles.roleHead}>
+        <AppText variant="label" color="textSecondary">
+          Ne yapmak istiyorsun?
+        </AppText>
+        <AppText variant="caption" color="textTertiary">
+          Sürücü ilanı ve yolcu talebi ayrı akışlardır.
+        </AppText>
+      </View>
       <View style={styles.actions}>
         <RideActionTile
           icon="add-circle-outline"
-          title="Yolculuk Paylaş"
-          subtitle="Sürücü olarak ilan ver"
+          title="Sürücü: Yolculuk Paylaş"
+          subtitle="Aracınla ilan ver, koltuk aç"
           tone="primary"
           onPress={() => router.navigate('/ride/create' as never)}
         />
         <RideActionTile
           icon="hand-left-outline"
-          title="Yolcu Talebi"
-          subtitle="Nereye gitmek istiyorsun?"
+          title="Yolcu: Talep Oluştur"
+          subtitle="Nereye gideceğini yaz, eşleş"
           tone="accent"
           onPress={() => router.navigate('/ride/request' as never)}
         />
@@ -235,10 +254,13 @@ export default function RideLobbyScreen() {
                 <AppText variant="label">
                   {upcoming.origin_label} → {upcoming.dest_label}
                 </AppText>
-                <AppText variant="caption" color="textSecondary">
-                  {upcoming.driver_first_name ?? upcoming.driver_username} · {upcoming.vehicle.make}{' '}
-                  {upcoming.vehicle.model}
-                </AppText>
+                <View style={styles.driverLine}>
+                  {upcoming.driver_identity_verified ? <VerifiedTick size={14} /> : null}
+                  <AppText variant="caption" color="textSecondary" style={styles.flex}>
+                    {upcoming.driver_first_name ?? upcoming.driver_username} ·{' '}
+                    {upcoming.vehicle.make} {upcoming.vehicle.model}
+                  </AppText>
+                </View>
               </View>
               <Badge
                 label={
@@ -344,11 +366,13 @@ export default function RideLobbyScreen() {
           icon="id-card-outline"
           title="Doğrulamalar"
           subtitle={
-            profile.data?.driver_status === 'approved'
-              ? 'Sürücü onaylı'
-              : profile.data?.driver_status === 'pending'
-                ? 'İnceleniyor'
-                : 'Belge yükle'
+            identityApproved
+              ? driverApproved
+                ? 'Kimlik ve sürücü onaylı'
+                : 'Kimlik onaylı · eksik belge'
+              : profile.data?.identity_status === 'pending'
+                ? 'Kimlik inceleniyor'
+                : 'Kimlik doğrula'
           }
           onPress={() => router.navigate('/ride/verification' as never)}
         />
@@ -467,6 +491,8 @@ const styles = StyleSheet.create({
   verifyCard: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   verifyIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   flex: { flex: 1 },
+  roleHead: { gap: 1 },
+  driverLine: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   center: { paddingVertical: 24, alignItems: 'center' },
   list: { gap: 10 },

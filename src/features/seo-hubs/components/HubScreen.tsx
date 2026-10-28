@@ -7,7 +7,6 @@ import {
   Image,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   useWindowDimensions,
   View,
@@ -18,6 +17,8 @@ import { authLinkHref } from '@/features/auth/use-require-auth';
 import { publicMediaUrl } from '@/features/media/media-service';
 import { WebFooter } from '@/features/web/components/WebFooter';
 import { WebHeader } from '@/features/web/components/WebHeader';
+import { WebPageScroll } from '@/features/web/components/WebPageScroll';
+import { webPageRoot } from '@/features/web/page-root';
 import { flatStyle } from '@/features/web/link-style';
 import { useWebMeta } from '@/features/web/use-web-meta';
 import { useAuthStatus } from '@/stores/auth-store';
@@ -369,11 +370,7 @@ export function HubScreen({ segments }: { segments: string[] }) {
     <View style={styles.root}>
       {web ? <WebHeader /> : null}
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+      <WebPageScroll contentContainerStyle={styles.scrollContent}>
         {!web ? (
           <View style={styles.nativeTop}>
             <Pressable
@@ -543,16 +540,15 @@ export function HubScreen({ segments }: { segments: string[] }) {
             </>
           )}
         </View>
-      </ScrollView>
 
-      {web ? <WebFooter /> : null}
+        {web ? <WebFooter /> : null}
+      </WebPageScroll>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#05080F' },
-  scroll: { flex: 1 },
+  root: { ...webPageRoot, backgroundColor: '#05080F' },
   scrollContent: { flexGrow: 1 },
   nativeTop: {
     flexDirection: 'row',

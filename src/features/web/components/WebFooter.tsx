@@ -18,6 +18,7 @@ const COLUMNS: { title: string; links: { label: string; href: string }[] }[] = [
     title: 'Trabzone',
     links: [
       { label: 'Hakkımızda', href: '/about' },
+      { label: 'Trabzon Blog', href: '/blog' },
       { label: 'Uygulamayı Keşfet', href: '/#kesfet' },
       { label: 'Marketplace', href: '/marketplace' },
       { label: 'Emlak', href: '/marketplace/real-estate' },

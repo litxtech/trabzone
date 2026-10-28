@@ -92,6 +92,7 @@ export const adminKeys = {
   reportPreview: (params: unknown) => ['admin', 'report-preview', params] as const,
   supportTemplates: ['admin', 'support-templates'] as const,
   mfa: ['admin', 'mfa'] as const,
+  alerts: ['admin', 'alerts'] as const,
 };
 
 const TOKENS: Record<string, { code: Parameters<typeof appError>[0]; message: string }> = {

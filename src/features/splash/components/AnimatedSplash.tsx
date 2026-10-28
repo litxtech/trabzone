@@ -72,6 +72,18 @@ export function AnimatedSplash({ ready, onFinish }: AnimatedSplashProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reduceMotion]);
 
+  // Emniyet: `withTiming` geri cagrisi (uygulama arka planda acildi, JS is
+  // parcacigi yogundu, yenileme sirasinda animasyon dusuruldu) gelmezse intro
+  // hic "bitmedi" kalirdi; perde opak halde ustte kalip uygulama gorunur ama
+  // kullanilamaz olurdu. Zaman asimi introyu her kosulda bitirir.
+  useEffect(() => {
+    if (reduceMotion) {
+      return;
+    }
+    const safety = setTimeout(() => setIntroFinished(true), perf.splashIntroMs + 350);
+    return () => clearTimeout(safety);
+  }, [reduceMotion]);
+
   useEffect(() => {
     if (!ready || !introDone) {
       return;
@@ -96,9 +108,11 @@ export function AnimatedSplash({ ready, onFinish }: AnimatedSplashProps) {
     return () => clearTimeout(safety);
   }, [ready, introDone, overlayOpacity, overlayScale, onFinish, reduceMotion]);
 
-  // Giris biter bitmez katman dokunuslara kapanir: kapanis animasyonu veya
-  // sokum gecikse bile parmak artik dogrudan uygulamaya ulasir.
-  const blocking = !ready || !introDone;
+  // Giris perdesi dokunuslari HIC yakalamaz: uygulama hazir degilken altinda
+  // etkilesimli bir ekran yok; hazir olduktan sonra kapanis animasyonu sirasinda
+  // parmak dogrudan uygulamaya ulasmali. Daha once perde `pointerEvents="auto"`
+  // ile duruyordu; yenileme sonrasi kapanis gecikirse ilk dokunuslari yutuyordu.
+  const overlayPointerEvents = 'none' as const;
 
   const overlayStyle = useAnimatedStyle(() => ({
     opacity: overlayOpacity.get(),
@@ -125,7 +139,7 @@ export function AnimatedSplash({ ready, onFinish }: AnimatedSplashProps) {
 
   return (
     <Animated.View
-      pointerEvents={blocking ? 'auto' : 'none'}
+      pointerEvents={overlayPointerEvents}
       style={[StyleSheet.absoluteFill, styles.container, overlayStyle]}
     >
       <LinearGradient

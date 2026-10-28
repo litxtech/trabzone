@@ -16,6 +16,7 @@ import {
   formatTime,
   initials,
 } from '../utils/format';
+import { VerifiedTick } from './IdentityBadge';
 
 export function RideOfferCard({ offer }: { offer: RideSearchItem }) {
   const { theme } = useTheme();
@@ -114,9 +115,7 @@ export function RideOfferCard({ offer }: { offer: RideSearchItem }) {
             <AppText variant="label" numberOfLines={1}>
               {driverName}
             </AppText>
-            {offer.driver.is_verified ? (
-              <Ionicons name="shield-checkmark" size={14} color={theme.colors.primary} />
-            ) : null}
+            {offer.driver.identity_verified ? <VerifiedTick size={15} /> : null}
           </View>
           <AppText variant="caption" color="textTertiary" numberOfLines={1}>
             {offer.driver.rating_avg

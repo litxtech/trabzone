@@ -14,7 +14,8 @@ import {
   type UsernameChangeStatus,
 } from '../services/profile-service';
 import { deleteProfileMedia, uploadProfileMedia, type MediaKind } from '../services/media-service';
-import { blockUser, unblockUser } from '../services/social-service';
+import { blockUser, fetchBlockedUsers, unblockUser } from '../services/social-service';
+import type { BlockedUser } from '../services/social-service';
 import { profileQueryKeys } from './use-my-profile';
 
 export function useMyPrivacySettings() {
@@ -169,6 +170,52 @@ export function useRemoveProfileMedia() {
   });
 }
 
+/**
+ * Engel listesi değiştiğinde kullanıcıya ait her yüzey tazelenir: akış, reels,
+ * keşif, sohbet, bildirim, pazar yeri, emlak ve yolculuk aramaları. Aksi halde
+ * engellenen kişinin içeriği önbellekten görünmeye devam ederdi.
+ */
+const BLOCK_AFFECTED_QUERY_ROOTS = [
+  'feed',
+  'reels',
+  'stories',
+  'explore',
+  'discovery',
+  'social',
+  'profile-view',
+  'my-profile',
+  'chat',
+  'comments',
+  'notifications',
+  'friends',
+  'friend-requests',
+  'blocked-users',
+  'market',
+  're',
+  'ride',
+  'map',
+] as const;
+
+function invalidateAfterBlockChange(queryClient: ReturnType<typeof useQueryClient>) {
+  for (const root of BLOCK_AFFECTED_QUERY_ROOTS) {
+    void queryClient.invalidateQueries({ queryKey: [root] });
+  }
+}
+
+export function useBlockedUsers() {
+  return useQuery<BlockedUser[]>({
+    queryKey: ['blocked-users'],
+    queryFn: async () => {
+      const result = await fetchBlockedUsers();
+      if (!result.ok) {
+        throw result.error;
+      }
+      return result.data;
+    },
+    staleTime: 30_000,
+  });
+}
+
 export function useBlockUser() {
   const queryClient = useQueryClient();
   return useMutation<void, Error, string>({
@@ -179,10 +226,7 @@ export function useBlockUser() {
       }
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['profile-view'] });
-      void queryClient.invalidateQueries({ queryKey: ['social'] });
-      void queryClient.invalidateQueries({ queryKey: ['friend-requests'] });
-      void queryClient.invalidateQueries({ queryKey: ['my-profile'] });
+      invalidateAfterBlockChange(queryClient);
     },
   });
 }
@@ -197,8 +241,8 @@ export function useUnblockUser() {
       }
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['profile-view'] });
-      void queryClient.invalidateQueries({ queryKey: ['social'] });
+      invalidateAfterBlockChange(queryClient);
+      void queryClient.invalidateQueries({ queryKey: profileQueryKeys.me });
     },
   });
 }

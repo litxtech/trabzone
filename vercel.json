@@ -15,7 +15,33 @@
       "memory": 1024,
       "maxDuration": 15
     },
+    "api/blog.js": {
+      "includeFiles": "dist/index.html",
+      "memory": 1024,
+      "maxDuration": 15
+    },
+    "api/share.js": {
+      "memory": 512,
+      "maxDuration": 10
+    },
+    "api/news.js": {
+      "includeFiles": "dist/index.html",
+      "memory": 1024,
+      "maxDuration": 15
+    },
+    "api/sitemap-news.js": {
+      "memory": 512,
+      "maxDuration": 15
+    },
+    "api/sitemap-blog.js": {
+      "memory": 512,
+      "maxDuration": 15
+    },
     "api/sitemap-hubs.js": {
+      "memory": 512,
+      "maxDuration": 15
+    },
+    "api/sitemap-news.js": {
       "memory": 512,
       "maxDuration": 15
     }
@@ -24,7 +50,8 @@
     { "source": "/policy/terms", "destination": "/terms", "permanent": true },
     { "source": "/policy/privacy", "destination": "/privacy", "permanent": true },
     { "source": "/real-estate", "destination": "/marketplace/real-estate", "permanent": true },
-    { "source": "/businesses", "destination": "/marketplace/places", "permanent": true }
+    { "source": "/businesses", "destination": "/marketplace/places", "permanent": true },
+    { "source": "/news/:slug", "destination": "/haber/:slug", "permanent": true }
   ],
   "rewrites": [
     { "source": "/about", "destination": "/seo/about.html" },
@@ -45,6 +72,17 @@
 
     { "source": "/sitemap-listings.xml", "destination": "/api/sitemap-listings" },
     { "source": "/sitemap-hubs.xml", "destination": "/api/sitemap-hubs" },
+    { "source": "/sitemap-blog.xml", "destination": "/api/sitemap-blog" },
+    { "source": "/sitemap-news.xml", "destination": "/api/sitemap-news" },
+
+    { "source": "/haber/:slug", "destination": "/api/news?slug=:slug" },
+    { "source": "/haber", "destination": "/api/news" },
+    { "source": "/sitemap-news.xml", "destination": "/api/sitemap-news" },
+
+    { "source": "/blog/:slug", "destination": "/api/blog?slug=:slug" },
+    { "source": "/blog", "destination": "/api/blog" },
+
+    { "source": "/p/:type/:key", "destination": "/api/share?type=:type&key=:key" },
 
     { "source": "/trabzon/:p1/:p2/:p3", "destination": "/api/hub?p1=:p1&p2=:p2&p3=:p3" },
     { "source": "/trabzon/:p1/:p2", "destination": "/api/hub?p1=:p1&p2=:p2" },
@@ -182,6 +220,18 @@
     {
       "source": "/compose/(.*)",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/p/(.*)",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, follow" }]
+    },
+    {
+      "source": "/.well-known/apple-app-site-association",
+      "headers": [{ "key": "Content-Type", "value": "application/json" }]
+    },
+    {
+      "source": "/.well-known/(.*)",
+      "headers": [{ "key": "Content-Type", "value": "application/json" }]
     },
     {
       "source": "/(.*)",

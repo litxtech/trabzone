@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/utils/router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText, Badge, Button, Skeleton } from '@/components/ui';
@@ -20,14 +21,7 @@ import { PlacesPanel } from '@/features/explore/admin/PlacesPanel';
 import { useTheme } from '@/theme/ThemeProvider';
 
 type TabKey =
-  | 'overview'
-  | 'places'
-  | 'suggestions'
-  | 'claims'
-  | 'media'
-  | 'reviews'
-  | 'reports'
-  | 'categories';
+  'overview' | 'places' | 'suggestions' | 'claims' | 'media' | 'reviews' | 'reports' | 'categories';
 
 const TABS: {
   key: TabKey;
@@ -45,12 +39,29 @@ const TABS: {
   { key: 'categories', label: 'Kategoriler', icon: 'pricetags-outline', permission: 'map.manage' },
 ];
 
+/** Baloncuk rotasındaki `?tab=` değerini güvenli biçimde sekmeye çevirir. */
+function tabFromParam(value: string | string[] | undefined): TabKey | null {
+  const key = Array.isArray(value) ? value[0] : value;
+  return TABS.some((item) => item.key === key) ? (key as TabKey) : null;
+}
+
 export default function AdminExploreScreen() {
   const { theme } = useTheme();
   const router = useRouter();
   const me = useAdminMe();
   const permissions = me.data?.permissions ?? [];
-  const [tab, setTab] = useState<TabKey>('overview');
+  const params = useLocalSearchParams<{ tab?: string }>();
+  const [tab, setTab] = useState<TabKey>(() => tabFromParam(params.tab) ?? 'overview');
+
+  // Yeni içerik bildirimi baloncuğu doğrudan "Şikâyetler" sekmesini açar. URL
+  // parametresi dış kaynak olduğu için sekmeyi efekt içinde eşitliyoruz.
+  useEffect(() => {
+    const next = tabFromParam(params.tab);
+    if (next) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTab(next);
+    }
+  }, [params.tab]);
 
   const can = (permission: string) => permissions.includes(permission);
   const canView = can('map.view');
@@ -83,7 +94,10 @@ export default function AdminExploreScreen() {
               onPress={() => router.push('/admin/real-estate' as never)}
             />
           ) : null}
-          <Badge label={me.isLoading ? 'Yetki kontrolü…' : `${permissions.length} izin`} tone="primary" />
+          <Badge
+            label={me.isLoading ? 'Yetki kontrolü…' : `${permissions.length} izin`}
+            tone="primary"
+          />
         </>
       }
     >
@@ -139,7 +153,9 @@ export default function AdminExploreScreen() {
           {active?.key === 'media' ? <PlaceMediaPanel canModerate={canModerate} /> : null}
           {active?.key === 'reviews' ? <PlaceReviewsPanel canModerate={canModerate} /> : null}
           {active?.key === 'reports' ? <ExploreReportsPanel canModerate={canModerate} /> : null}
-          {active?.key === 'categories' && canManage ? <CategoriesPanel canManage={canManage} /> : null}
+          {active?.key === 'categories' && canManage ? (
+            <CategoriesPanel canManage={canManage} />
+          ) : null}
         </>
       )}
     </AdminPage>

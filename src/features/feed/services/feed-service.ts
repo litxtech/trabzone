@@ -16,6 +16,21 @@ export type PostMedia = {
   duration_ms: number | null;
 };
 
+export type PostSource = {
+  name: string;
+  username: string | null;
+  domain: string | null;
+  url: string | null;
+  logo_url: string | null;
+  verified: boolean;
+  author: string | null;
+  mode: string | null;
+  attribution: string | null;
+  license_status: string | null;
+  same_as_author: boolean;
+  published_at: string | null;
+};
+
 export type FeedPost = {
   id: string;
   author_id: string;
@@ -38,6 +53,7 @@ export type FeedPost = {
   liked: boolean;
   saved: boolean;
   is_mine: boolean;
+  source?: PostSource | null;
   media: PostMedia[];
 };
 

@@ -33,6 +33,7 @@ import {
   timeInputValue,
   toIsoFromLocal,
 } from '@/features/ride/utils/format';
+import { isIdentityVerified } from '@/features/ride/utils/identity';
 
 type StopDraft = { label: string; city: string; offset: string; isPublic: boolean };
 
@@ -113,7 +114,7 @@ export default function CreateRideOfferScreen() {
     approvedVehicles.find((vehicle) => vehicle.id === vehicleId) ?? approvedVehicles[0] ?? null;
   const totalSeats = selectedVehicle?.seat_capacity ?? 4;
   const ready =
-    profile.data?.identity_status === 'approved' && profile.data?.driver_status === 'approved';
+    isIdentityVerified(profile.data) && profile.data?.driver_status === 'approved';
 
   const resolveCoords = async () => {
     setGeoBusy(true);

@@ -9,6 +9,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { useWebMeta } from '../use-web-meta';
 import { WebFooter } from './WebFooter';
 import { WebHeader } from './WebHeader';
+import { webPageRoot } from '../page-root';
 
 const PILLARS: { icon: keyof typeof Ionicons.glyphMap; title: string; body: string }[] = [
   {
@@ -184,7 +185,7 @@ export function WebAboutPage() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { ...webPageRoot },
   flex: { flex: 1 },
   hero: { paddingVertical: 64 },
   heroInner: {

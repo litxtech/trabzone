@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
-const root = path.resolve('dist');
+const root = path.resolve(process.env.ROOT_DIR || 'dist');
 const port = Number(process.argv[2] || 4175);
 
 const routes = {

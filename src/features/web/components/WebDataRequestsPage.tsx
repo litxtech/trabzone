@@ -23,6 +23,7 @@ import { formatDateTr } from '@/utils/date';
 import { useWebMeta } from '../use-web-meta';
 import { WebFooter } from './WebFooter';
 import { WebHeader } from './WebHeader';
+import { webPageRoot } from '../page-root';
 
 const STATUS_TONE: Record<PrivacyRequestStatus, 'primary' | 'success' | 'warning' | 'danger' | 'muted'> = {
   received: 'primary',
@@ -456,7 +457,7 @@ function RequestRow({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { ...webPageRoot },
   flex: { flex: 1 },
   hero: { backgroundColor: '#07152E', paddingTop: 56, paddingBottom: 44, paddingHorizontal: 20 },
   heroInner: { width: '100%', maxWidth: 1160, alignSelf: 'center' },

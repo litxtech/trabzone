@@ -26,6 +26,7 @@ import { useAuthStore } from '@/stores/auth-store';
 import { useTheme } from '@/theme/ThemeProvider';
 
 import { AdminToastProvider } from './AdminToast';
+import { AdminAlertProvider } from './AdminAlertBubbles';
 
 type BadgeKey = NonNullable<AdminNavItem['badge']>;
 
@@ -352,377 +353,402 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
   return (
     <AdminToastProvider>
-      <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-        {isMobile ? (
+      <AdminAlertProvider>
+        <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
+          {isMobile ? (
+            <Modal
+              visible={drawerOpen}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setDrawerOpen(false)}
+            >
+              <View style={styles.modalRoot}>
+                <Pressable
+                  accessibilityLabel="Menüyü kapat"
+                  style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.overlay }]}
+                  onPress={() => setDrawerOpen(false)}
+                />
+                <View style={{ width: SIDEBAR_FULL, height: '100%' }}>{sidebar}</View>
+              </View>
+            </Modal>
+          ) : (
+            sidebar
+          )}
+
+          <View style={styles.main}>
+            <View
+              style={[
+                styles.topbar,
+                {
+                  height: 58 + (Platform.OS === 'web' ? 0 : insets.top),
+                  paddingTop: Platform.OS === 'web' ? 0 : insets.top,
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                },
+              ]}
+            >
+              <View style={styles.topbarLeft}>
+                {isMobile ? (
+                  <IconButton
+                    accessibilityLabel="Menüyü aç"
+                    name="menu"
+                    size={20}
+                    onPress={() => setDrawerOpen(true)}
+                  />
+                ) : null}
+                <View style={styles.breadcrumb}>
+                  <AppText variant="caption" color="textTertiary" numberOfLines={1}>
+                    {currentGroup?.label ?? 'Yönetim'}
+                  </AppText>
+                  <Ionicons name="chevron-forward" size={11} color={theme.colors.textTertiary} />
+                  <AppText variant="caption" numberOfLines={1} style={{ fontWeight: '700' }}>
+                    {current?.label ?? 'Genel Bakış'}
+                  </AppText>
+                </View>
+              </View>
+
+              <View style={styles.topbarRight}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Uygulamaya dön"
+                  onPress={() => {
+                    setDrawerOpen(false);
+                    router.push('/feed' as Href);
+                  }}
+                  style={({ pressed }) => [
+                    styles.appBackButton,
+                    {
+                      borderColor: theme.colors.border,
+                      backgroundColor: pressed ? theme.colors.surfaceMuted : 'transparent',
+                    },
+                  ]}
+                >
+                  <Ionicons name="arrow-back" size={13} color={theme.colors.textSecondary} />
+                  {!isMobile ? (
+                    <AppText variant="caption" color="textSecondary" style={styles.appBackLabel}>
+                      Uygulamaya dön
+                    </AppText>
+                  ) : null}
+                </Pressable>
+
+                {!isMobile ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setSearchOpen(true)}
+                    style={[
+                      styles.topSearch,
+                      {
+                        backgroundColor: theme.colors.surfaceMuted,
+                        borderColor: theme.colors.border,
+                      },
+                    ]}
+                  >
+                    <Ionicons name="search" size={14} color={theme.colors.textTertiary} />
+                    <AppText variant="caption" color="textTertiary">
+                      Hızlı arama
+                    </AppText>
+                  </Pressable>
+                ) : null}
+
+                <IconButton
+                  accessibilityLabel={scheme === 'dark' ? 'Aydınlık tema' : 'Karanlık tema'}
+                  name={scheme === 'dark' ? 'sunny-outline' : 'moon-outline'}
+                  size={17}
+                  onPress={() => setMode(scheme === 'dark' ? 'light' : 'dark')}
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Bildirim merkezi"
+                  onPress={() => setNotificationsOpen(true)}
+                  style={styles.iconWrap}
+                >
+                  <Ionicons
+                    name="notifications-outline"
+                    size={19}
+                    color={theme.colors.textSecondary}
+                  />
+                  {unread > 0 ? (
+                    <View style={[styles.badgeDot, { backgroundColor: theme.colors.danger }]}>
+                      <AppText style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>
+                        {unread > 9 ? '9+' : unread}
+                      </AppText>
+                    </View>
+                  ) : null}
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Personel menüsü"
+                  onPress={() => setProfileOpen(true)}
+                  style={[styles.profileChip, { borderColor: theme.colors.border }]}
+                >
+                  <Avatar name={me.data?.display_name ?? 'Yönetici'} size={26} />
+                  {!isMobile ? (
+                    <View style={{ maxWidth: 150 }}>
+                      <AppText variant="caption" numberOfLines={1} style={{ fontWeight: '700' }}>
+                        {me.data?.display_name ?? 'Yönetici'}
+                      </AppText>
+                      <AppText
+                        variant="caption"
+                        color="textTertiary"
+                        numberOfLines={1}
+                        style={{ fontSize: 10 }}
+                      >
+                        {(me.data?.role_names ?? me.data?.roles ?? []).join(', ') || 'Personel'}
+                      </AppText>
+                    </View>
+                  ) : null}
+                  <Ionicons name="chevron-down" size={12} color={theme.colors.textTertiary} />
+                </Pressable>
+              </View>
+            </View>
+
+            <View
+              style={[
+                styles.content,
+                {
+                  paddingBottom: Platform.OS === 'web' ? 0 : insets.bottom,
+                },
+              ]}
+            >
+              {children}
+            </View>
+          </View>
+
+          {/* Command palette */}
           <Modal
-            visible={drawerOpen}
+            visible={searchOpen}
             transparent
             animationType="fade"
-            onRequestClose={() => setDrawerOpen(false)}
+            onRequestClose={() => setSearchOpen(false)}
+          >
+            <View style={styles.modalRoot}>
+              <Pressable
+                accessibilityLabel="Aramayı kapat"
+                style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.overlay }]}
+                onPress={() => setSearchOpen(false)}
+              />
+              <View
+                style={[
+                  styles.searchPanel,
+                  {
+                    backgroundColor: theme.colors.surfaceElevated,
+                    borderColor: theme.colors.border,
+                    marginTop: Math.max(insets.top, 20),
+                  },
+                ]}
+              >
+                <View style={[styles.searchInputRow, { borderColor: theme.colors.divider }]}>
+                  <Ionicons name="search" size={17} color={theme.colors.textTertiary} />
+                  <TextInput
+                    autoFocus
+                    value={search}
+                    onChangeText={setSearch}
+                    placeholder="Sayfa, işlem veya ayar ara…"
+                    placeholderTextColor={theme.colors.textTertiary}
+                    style={[styles.searchInput, { color: theme.colors.text }]}
+                    autoCorrect={false}
+                    returnKeyType="go"
+                  />
+                  <IconButton
+                    accessibilityLabel="Aramayı kapat"
+                    name="close"
+                    size={16}
+                    onPress={() => setSearchOpen(false)}
+                  />
+                </View>
+                <ScrollView style={{ maxHeight: 380 }} keyboardShouldPersistTaps="handled">
+                  {searchResults.length === 0 ? (
+                    <View style={styles.searchEmpty}>
+                      <AppText variant="body" color="textSecondary">
+                        Sonuç bulunamadı.
+                      </AppText>
+                    </View>
+                  ) : (
+                    searchResults.map((item) => (
+                      <Pressable
+                        key={item.key}
+                        accessibilityRole="button"
+                        onPress={() => {
+                          setSearch('');
+                          navigate(item.href);
+                        }}
+                        style={({ pressed }) => [
+                          styles.searchRow,
+                          pressed ? { backgroundColor: theme.colors.primarySoft } : null,
+                        ]}
+                      >
+                        <View
+                          style={[styles.searchIcon, { backgroundColor: theme.colors.primarySoft }]}
+                        >
+                          <Ionicons name={item.icon} size={16} color={theme.colors.primaryDeep} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <AppText variant="bodyStrong">{item.label}</AppText>
+                          <AppText variant="caption" color="textTertiary" numberOfLines={1}>
+                            {item.description}
+                          </AppText>
+                        </View>
+                        <Ionicons
+                          name="return-down-back"
+                          size={13}
+                          color={theme.colors.textTertiary}
+                        />
+                      </Pressable>
+                    ))
+                  )}
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Notification center */}
+          <Modal
+            visible={notificationsOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setNotificationsOpen(false)}
+          >
+            <View style={styles.modalRoot}>
+              <Pressable
+                accessibilityLabel="Bildirimleri kapat"
+                style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.overlay }]}
+                onPress={() => setNotificationsOpen(false)}
+              />
+              <View
+                style={[
+                  styles.notificationPanel,
+                  {
+                    backgroundColor: theme.colors.surfaceElevated,
+                    borderColor: theme.colors.border,
+                    marginTop: 64,
+                  },
+                ]}
+              >
+                <View style={styles.notificationHeader}>
+                  <AppText variant="h3">Operasyon bildirimleri</AppText>
+                  <IconButton
+                    accessibilityLabel="Kapat"
+                    name="close"
+                    size={16}
+                    onPress={() => setNotificationsOpen(false)}
+                  />
+                </View>
+                {notifications.length === 0 ? (
+                  <View style={styles.notificationEmpty}>
+                    <Ionicons
+                      name="checkmark-circle-outline"
+                      size={24}
+                      color={theme.colors.success}
+                    />
+                    <AppText variant="body" color="textSecondary">
+                      Bekleyen işlem yok. Her şey güncel.
+                    </AppText>
+                  </View>
+                ) : (
+                  notifications.map((note) => {
+                    const tone =
+                      note.tone === 'danger'
+                        ? theme.colors.danger
+                        : note.tone === 'warning'
+                          ? theme.colors.warning
+                          : note.tone === 'accent'
+                            ? theme.colors.accent
+                            : theme.colors.info;
+                    return (
+                      <Pressable
+                        key={note.key}
+                        accessibilityRole="button"
+                        onPress={() => navigate(note.href)}
+                        style={({ pressed }) => [
+                          styles.notificationRow,
+                          { borderColor: theme.colors.divider },
+                          pressed ? { backgroundColor: theme.colors.surfaceMuted } : null,
+                        ]}
+                      >
+                        <View style={[styles.searchIcon, { backgroundColor: `${tone}1A` }]}>
+                          <Ionicons name={note.icon} size={17} color={tone} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <AppText variant="bodyStrong">{note.title}</AppText>
+                          <AppText variant="caption" color="textTertiary">
+                            {note.body}
+                          </AppText>
+                        </View>
+                        <Ionicons
+                          name="chevron-forward"
+                          size={14}
+                          color={theme.colors.textTertiary}
+                        />
+                      </Pressable>
+                    );
+                  })
+                )}
+              </View>
+            </View>
+          </Modal>
+
+          {/* Staff menu */}
+          <Modal
+            visible={profileOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setProfileOpen(false)}
           >
             <View style={styles.modalRoot}>
               <Pressable
                 accessibilityLabel="Menüyü kapat"
                 style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.overlay }]}
-                onPress={() => setDrawerOpen(false)}
+                onPress={() => setProfileOpen(false)}
               />
-              <View style={{ width: SIDEBAR_FULL, height: '100%' }}>{sidebar}</View>
-            </View>
-          </Modal>
-        ) : (
-          sidebar
-        )}
-
-        <View style={styles.main}>
-          <View
-            style={[
-              styles.topbar,
-              {
-                height: 58 + (Platform.OS === 'web' ? 0 : insets.top),
-                paddingTop: Platform.OS === 'web' ? 0 : insets.top,
-                backgroundColor: theme.colors.surface,
-                borderColor: theme.colors.border,
-              },
-            ]}
-          >
-            <View style={styles.topbarLeft}>
-              {isMobile ? (
-                <IconButton
-                  accessibilityLabel="Menüyü aç"
-                  name="menu"
-                  size={20}
-                  onPress={() => setDrawerOpen(true)}
-                />
-              ) : null}
-              <View style={styles.breadcrumb}>
-                <AppText variant="caption" color="textTertiary" numberOfLines={1}>
-                  {currentGroup?.label ?? 'Yönetim'}
-                </AppText>
-                <Ionicons name="chevron-forward" size={11} color={theme.colors.textTertiary} />
-                <AppText variant="caption" numberOfLines={1} style={{ fontWeight: '700' }}>
-                  {current?.label ?? 'Genel Bakış'}
-                </AppText>
-              </View>
-            </View>
-
-            <View style={styles.topbarRight}>
-              {!isMobile ? (
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => setSearchOpen(true)}
-                  style={[
-                    styles.topSearch,
-                    {
-                      backgroundColor: theme.colors.surfaceMuted,
-                      borderColor: theme.colors.border,
-                    },
-                  ]}
-                >
-                  <Ionicons name="search" size={14} color={theme.colors.textTertiary} />
-                  <AppText variant="caption" color="textTertiary">
-                    Hızlı arama
-                  </AppText>
-                </Pressable>
-              ) : null}
-
-              <IconButton
-                accessibilityLabel={scheme === 'dark' ? 'Aydınlık tema' : 'Karanlık tema'}
-                name={scheme === 'dark' ? 'sunny-outline' : 'moon-outline'}
-                size={17}
-                onPress={() => setMode(scheme === 'dark' ? 'light' : 'dark')}
-              />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Bildirim merkezi"
-                onPress={() => setNotificationsOpen(true)}
-                style={styles.iconWrap}
+              <View
+                style={[
+                  styles.profilePanel,
+                  {
+                    backgroundColor: theme.colors.surfaceElevated,
+                    borderColor: theme.colors.border,
+                  },
+                ]}
               >
-                <Ionicons
-                  name="notifications-outline"
-                  size={19}
-                  color={theme.colors.textSecondary}
-                />
-                {unread > 0 ? (
-                  <View style={[styles.badgeDot, { backgroundColor: theme.colors.danger }]}>
-                    <AppText style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>
-                      {unread > 9 ? '9+' : unread}
-                    </AppText>
-                  </View>
-                ) : null}
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Personel menüsü"
-                onPress={() => setProfileOpen(true)}
-                style={[styles.profileChip, { borderColor: theme.colors.border }]}
-              >
-                <Avatar name={me.data?.display_name ?? 'Yönetici'} size={26} />
-                {!isMobile ? (
-                  <View style={{ maxWidth: 150 }}>
-                    <AppText variant="caption" numberOfLines={1} style={{ fontWeight: '700' }}>
-                      {me.data?.display_name ?? 'Yönetici'}
-                    </AppText>
-                    <AppText
-                      variant="caption"
-                      color="textTertiary"
-                      numberOfLines={1}
-                      style={{ fontSize: 10 }}
-                    >
+                <View style={[styles.profileHead, { borderColor: theme.colors.divider }]}>
+                  <Avatar name={me.data?.display_name ?? 'Yönetici'} size={40} />
+                  <View style={{ flex: 1 }}>
+                    <AppText variant="bodyStrong">{me.data?.display_name ?? 'Yönetici'}</AppText>
+                    <AppText variant="caption" color="textTertiary">
                       {(me.data?.role_names ?? me.data?.roles ?? []).join(', ') || 'Personel'}
                     </AppText>
                   </View>
-                ) : null}
-                <Ionicons name="chevron-down" size={12} color={theme.colors.textTertiary} />
-              </Pressable>
+                </View>
+                <ProfileAction
+                  icon="shield-checkmark-outline"
+                  label="Güvenlik merkezi"
+                  onPress={() => navigate('/admin/security')}
+                />
+                <ProfileAction
+                  icon="key-outline"
+                  label="Rol ve yetkiler"
+                  onPress={() => navigate('/admin/roles')}
+                />
+                <ProfileAction
+                  icon="receipt-outline"
+                  label="İşlem geçmişim"
+                  onPress={() => navigate('/admin/audit')}
+                />
+                <View style={[styles.profileDivider, { backgroundColor: theme.colors.divider }]} />
+                <ProfileAction
+                  icon="log-out-outline"
+                  label={signingOut ? 'Çıkış yapılıyor…' : 'Güvenli çıkış'}
+                  tone="danger"
+                  onPress={() => {
+                    if (!signingOut) {
+                      void onSignOut();
+                    }
+                  }}
+                />
+              </View>
             </View>
-          </View>
-
-          <View
-            style={[
-              styles.content,
-              {
-                paddingBottom: Platform.OS === 'web' ? 0 : insets.bottom,
-              },
-            ]}
-          >
-            {children}
-          </View>
+          </Modal>
         </View>
-
-        {/* Command palette */}
-        <Modal
-          visible={searchOpen}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setSearchOpen(false)}
-        >
-          <View style={styles.modalRoot}>
-            <Pressable
-              accessibilityLabel="Aramayı kapat"
-              style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.overlay }]}
-              onPress={() => setSearchOpen(false)}
-            />
-            <View
-              style={[
-                styles.searchPanel,
-                {
-                  backgroundColor: theme.colors.surfaceElevated,
-                  borderColor: theme.colors.border,
-                  marginTop: Math.max(insets.top, 20),
-                },
-              ]}
-            >
-              <View style={[styles.searchInputRow, { borderColor: theme.colors.divider }]}>
-                <Ionicons name="search" size={17} color={theme.colors.textTertiary} />
-                <TextInput
-                  autoFocus
-                  value={search}
-                  onChangeText={setSearch}
-                  placeholder="Sayfa, işlem veya ayar ara…"
-                  placeholderTextColor={theme.colors.textTertiary}
-                  style={[styles.searchInput, { color: theme.colors.text }]}
-                  autoCorrect={false}
-                  returnKeyType="go"
-                />
-                <IconButton
-                  accessibilityLabel="Aramayı kapat"
-                  name="close"
-                  size={16}
-                  onPress={() => setSearchOpen(false)}
-                />
-              </View>
-              <ScrollView style={{ maxHeight: 380 }} keyboardShouldPersistTaps="handled">
-                {searchResults.length === 0 ? (
-                  <View style={styles.searchEmpty}>
-                    <AppText variant="body" color="textSecondary">
-                      Sonuç bulunamadı.
-                    </AppText>
-                  </View>
-                ) : (
-                  searchResults.map((item) => (
-                    <Pressable
-                      key={item.key}
-                      accessibilityRole="button"
-                      onPress={() => {
-                        setSearch('');
-                        navigate(item.href);
-                      }}
-                      style={({ pressed }) => [
-                        styles.searchRow,
-                        pressed ? { backgroundColor: theme.colors.primarySoft } : null,
-                      ]}
-                    >
-                      <View
-                        style={[styles.searchIcon, { backgroundColor: theme.colors.primarySoft }]}
-                      >
-                        <Ionicons name={item.icon} size={16} color={theme.colors.primaryDeep} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <AppText variant="bodyStrong">{item.label}</AppText>
-                        <AppText variant="caption" color="textTertiary" numberOfLines={1}>
-                          {item.description}
-                        </AppText>
-                      </View>
-                      <Ionicons
-                        name="return-down-back"
-                        size={13}
-                        color={theme.colors.textTertiary}
-                      />
-                    </Pressable>
-                  ))
-                )}
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Notification center */}
-        <Modal
-          visible={notificationsOpen}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setNotificationsOpen(false)}
-        >
-          <View style={styles.modalRoot}>
-            <Pressable
-              accessibilityLabel="Bildirimleri kapat"
-              style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.overlay }]}
-              onPress={() => setNotificationsOpen(false)}
-            />
-            <View
-              style={[
-                styles.notificationPanel,
-                {
-                  backgroundColor: theme.colors.surfaceElevated,
-                  borderColor: theme.colors.border,
-                  marginTop: 64,
-                },
-              ]}
-            >
-              <View style={styles.notificationHeader}>
-                <AppText variant="h3">Operasyon bildirimleri</AppText>
-                <IconButton
-                  accessibilityLabel="Kapat"
-                  name="close"
-                  size={16}
-                  onPress={() => setNotificationsOpen(false)}
-                />
-              </View>
-              {notifications.length === 0 ? (
-                <View style={styles.notificationEmpty}>
-                  <Ionicons
-                    name="checkmark-circle-outline"
-                    size={24}
-                    color={theme.colors.success}
-                  />
-                  <AppText variant="body" color="textSecondary">
-                    Bekleyen işlem yok. Her şey güncel.
-                  </AppText>
-                </View>
-              ) : (
-                notifications.map((note) => {
-                  const tone =
-                    note.tone === 'danger'
-                      ? theme.colors.danger
-                      : note.tone === 'warning'
-                        ? theme.colors.warning
-                        : note.tone === 'accent'
-                          ? theme.colors.accent
-                          : theme.colors.info;
-                  return (
-                    <Pressable
-                      key={note.key}
-                      accessibilityRole="button"
-                      onPress={() => navigate(note.href)}
-                      style={({ pressed }) => [
-                        styles.notificationRow,
-                        { borderColor: theme.colors.divider },
-                        pressed ? { backgroundColor: theme.colors.surfaceMuted } : null,
-                      ]}
-                    >
-                      <View style={[styles.searchIcon, { backgroundColor: `${tone}1A` }]}>
-                        <Ionicons name={note.icon} size={17} color={tone} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <AppText variant="bodyStrong">{note.title}</AppText>
-                        <AppText variant="caption" color="textTertiary">
-                          {note.body}
-                        </AppText>
-                      </View>
-                      <Ionicons
-                        name="chevron-forward"
-                        size={14}
-                        color={theme.colors.textTertiary}
-                      />
-                    </Pressable>
-                  );
-                })
-              )}
-            </View>
-          </View>
-        </Modal>
-
-        {/* Staff menu */}
-        <Modal
-          visible={profileOpen}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setProfileOpen(false)}
-        >
-          <View style={styles.modalRoot}>
-            <Pressable
-              accessibilityLabel="Menüyü kapat"
-              style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.overlay }]}
-              onPress={() => setProfileOpen(false)}
-            />
-            <View
-              style={[
-                styles.profilePanel,
-                {
-                  backgroundColor: theme.colors.surfaceElevated,
-                  borderColor: theme.colors.border,
-                },
-              ]}
-            >
-              <View style={[styles.profileHead, { borderColor: theme.colors.divider }]}>
-                <Avatar name={me.data?.display_name ?? 'Yönetici'} size={40} />
-                <View style={{ flex: 1 }}>
-                  <AppText variant="bodyStrong">{me.data?.display_name ?? 'Yönetici'}</AppText>
-                  <AppText variant="caption" color="textTertiary">
-                    {(me.data?.role_names ?? me.data?.roles ?? []).join(', ') || 'Personel'}
-                  </AppText>
-                </View>
-              </View>
-              <ProfileAction
-                icon="shield-checkmark-outline"
-                label="Güvenlik merkezi"
-                onPress={() => navigate('/admin/security')}
-              />
-              <ProfileAction
-                icon="key-outline"
-                label="Rol ve yetkiler"
-                onPress={() => navigate('/admin/roles')}
-              />
-              <ProfileAction
-                icon="receipt-outline"
-                label="İşlem geçmişim"
-                onPress={() => navigate('/admin/audit')}
-              />
-              <View style={[styles.profileDivider, { backgroundColor: theme.colors.divider }]} />
-              <ProfileAction
-                icon="log-out-outline"
-                label={signingOut ? 'Çıkış yapılıyor…' : 'Güvenli çıkış'}
-                tone="danger"
-                onPress={() => {
-                  if (!signingOut) {
-                    void onSignOut();
-                  }
-                }}
-              />
-            </View>
-          </View>
-        </Modal>
-      </View>
+      </AdminAlertProvider>
     </AdminToastProvider>
   );
 }
@@ -949,6 +975,16 @@ const styles = StyleSheet.create({
   topbarLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 },
   breadcrumb: { flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 0, flex: 1 },
   topbarRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  appBackButton: {
+    height: 26,
+    borderRadius: 7,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  appBackLabel: { fontSize: 11, fontWeight: '600' },
   topSearch: {
     height: 32,
     borderRadius: 8,

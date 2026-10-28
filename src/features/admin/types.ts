@@ -23,6 +23,43 @@ export type ShellCounts = {
   unread_notifications: number;
 };
 
+/** Panelde yeni bir işlem düştüğünde gösterilen baloncuğun kaynağı. */
+export type AdminAlertCategory =
+  | 'report'
+  | 'child_safety'
+  | 'ticket'
+  | 'approval'
+  | 'error'
+  | 'privacy'
+  | 'deletion'
+  | 'order'
+  | 'ride_verification'
+  | 'ride_safety'
+  | 'ride_dispute'
+  | 'ride_booking'
+  | 'content_report'
+  | 'custom';
+
+export type AdminAlertTone = 'info' | 'success' | 'warning' | 'danger';
+
+export type AdminAlert = {
+  id: string;
+  category: AdminAlertCategory;
+  title: string;
+  body: string | null;
+  /** Tıklanınca gidilecek mevcut uygulama rotası. */
+  route: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  tone: AdminAlertTone;
+  created_at: string;
+};
+
+export type AdminAlertFeed = {
+  items: AdminAlert[];
+  unread: number;
+};
+
 export type Paged<T> = {
   items: T[];
   total: number;
@@ -305,13 +342,7 @@ export type ContentComment = {
 
 export type ContentKind = 'post' | 'reel' | 'story' | 'comment';
 export type ContentAction =
-  | 'hide'
-  | 'restore'
-  | 'remove'
-  | 'lock_comments'
-  | 'unlock_comments'
-  | 'feature'
-  | 'unfeature';
+  'hide' | 'restore' | 'remove' | 'lock_comments' | 'unlock_comments' | 'feature' | 'unfeature';
 
 export type MarketplaceOverview = {
   listings: {
@@ -389,8 +420,20 @@ export type AdminOrderDetail = {
     note: string | null;
     created_at: string;
     updated_at: string;
-    buyer: { id: string; username: string; display_name: string; avatar_path: string | null; email: string };
-    seller: { id: string; username: string; display_name: string; avatar_path: string | null; email: string };
+    buyer: {
+      id: string;
+      username: string;
+      display_name: string;
+      avatar_path: string | null;
+      email: string;
+    };
+    seller: {
+      id: string;
+      username: string;
+      display_name: string;
+      avatar_path: string | null;
+      email: string;
+    };
   };
   items: {
     id: string;

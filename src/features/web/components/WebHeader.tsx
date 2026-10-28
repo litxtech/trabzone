@@ -21,6 +21,7 @@ import { AppText, Logo, Wordmark } from '@/components/ui';
 import { useReduceMotion } from '@/perf/use-reduce-motion';
 import { useAuthStatus } from '@/stores/auth-store';
 import { useTheme } from '@/theme/ThemeProvider';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { flatStyle } from '../link-style';
 
@@ -30,6 +31,7 @@ const NAV_ITEMS = [
   { label: 'Reels', href: '/#reels' },
   { label: 'Marketplace', href: '/#marketplace' },
   { label: 'Harita', href: '/#harita' },
+  { label: 'Blog', href: '/blog' },
   { label: 'Hakkımızda', href: '/about' },
   { label: 'Destek', href: '/support' },
 ] as const;
@@ -93,6 +95,9 @@ export function WebHeader() {
   const authStatus = useAuthStatus();
   const { theme, scheme, setMode } = useTheme();
   const reduceMotion = useReduceMotion();
+  // Çentikli telefonlarda / ana ekrana eklenmiş (standalone) web uygulamasında
+  // menü durum çubuğunun altına girmesin.
+  const insets = useSafeAreaInsets();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
@@ -139,7 +144,10 @@ export function WebHeader() {
 
   return (
     <>
-      <View style={styles.headerWrap} pointerEvents="box-none">
+      <View
+        style={[styles.headerWrap, insets.top > 0 ? { paddingTop: insets.top } : null]}
+        pointerEvents="box-none"
+      >
         <View style={[styles.header, desktop ? styles.headerDesktop : styles.headerMobile]}>
           <Link href={'/' as Href} asChild style={linkStyle(styles.brand)}>
             <Pressable accessibilityRole="link" accessibilityLabel="Trabzone ana sayfa" style={styles.brand}>

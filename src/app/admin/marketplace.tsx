@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useMemo, useState } from 'react';
+import { useLocalSearchParams } from 'expo-router';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -54,6 +55,14 @@ import { useDebouncedValue } from '@/hooks/use-debounced-value';
 
 type TabKey = 'overview' | 'categories' | 'listings' | 'analytics' | 'orders';
 type ModerationAction = 'approve' | 'reject' | 'remove' | 'restore' | 'expire';
+
+const MARKET_TABS: TabKey[] = ['overview', 'categories', 'listings', 'analytics', 'orders'];
+
+/** Baloncuk rotasındaki `?tab=` değerini güvenli biçimde sekmeye çevirir. */
+function tabFromParam(value: string | string[] | undefined): TabKey | null {
+  const key = Array.isArray(value) ? value[0] : value;
+  return MARKET_TABS.includes(key as TabKey) ? (key as TabKey) : null;
+}
 
 const LISTING_STATUS_LABELS: Record<string, string> = {
   draft: 'Taslak',
@@ -119,8 +128,19 @@ export default function AdminMarketplaceScreen() {
   const { theme } = useTheme();
   const router = useRouter();
   const { data: staff, isLoading: staffLoading } = useStaffInfo();
-  const [tab, setTab] = useState<TabKey>('overview');
+  const params = useLocalSearchParams<{ tab?: string }>();
+  const [tab, setTab] = useState<TabKey>(() => tabFromParam(params.tab) ?? 'overview');
 
+  // Baloncuk bildirimi doğrudan ilgili sekmeye indirir; panel açıkken yeni bir
+  // bildirim gelirse de aynı sekme güncellenir. URL parametresi dış kaynak
+  // olduğu için sekmeyi efekt içinde eşitliyoruz.
+  useEffect(() => {
+    const next = tabFromParam(params.tab);
+    if (next) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTab(next);
+    }
+  }, [params.tab]);
   const permissions = staff?.permissions ?? [];
   const canManage = permissions.includes('market.manage');
   const canViewOrders = canManage || permissions.includes('market.orders.view');

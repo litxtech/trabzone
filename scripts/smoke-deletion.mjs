@@ -192,6 +192,47 @@ const main = async () => {
     JSON.stringify(mediaPaths.data),
   );
 
+  // Preflight: yanlış şifreyle hiçbir şey silinmemeli (medya kaybı olmadan).
+  const preflightBad = await rpc(tokens.leaver, 'account_deletion_preflight', {
+    p_confirm: username,
+    p_password: 'not-the-password',
+  });
+  check(
+    'preflight rejects a wrong password',
+    !preflightBad.ok && preflightBad.text.includes('invalid_password'),
+    `status ${preflightBad.status}`,
+  );
+
+  const mediaStillThere = await runSql(
+    `select count(*)::int as n from storage.objects where owner = '${ids.leaver}';`,
+  );
+  check('failed preflight keeps the media', mediaStillThere[0]?.n === 1);
+
+  const preflight = await rpc(tokens.leaver, 'account_deletion_preflight', {
+    p_confirm: username,
+    p_password: accounts.leaver.password,
+  });
+  check(
+    'preflight accepts valid credentials',
+    preflight.ok && preflight.data?.ok === true,
+    `status ${preflight.status}`,
+  );
+  check(
+    'preflight reports the media inventory',
+    preflight.ok &&
+      Array.isArray(preflight.data?.media?.legacy_storage) &&
+      preflight.data.media.legacy_storage.some((item) => item.path === objectPath) &&
+      Array.isArray(preflight.data?.media?.private_keys),
+    JSON.stringify(preflight.data?.media?.counts ?? null),
+  );
+
+  const inventory = await rpc(tokens.leaver, 'account_deletion_media_inventory');
+  check(
+    'media inventory is readable by the owner',
+    inventory.ok && inventory.data?.user_id === ids.leaver,
+    `status ${inventory.status}`,
+  );
+
   // Deletion must refuse while public bucket files are still present.
   const blockedByMedia = await rpc(tokens.leaver, 'account_delete_self', {
     p_confirm: username,
@@ -221,9 +262,11 @@ const main = async () => {
     `status ${badConfirm.status}`,
   );
 
-  const badPassword = await rpc(tokens.leaver, 'account_delete_self', {
+  const badPassword = await rpc(tokens.leaver, 'account_delete_self_v2', {
     p_confirm: username,
     p_password: 'not-the-password',
+    p_reason: 'smoke test',
+    p_media: null,
   });
   check(
     'wrong password is rejected',
@@ -249,11 +292,66 @@ const main = async () => {
     JSON.stringify(mediaAfterCleanup.data),
   );
 
-  // The real deletion.
-  const deleted = await rpc(tokens.leaver, 'account_delete_self', {
+  // Apple oturum jetonu: hesap silinince hem iptal edilmeli hem de kaydı
+  // cascade ile kalkmalı (App Store 5.1.1(v)).
+  const appleRevoke = await request('/functions/v1/apple-token', {
+    method: 'POST',
+    token: tokens.leaver,
+    body: { action: 'revoke' },
+  });
+  check(
+    'apple revoke function is available to the owner',
+    appleRevoke.ok && appleRevoke.data?.skipped === 'no_token',
+    appleRevoke.text.slice(0, 160),
+  );
+
+  const appleLink = await request('/functions/v1/apple-token', {
+    method: 'POST',
+    token: tokens.leaver,
+    body: { action: 'link', code: 'smoke-invalid-authorization-code' },
+  });
+  check(
+    'apple link does not break sign-in with an invalid code',
+    appleLink.status < 500 && appleLink.data?.linked !== true,
+    appleLink.text.slice(0, 160),
+  );
+
+  await runSql(
+    `insert into public.apple_auth_tokens (user_id, refresh_token, client_id)
+     values ('${ids.leaver}', 'smoke-apple-refresh-token', 'com.litxtech.trabzone')
+     on conflict (user_id) do update set refresh_token = excluded.refresh_token;`,
+  );
+  const appleTokenSeeded = await runSql(
+    `select count(*)::int as n from public.apple_auth_tokens where user_id = '${ids.leaver}';`,
+  );
+  check('apple token is stored for the account', appleTokenSeeded[0]?.n === 1);
+
+  const appleSelfAllowed = await rpc(tokens.leaver, 'account_deletion_target_allowed', {
+    p_user_id: ids.leaver,
+  });
+  check('apple revoke is allowed for own account', appleSelfAllowed.data === true);
+
+  const appleOtherDenied = await rpc(tokens.friend, 'account_deletion_target_allowed', {
+    p_user_id: ids.leaver,
+  });
+  check('apple revoke is denied for another account', appleOtherDenied.data === false);
+
+  const appleTokenHidden = await request('/rest/v1/apple_auth_tokens?select=user_id', {
+    token: tokens.leaver,
+  });
+  check(
+    'apple tokens are not readable with the user session',
+    !appleTokenHidden.ok || !Array.isArray(appleTokenHidden.data) || appleTokenHidden.data.length === 0,
+    `status ${appleTokenHidden.status}`,
+  );
+
+  // The real deletion (v3 also records the identity-provider cleanup report).
+  const deleted = await rpc(tokens.leaver, 'account_delete_self_v3', {
     p_confirm: username,
     p_password: accounts.leaver.password,
     p_reason: 'smoke test',
+    p_media: { verified: true, removed: 0, legacy_removed: 1, source: 'smoke' },
+    p_identity: { ok: true, revoked: true, skipped: null },
   });
   check('self deletion completes', deleted.ok && deleted.data?.status === 'completed', deleted.text.slice(0, 200));
   check('deletion returns a reference code', Boolean(deleted.data?.reference_code));
@@ -261,6 +359,37 @@ const main = async () => {
 
   const reference = deleted.data?.reference_code;
   const receipt = deleted.data?.receipt_token;
+
+  const storageStep = reference
+    ? await runSql(
+        `select detail from public.account_deletion_steps s
+           join public.account_deletion_requests r on r.id = s.request_id
+          where r.reference_code = '${reference}' and s.step_key = 'storage';`,
+      )
+    : [];
+  check(
+    'media purge report is recorded on the request',
+    Boolean(storageStep[0]?.detail?.purge?.verified),
+    JSON.stringify(storageStep[0]?.detail ?? null),
+  );
+
+  const authStep = reference
+    ? await runSql(
+        `select detail from public.account_deletion_steps s
+           join public.account_deletion_requests r on r.id = s.request_id
+          where r.reference_code = '${reference}' and s.step_key = 'auth';`,
+      )
+    : [];
+  check(
+    'apple token revocation is recorded on the request',
+    authStep[0]?.detail?.apple_token_revoked === true,
+    JSON.stringify(authStep[0]?.detail ?? null),
+  );
+
+  const appleTokenLeft = await runSql(
+    `select count(*)::int as n from public.apple_auth_tokens where user_id = '${ids.leaver}';`,
+  );
+  check('apple token is purged with the account', appleTokenLeft[0]?.n === 0);
 
   // Profile, content, conversation and storage must be gone.
   const profileLeft = await runSql(

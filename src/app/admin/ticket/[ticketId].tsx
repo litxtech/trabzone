@@ -3,7 +3,6 @@ import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import {
   ActivityIndicator,
-  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -14,6 +13,7 @@ import {
 
 import { AppText, Button, Card, IconButton } from '@/components/ui';
 import { Screen } from '@/components/ui/Screen';
+import { useDocumentViewer } from '@/features/documents/viewer';
 import { SafetyEmptyState } from '@/features/safety/components/SafetyEmptyState';
 import { SafetyHeader } from '@/features/safety/components/SafetyHeader';
 import { TicketStatusPill } from '@/features/safety/components/StatusPill';
@@ -51,6 +51,7 @@ export default function AdminTicketDetailScreen() {
   const reply = useAdminReplyTicket(ticketId);
   const update = useAdminUpdateTicket();
   const templatesQuery = useSupportTemplates();
+  const viewer = useDocumentViewer();
 
   const [draft, setDraft] = useState('');
   const [internal, setInternal] = useState(false);
@@ -101,9 +102,17 @@ export default function AdminTicketDetailScreen() {
 
   const openAttachment = async (attachment: Attachment) => {
     const url = await getAttachmentUrl('safety-support', attachment.path);
-    if (url) {
-      await Linking.openURL(url).catch(() => setError('Ek dosya açılamadı.'));
+    if (!url) {
+      setError('Ek dosya açılamadı.');
+      return;
     }
+    viewer.openDocument({
+      url,
+      name: attachment.name,
+      mime: attachment.mime,
+      title: attachment.name,
+      refresh: () => getAttachmentUrl('safety-support', attachment.path),
+    });
   };
 
   if (isLoading) {

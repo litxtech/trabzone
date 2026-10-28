@@ -6,6 +6,8 @@ import { AppText, Avatar, Card, IconButton, Screen } from '@/components/ui';
 import { useIncomingFriendRequestCount } from '@/features/profile/hooks/use-friend-requests';
 import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
+import { useRideProfile } from '@/features/ride/hooks/use-ride';
+import { isIdentityVerified } from '@/features/ride/utils/identity';
 import { SUPPORT_EMAIL } from '@/features/safety/constants';
 import { useAuthStore, useSession } from '@/stores/auth-store';
 import { useSettingsStore, type ThemeMode } from '@/stores/settings-store';
@@ -24,7 +26,9 @@ export default function SettingsScreen() {
   const signOut = useAuthStore((state) => state.signOut);
   const themeMode = useSettingsStore((state) => state.themeMode);
   const { data: profile } = useMyProfile();
+  const rideProfile = useRideProfile();
   const pendingRequests = useIncomingFriendRequestCount();
+  const identityApproved = isIdentityVerified(rideProfile.data);
 
   const fullName = profile ? `${profile.first_name} ${profile.last_name}`.trim() : 'Trabzone üyesi';
   const email = session?.user.email ?? '—';
@@ -89,9 +93,22 @@ export default function SettingsScreen() {
           />
           <Divider />
           <SettingRow
+            icon="shield-checkmark-outline"
+            label="Doğrulamalar"
+            value={identityApproved ? 'Kimlik onaylı' : 'Kimlik doğrula'}
+            onPress={() => router.push('/settings/verifications' as never)}
+          />
+          <Divider />
+          <SettingRow
             icon="lock-closed-outline"
             label="Gizlilik"
             onPress={() => router.push('/settings/privacy')}
+          />
+          <Divider />
+          <SettingRow
+            icon="ban-outline"
+            label="Engellenen kişiler"
+            onPress={() => router.push('/settings/blocked')}
           />
           <Divider />
           <SettingRow

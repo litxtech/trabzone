@@ -103,14 +103,26 @@ export async function completeRegistration(input: {
   return ok(data as Profile);
 }
 
-export async function isUsernameAvailable(username: string): Promise<boolean> {
-  const { data, error } = await supabase.rpc('is_username_available', {
-    p_username: username,
-  });
-  if (error) {
-    return false;
+export async function fetchUsernameAvailability(
+  username: string,
+  signal?: AbortSignal,
+): Promise<Result<boolean>> {
+  let request = supabase.rpc('is_username_available', { p_username: username });
+  if (signal) {
+    // Kullanıcı adı değişince eski istek iptal edilir; yanıtı boşa beklemez.
+    request = request.abortSignal(signal);
   }
-  return Boolean(data);
+  const { data, error } = await request;
+  if (error) {
+    // Ağ hatasını "alınmış" gibi göstermemek için hata ayrı döner.
+    return fail(appError('network'));
+  }
+  return ok(Boolean(data));
+}
+
+export async function isUsernameAvailable(username: string): Promise<boolean> {
+  const result = await fetchUsernameAvailability(username);
+  return result.ok ? result.data : false;
 }
 
 // -----------------------------------------------------------------------------

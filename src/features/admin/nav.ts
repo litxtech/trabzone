@@ -87,6 +87,30 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     ],
   },
   {
+    key: 'news',
+    label: 'Haber Merkezi',
+    items: [
+      {
+        key: 'ai-news',
+        label: 'AI Haber Merkezi',
+        href: '/admin/news',
+        icon: 'sparkles-outline',
+        permissions: ['news.view'],
+        description:
+          'DeepSeek araştırması, doğrulama, lisanslı görsel, otomatik yayın ve maliyet kontrolü',
+      },
+      {
+        key: 'news-api',
+        label: 'API ve Kaynak Yönetimi',
+        href: '/admin/news-api',
+        icon: 'git-network-outline',
+        permissions: ['news.view'],
+        description:
+          'RSS, Atom, XML, JSON Feed ve REST API kaynakları; alan eşleştirme, filtreler, lisans ve toplu kaldırma',
+      },
+    ],
+  },
+  {
     key: 'commerce',
     label: 'Ticaret',
     items: [
@@ -209,6 +233,14 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     label: 'Web ve Uyum',
     items: [
       {
+        key: 'blog',
+        label: 'Blog Yönetimi',
+        href: '/admin/blog',
+        icon: 'newspaper-outline',
+        permissions: ['cms.view', 'cms.manage'],
+        description: 'SEO blog yazıları, AI ile üretim, yayınlama ve sürüm geçmişi',
+      },
+      {
         key: 'website',
         label: 'Web Sitesi Yönetimi',
         href: '/admin/website',
@@ -254,6 +286,14 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     key: 'system',
     label: 'Sistem',
     items: [
+      {
+        key: 'demo',
+        label: 'Örnek Veri',
+        href: '/admin/demo',
+        icon: 'flask-outline',
+        permissions: ['demo.view'],
+        description: 'Gerçekçi örnek ilanları yükle, kaldır ve demo hesapları yönet',
+      },
       {
         key: 'settings',
         label: 'Uygulama Ayarları',

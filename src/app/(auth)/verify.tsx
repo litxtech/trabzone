@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/utils/router';
 import { useEffect, useState } from 'react';
@@ -8,7 +9,7 @@ import { AppText, Button } from '@/components/ui';
 import { AuthScreen, InlineLink } from '@/features/auth/components/AuthScreen';
 import { FormError } from '@/features/auth/components/FormError';
 import { OtpInput } from '@/features/auth/components/OtpInput';
-import { fetchMyProfile } from '@/features/profile/services/profile-service';
+import { finishSignUpFromMetadata } from '@/features/auth/signup-completion';
 import { applyWebRegistrationMetadata } from '@/features/auth/web-registration';
 import { resendSignUpOtp, verifySignUpOtp } from '@/services/supabase/auth';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -16,6 +17,7 @@ import { haptics } from '@/utils/haptics';
 
 export default function VerifyScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { theme } = useTheme();
   const params = useLocalSearchParams<{ email?: string }>();
   const email = typeof params.email === 'string' ? params.email : '';
@@ -59,15 +61,14 @@ export default function VerifyScreen() {
       return;
     }
 
-    const profile = await fetchMyProfile();
+    // Kayıt sırasında ad, soyad ve kullanıcı adı zaten alındığı için profil
+    // burada tekrar sorulmadan tamamlanır; ekran yalnızca eksik bilgi varsa
+    // (ör. sosyal giriş) gösterilir.
+    const destination = await finishSignUpFromMetadata();
     setSubmitting(false);
-
-    if (profile.ok && profile.data?.onboarding_completed) {
-      router.replace('/feed');
-      return;
-    }
     haptics.success();
-    router.replace('/complete-profile');
+    await queryClient.invalidateQueries({ queryKey: ['my-profile'] });
+    router.replace(destination);
   };
 
   const resend = async () => {

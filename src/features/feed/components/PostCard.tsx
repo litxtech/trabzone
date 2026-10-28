@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useRouter } from '@/utils/router';
-import { memo, useCallback, useState } from 'react';
-import { Alert, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { Alert, Linking, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { ActionSheet, AppImage, AppText, Avatar } from '@/components/ui';
 import { VideoThumbnail } from '@/features/media/components/VideoThumbnail';
@@ -50,6 +50,20 @@ function aspectFor(media: PostMedia) {
     return Math.min(Math.max(media.width / media.height, 0.66), 1.6);
   }
   return 1;
+}
+
+const SOURCE_LINE_RE = /^(?:🔗\s*)?(?:haber\s+)?kayna[ğg][ıi]\s*:/i;
+
+/** Gövdeden kaynak/atıf satırlarını çıkarır; kart şeridi bunları üstlenir. */
+function stripSourceLines(body: string | null): string | null {
+  if (!body) return body;
+  const kept = body
+    .split('\n')
+    .filter((line) => !SOURCE_LINE_RE.test(line.trim()) && !line.trim().startsWith('🔗'))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return kept.length > 0 ? kept : body;
 }
 
 function PostMediaBlock({
@@ -275,6 +289,20 @@ export const PostCard = memo(function PostCard({
     router.push(`/profile/${post.author_username}` as never);
   }, [post.author_username, router]);
 
+  const source = post.source ?? null;
+  const openSource = useCallback(() => {
+    if (!source?.url) return;
+    haptics.tap();
+    void Linking.openURL(source.url).catch(() => undefined);
+  }, [source]);
+
+  // Kaynak bilgisi ayrı şeritte gösterildiği için gövdedeki atıf satırları
+  // kartta tekrarlanmaz (paylaşım metni yine tam gövdeyi kullanır).
+  const bodyText = useMemo(
+    () => (source?.url ? stripSourceLines(post.body) : post.body),
+    [post.body, source?.url],
+  );
+
   const onLike = useCallback(() => {
     haptics.tap();
     onChange?.({
@@ -405,9 +433,9 @@ export const PostCard = memo(function PostCard({
         </Pressable>
       </View>
 
-      {post.body ? (
+      {bodyText ? (
         <AppText variant="body" style={styles.body}>
-          {post.body}
+          {bodyText}
           {post.is_edited ? (
             <AppText variant="caption" color="textTertiary">
               {'  '}(düzenlendi)
@@ -424,6 +452,55 @@ export const PostCard = memo(function PostCard({
           setViewerOpen(true);
         }}
       />
+
+      {source?.url ? (
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={`${source.name} — orijinal haberi tarayıcıda aç`}
+          onPress={openSource}
+          style={({ pressed }) => [
+            styles.sourceCard,
+            {
+              borderColor: theme.colors.border,
+              backgroundColor: theme.colors.surfaceMuted,
+              opacity: pressed ? 0.72 : 1,
+            },
+          ]}
+        >
+          {source.logo_url ? (
+            <AppImage
+              source={{ uri: source.logo_url }}
+              style={styles.sourceLogo}
+              contentFit="contain"
+              recycleKey={`src-${post.id}`}
+            />
+          ) : (
+            <View style={[styles.sourceLogo, styles.sourceLogoFallback, { borderColor: theme.colors.border }]}>
+              <AppText variant="caption" color="textSecondary" numberOfLines={1}>
+                {(source.name || '?').trim().charAt(0).toUpperCase()}
+              </AppText>
+            </View>
+          )}
+          <View style={styles.sourceText}>
+            <View style={styles.sourceNameRow}>
+              <AppText variant="bodyStrong" numberOfLines={1} style={styles.sourceName}>
+                {source.name}
+              </AppText>
+              {source.verified ? (
+                <Ionicons name="checkmark-circle" size={13} color={theme.colors.primary} />
+              ) : null}
+            </View>
+            <AppText variant="caption" color="textTertiary" numberOfLines={1}>
+              {source.author
+                ? `Haber: ${source.author}`
+                : source.domain
+                  ? `${source.domain} · orijinal habere git`
+                  : 'Orijinal habere git'}
+            </AppText>
+          </View>
+          <Ionicons name="open-outline" size={16} color={theme.colors.textTertiary} />
+        </Pressable>
+      ) : null}
 
       <View style={styles.actions}>
         <ActionButton
@@ -569,6 +646,24 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(9,14,28,0.55)',
   },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 18, paddingTop: 2 },
+  sourceCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  sourceLogo: { width: 30, height: 30, borderRadius: 8, backgroundColor: '#FFFFFF' },
+  sourceLogoFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  sourceText: { flex: 1, gap: 1 },
+  sourceNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  sourceName: { flexShrink: 1 },
   action: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 32 },
   actionSpacer: { flex: 1 },
 });

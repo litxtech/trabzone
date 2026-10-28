@@ -15,6 +15,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { useWebMeta } from '../use-web-meta';
 import { WebFooter } from './WebFooter';
 import { WebHeader } from './WebHeader';
+import { webPageRoot } from '../page-root';
 
 type WebCategory = {
   key: string;
@@ -503,7 +504,7 @@ export function WebSupportPage() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { ...webPageRoot },
   flex: { flex: 1 },
   hero: { backgroundColor: '#07152E', paddingTop: 58, paddingBottom: 48, paddingHorizontal: 20 },
   heroInner: { width: '100%', maxWidth: 1160, alignSelf: 'center' },

@@ -6,7 +6,6 @@ import {
   Image,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   useWindowDimensions,
   View,
@@ -28,8 +27,10 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { useWebMeta } from '../use-web-meta';
 import { webPhotos } from '../assets';
 import { HomeListings } from './HomeListings';
+import { webPageRoot } from '../page-root';
 import { WebFooter } from './WebFooter';
 import { WebHeader } from './WebHeader';
+import { WebPageScroll } from './WebPageScroll';
 import {
   ChatPhone,
   FeedPhone,
@@ -267,10 +268,7 @@ export function LandingPage() {
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
       <WebHeader />
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
+      <WebPageScroll contentContainerStyle={styles.scrollContent}>
         {/* HERO */}
         <View nativeID="top" style={styles.hero}>
           <Image
@@ -705,13 +703,13 @@ export function LandingPage() {
         </View>
 
         <WebFooter />
-      </ScrollView>
+      </WebPageScroll>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { ...webPageRoot },
   scrollContent: { flexGrow: 1 },
   flex: { flex: 1 },
 

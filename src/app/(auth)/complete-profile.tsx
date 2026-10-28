@@ -2,17 +2,24 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from '@/utils/router';
 import { useEffect, useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { Controller, useForm, useWatch } from 'react-hook-form';
 import { StyleSheet, View } from 'react-native';
 
 import { AppText, Button, Skeleton, TextField } from '@/components/ui';
 import { AuthScreen } from '@/features/auth/components/AuthScreen';
 import { FormError } from '@/features/auth/components/FormError';
+import { UsernameStatusIcon } from '@/features/auth/components/UsernameStatusIcon';
+import {
+  USERNAME_HINT,
+  USERNAME_HINT_TONE,
+  ensureUsernameAvailable,
+  useUsernameAvailability,
+} from '@/features/auth/hooks/use-username-availability';
 import {
   completeProfileSchema,
   type CompleteProfileValues,
 } from '@/features/auth/validators';
-import { completeRegistration, fetchMyProfile, isUsernameAvailable } from '@/features/profile/services/profile-service';
+import { completeRegistration, fetchMyProfile } from '@/features/profile/services/profile-service';
 import { fetchPendingAcceptances } from '@/features/legal/services/legal-service';
 import { getSignUpMetadata } from '@/services/supabase/auth';
 import { haptics } from '@/utils/haptics';
@@ -22,6 +29,8 @@ export default function CompleteProfileScreen() {
   const queryClient = useQueryClient();
   const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Profilde kayıtlı ad: kendi kullanıcı adı "alınmış" görünmemeli.
+  const [savedUsername, setSavedUsername] = useState<string | null>(null);
 
   const { control, handleSubmit, reset, formState } = useForm<CompleteProfileValues>({
     resolver: zodResolver(completeProfileSchema),
@@ -53,6 +62,7 @@ export default function CompleteProfileScreen() {
         (profile?.last_name && profile.last_name !== 'Üyesi' ? profile.last_name : '');
 
       reset({ username, firstName, lastName });
+      setSavedUsername(profile?.username ?? null);
       setLoading(false);
     });
 
@@ -61,14 +71,33 @@ export default function CompleteProfileScreen() {
     };
   }, [reset, router]);
 
+  const usernameValue = useWatch({ control, name: 'username' });
+  const usernameCheck = useUsernameAvailability(usernameValue, { ownUsername: savedUsername });
+  const usernameState = usernameCheck.state;
+
   const onSubmit = handleSubmit(async (values) => {
     setFormError(null);
 
-    const available = await isUsernameAvailable(values.username);
-    if (!available) {
+    if (usernameState === 'taken' || usernameState === 'reserved') {
       haptics.error();
-      setFormError('Bu kullanıcı adı alınmış. Başka bir tane dene.');
+      setFormError(USERNAME_HINT[usernameState]);
       return;
+    }
+
+    if (usernameState !== 'available') {
+      const normalized = values.username.trim().toLowerCase();
+      const isOwnUsername =
+        Boolean(savedUsername) && normalized === (savedUsername ?? '').trim().toLowerCase();
+      // Profilde zaten kayıtlı olan ad "alınmış" sayılmaz; aksi halde kullanıcı
+      // kendi adıyla formu hiç gönderemiyordu.
+      if (!isOwnUsername) {
+        const check = await ensureUsernameAvailable(values.username);
+        if (check === 'taken') {
+          haptics.error();
+          setFormError(USERNAME_HINT.taken);
+          return;
+        }
+      }
     }
 
     const result = await completeRegistration(values);
@@ -156,7 +185,9 @@ export default function CompleteProfileScreen() {
               onChangeText={(text) => field.onChange(text.toLowerCase())}
               onBlur={field.onBlur}
               error={fieldState.error?.message}
-              hint="3-24 karakter; küçük harf, rakam, nokta ve alt çizgi"
+              hint={USERNAME_HINT[usernameState]}
+              hintTone={USERNAME_HINT_TONE[usernameState]}
+              rightSlot={<UsernameStatusIcon state={usernameState} />}
             />
           )}
         />
