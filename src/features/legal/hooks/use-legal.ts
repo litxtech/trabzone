@@ -57,6 +57,11 @@ export function useLegalDocuments(locale: LegalLocale = 'tr') {
  * Yayınlanmış sözleşmeler değiştiğinde açık oturumları anında tazeler.
  * Yönetim panelinden yapılan her yayın/geri alma/düzenleme, sayfa
  * yenilenmeden siteye ve uygulamaya yansır.
+ *
+ * İki kanal birlikte kullanılır:
+ *  - `legal-policies` broadcast: RLS'in gizlediği silme/geri alma olayları
+ *    dahil her değişikliği iletir (0083 tetikleyicisi).
+ *  - `postgres_changes`: değişen satır içeriğini yetkili oturumlara iletir.
  */
 export function useLegalRealtime(enabled = true) {
   const queryClient = useQueryClient();
@@ -65,15 +70,17 @@ export function useLegalRealtime(enabled = true) {
     if (!enabled) {
       return;
     }
+    const refresh = () => {
+      void queryClient.invalidateQueries({ queryKey: ['legal'] });
+      void queryClient.invalidateQueries({ queryKey: ['safety'] });
+    };
     const channel = supabase
-      .channel('legal-policy-versions')
+      .channel('legal-policies')
+      .on('broadcast', { event: 'legal_changed' }, refresh)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'safety_policy_versions' },
-        () => {
-          void queryClient.invalidateQueries({ queryKey: ['legal'] });
-          void queryClient.invalidateQueries({ queryKey: ['safety'] });
-        },
+        refresh,
       )
       .subscribe();
 
