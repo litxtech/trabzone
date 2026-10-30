@@ -1,14 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import { usePreventRemove } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useRouter } from '@/utils/router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { AppText, Button, Screen, ScreenHeader } from '@/components/ui';
 import { pickMedia, type PickedAsset } from '@/features/media/media-picker';
 import { uploadMedia } from '@/features/media/media-service';
-import { prepareVideoForUpload } from '@/features/media/video-service';
+import { cancelVideoPreparation, prepareVideoForUpload } from '@/features/media/video-service';
 import { useCreateStory } from '@/features/feed/hooks/use-stories';
 import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -43,12 +44,82 @@ export default function ComposeStoryScreen() {
   const [status, setStatus] = useState<string | null>(null);
   /** Seçim anında başlayan arka plan sıkıştırmasının ilerlemesi (0..1). */
   const [prepRatio, setPrepRatio] = useState(0);
+  /** Süren yayının iptal anahtarı. */
+  const storyAbort = useRef<AbortController | null>(null);
+  /** Çıkış niyeti: engel kalktıktan sonra gerçek navigasyon effect'te yapılır. */
+  const [leaving, setLeaving] = useState(false);
+
+  useEffect(() => {
+    if (!leaving) {
+      return;
+    }
+    // Doğrudan bağlantıyla gelindiğinde geri gidilecek ekran olmayabilir.
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/feed' as never);
+    }
+  }, [leaving, router]);
+
+  const hasChanges = asset !== null || caption.trim().length > 0;
+
+  usePreventRemove(hasChanges && !leaving, ({ data }) => {
+    if (busy) {
+      Alert.alert('Hikâye yayınlanıyor', 'Yükleme tamamlanana kadar ekrandan ayrılamazsın.');
+      return;
+    }
+    Alert.alert('Hikâyeden vazgeçilsin mi?', 'Seçtiğin medya ve açıklama kaldırılacak.', [
+      { text: 'Devam et', style: 'cancel' },
+      {
+        text: 'Vazgeç',
+        style: 'destructive',
+        onPress: () => {
+          if (asset?.mediaType === 'video') {
+            // Arka planda süren sıkıştırma boşa çalışmasın.
+            cancelVideoPreparation(asset.uri);
+          }
+          // Engel durumu render sonrası kalktığı için çıkış effect'e bırakılır;
+          // aksi halde aynı karede gönderilen geri hareketi yeniden engellenir.
+          setLeaving(true);
+        },
+      },
+    ]);
+  });
+
+  const requestCancel = useCallback(() => {
+    if (busy) {
+      Alert.alert('Hikâye yayınlanıyor', 'Yükleme tamamlanana kadar ekrandan ayrılamazsın.');
+      return;
+    }
+    if (!hasChanges) {
+      setLeaving(true);
+      return;
+    }
+    Alert.alert('Hikâyeden vazgeçilsin mi?', 'Seçtiğin medya ve açıklama kaldırılacak.', [
+      { text: 'Devam et', style: 'cancel' },
+      {
+        text: 'Vazgeç',
+        style: 'destructive',
+        onPress: () => {
+          if (asset?.mediaType === 'video') {
+            cancelVideoPreparation(asset.uri);
+          }
+          setLeaving(true);
+        },
+      },
+    ]);
+  }, [asset, busy, hasChanges]);
+
 
   const pick = useCallback(async (source: 'library' | 'camera') => {
     const picked = await pickMedia({ source, kind: source === 'camera' ? 'image' : 'all' });
     const first = picked?.[0];
     if (!first) {
       return;
+    }
+    // Önceki video hâlâ hazırlanıyorsa boşa çalışmasın.
+    if (asset && asset.mediaType === 'video' && asset.uri !== first.uri) {
+      cancelVideoPreparation(asset.uri);
     }
     setAsset(first);
     setPrepRatio(0);
@@ -65,7 +136,7 @@ export default function ComposeStoryScreen() {
         { onProgress: setPrepRatio },
       ).catch(() => undefined);
     }
-  }, []);
+  }, [asset]);
 
   const publish = useCallback(async () => {
     if (!asset || !profile?.id) {
@@ -74,6 +145,8 @@ export default function ComposeStoryScreen() {
 
     setBusy(true);
     setStatus('Hikâye hazırlanıyor');
+    const controller = new AbortController();
+    storyAbort.current = controller;
     try {
       const uploaded = await uploadMedia({
         bucket: 'stories',
@@ -86,8 +159,9 @@ export default function ComposeStoryScreen() {
         durationMs: asset.durationMs,
         fileSize: asset.fileSize,
         compressImages: true,
+        signal: controller.signal,
         onProgress: (phase, ratio) => {
-          if (asset.mediaType !== 'video') {
+          if (asset.mediaType !== 'video' || controller.signal.aborted) {
             return;
           }
           setStatus(
@@ -99,7 +173,12 @@ export default function ComposeStoryScreen() {
       });
 
       if (!uploaded.ok) {
-        Alert.alert('Yüklenemedi', uploaded.error.message);
+        if (uploaded.error.code !== 'cancelled') {
+          Alert.alert('Yüklenemedi', uploaded.error.message);
+        }
+        return;
+      }
+      if (controller.signal.aborted) {
         return;
       }
 
@@ -115,25 +194,45 @@ export default function ComposeStoryScreen() {
             haptics.success();
             setAsset(null);
             setCaption('');
-            router.back();
+            setLeaving(true);
           },
           onError: (error) => Alert.alert('Paylaşılamadı', toMessage(error)),
         },
       );
     } catch (error) {
-      Alert.alert('Paylaşılamadı', toMessage(error));
+      if (!controller.signal.aborted) {
+        Alert.alert('Paylaşılamadı', toMessage(error));
+      }
     } finally {
-      setBusy(false);
-      setStatus(null);
+      if (storyAbort.current === controller) {
+        storyAbort.current = null;
+        setBusy(false);
+        setStatus(null);
+      }
     }
-  }, [asset, caption, createStory, profile, router]);
+  }, [asset, caption, createStory, profile]);
 
   return (
     <Screen edges={['top', 'left', 'right', 'bottom']} scroll keyboardAware>
       <ScreenHeader
         title="Hikâye oluştur"
         subtitle="24 saat sonra kaybolur"
-        onBack={() => router.back()}
+        left={
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Hikâyeden vazgeç"
+            disabled={busy}
+            onPress={requestCancel}
+            style={({ pressed }) => [
+              styles.cancel,
+              { opacity: busy ? 0.4 : pressed ? 0.6 : 1 },
+            ]}
+          >
+            <AppText variant="label" color="textSecondary">
+              İptal
+            </AppText>
+          </Pressable>
+        }
         right={
           <Pressable
             accessibilityRole="button"
@@ -169,7 +268,13 @@ export default function ComposeStoryScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Medyayı kaldır"
-            onPress={() => setAsset(null)}
+            onPress={() => {
+              if (asset.mediaType === 'video') {
+                cancelVideoPreparation(asset.uri);
+              }
+              setAsset(null);
+              setPrepRatio(0);
+            }}
             style={styles.remove}
           >
             <Ionicons name="close" size={16} color="#FFFFFF" />
@@ -264,9 +369,33 @@ export default function ComposeStoryScreen() {
       {status ? (
         <View style={[styles.status, { backgroundColor: theme.colors.primarySoft }]}>
           <ActivityIndicator size="small" color={theme.colors.primaryDeep} />
-          <AppText variant="caption" color="primaryDeep">
+          <AppText variant="caption" color="primaryDeep" style={styles.statusText}>
             {status}
           </AppText>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Yayını iptal et"
+            hitSlop={8}
+            onPress={() => {
+              storyAbort.current?.abort();
+              if (asset?.mediaType === 'video') {
+                cancelVideoPreparation(asset.uri);
+              }
+            }}
+            style={({ pressed }) => [
+              styles.statusCancel,
+              {
+                backgroundColor: theme.colors.surface,
+                borderColor: theme.colors.primary,
+                opacity: pressed ? 0.7 : 1,
+              },
+            ]}
+          >
+            <Ionicons name="close" size={12} color={theme.colors.primaryDeep} />
+            <AppText variant="caption" color="primaryDeep">
+              İptal
+            </AppText>
+          </Pressable>
         </View>
       ) : null}
 
@@ -287,6 +416,12 @@ export default function ComposeStoryScreen() {
 }
 
 const styles = StyleSheet.create({
+  cancel: {
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingRight: 4,
+  },
   publish: {
     paddingHorizontal: 16,
     paddingVertical: 9,
@@ -367,6 +502,17 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 14,
     marginTop: 14,
+  },
+  statusText: { flex: 1 },
+  statusCancel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    minHeight: 26,
   },
   submit: { marginTop: 20 },
   note: { marginTop: 12, paddingBottom: 10 },

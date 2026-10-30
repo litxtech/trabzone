@@ -20,8 +20,6 @@ import {
   Skeleton,
   TextField,
 } from '@/components/ui';
-import { useDrawer } from '@/features/navigation/drawer-context';
-import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { NewChatSheet } from '@/features/messaging/components/NewChatSheet';
 import {
@@ -41,11 +39,9 @@ import { haptics } from '@/utils/haptics';
 export default function MessagesScreen() {
   const { theme } = useTheme();
   const router = useRouter();
-  const { open: openDrawer } = useDrawer();
   const session = useSession();
   const myId = session?.user?.id ?? null;
 
-  const { data: profile } = useMyProfile();
   const conversations = useConversations();
   // Gönderilmemiş taslaklar listede "Taslak: ..." olarak görünür.
   const drafts = useChatDrafts();
@@ -309,11 +305,10 @@ export default function MessagesScreen() {
     <Screen edges={['top', 'left', 'right']} padded={false}>
       <View style={styles.header}>
         <IconButton
-          name="menu"
-          accessibilityLabel="Menüyü aç"
-          variant="surface"
-          size={20}
-          onPress={() => openDrawer('main')}
+          name="chevron-back"
+          accessibilityLabel="Geri"
+          size={22}
+          onPress={() => router.back()}
         />
 
         <View style={styles.headerTitles}>
@@ -328,18 +323,12 @@ export default function MessagesScreen() {
         </View>
 
         <View style={styles.headerActions}>
-          <IconButton
-            name="people-outline"
-            accessibilityLabel="Yeni grup oluştur"
-            variant="surface"
-            size={19}
-            onPress={() => openComposer('group')}
-          />
+          {/* Yeni sohbet ekranindaki mod secici grup olusturmayi da kapsar;
+              bu yuzden tek aksiyon yeterli. */}
           <IconButton
             name="create-outline"
             accessibilityLabel="Yeni sohbet başlat"
-            variant="surface"
-            size={20}
+            size={22}
             onPress={() => openComposer('direct')}
           />
         </View>
@@ -383,27 +372,6 @@ export default function MessagesScreen() {
             tintColor={theme.colors.primary}
             colors={[theme.colors.primary]}
           />
-        }
-        ListHeaderComponent={
-          items.length > 0 ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Profilime git"
-              onPress={() => router.navigate('/profile')}
-              style={({ pressed }) => [styles.selfRow, { opacity: pressed ? 0.7 : 1 }]}
-            >
-              <Avatar
-                uri={mediaPublicUrl('avatar', profile?.avatar_path)}
-                name={profile ? `${profile.first_name} ${profile.last_name}` : undefined}
-                size={38}
-                recycleKey={profile?.id ?? 'self'}
-              />
-              <AppText variant="caption" color="textTertiary" style={styles.flex}>
-                Profilim · @{profile?.username ?? 'sen'}
-              </AppText>
-              <Ionicons name="chevron-forward" size={15} color={theme.colors.textTertiary} />
-            </Pressable>
-          ) : null
         }
         ListFooterComponent={
           items.length > 0 ? (
@@ -565,14 +533,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   unreadText: { fontSize: 10.5, lineHeight: 14 },
-  selfRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    marginBottom: 4,
-  },
   skeletons: { paddingHorizontal: 8, paddingTop: 8, gap: 16 },
   skeletonRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   skeletonText: { flex: 1, gap: 7 },

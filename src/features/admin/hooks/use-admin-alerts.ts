@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 
 import { supabase } from '@/services/supabase/client';
+import { postgresChannel } from '@/services/supabase/realtime';
 import { unwrap } from '@/utils/result';
 
 import {
@@ -44,8 +45,7 @@ export function useAdminAlerts(enabled: boolean) {
       void queryClient.invalidateQueries({ queryKey: adminKeys.shell });
     };
 
-    const channel = supabase
-      .channel('admin-alerts')
+    const channel = postgresChannel('admin-alerts')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'admin_alert_events' },

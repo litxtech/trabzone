@@ -36,10 +36,13 @@ export type SignUpPayload = {
   firstName: string;
   lastName: string;
   username: string;
-  /** Web kayıt formunda toplanan beyanlar; doğrulama sonrası uygulanır. */
+  /** Kayıt formunda toplanan beyanlar; doğrulama sonrası uygulanır. */
   birthDate?: string | null;
+  /**
+   * Kayıt ekranındaki tek onay kutusu. `true` ise yayındaki tüm sözleşme ve
+   * politikalar kabul edilmiş sayılır ve her belge için kabul kaydı yazılır.
+   */
   acceptedTerms?: boolean;
-  acceptedGuidelines?: boolean;
   marketingOptIn?: boolean;
   analyticsOptIn?: boolean;
 };
@@ -55,7 +58,6 @@ export async function signUpWithPassword(payload: SignUpPayload): Promise<Result
         username: payload.username.trim().toLowerCase(),
         ...(payload.birthDate ? { birth_date: payload.birthDate } : {}),
         ...(payload.acceptedTerms ? { accepted_terms: true } : {}),
-        ...(payload.acceptedGuidelines ? { accepted_guidelines: true } : {}),
         ...(payload.marketingOptIn ? { marketing_opt_in: true } : {}),
         ...(payload.analyticsOptIn ? { analytics_opt_in: true } : {}),
       },

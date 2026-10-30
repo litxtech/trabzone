@@ -1,12 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from '@/utils/router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { AppText } from '@/components/ui';
-import { env } from '@/config/env';
 import { finishSignUpFromMetadata } from '@/features/auth/signup-completion';
+import { socialAvailability } from '@/features/auth/social-availability';
 import { fetchPendingAcceptances } from '@/features/legal/services/legal-service';
 import { fetchMyProfile } from '@/features/profile/services/profile-service';
 import {
@@ -106,17 +106,15 @@ export function SocialAuthButtons({ onError, showInlineError = true }: Props) {
   // Apple native oturumu iOS'a özeldir; Google native girişi istemci kimliği
   // tanımlıysa çalışır. Aksi halde kullanıcıyı tarayıcıya göndermek yerine
   // buton hiç gösterilmez.
-  const canUseApple = env.enableSocialAuth && Platform.OS === 'ios';
-  const canUseGoogle =
-    env.enableSocialAuth && Platform.OS !== 'web' && Boolean(env.googleWebClientId);
+  const availability = socialAvailability();
 
-  if (!canUseApple && !canUseGoogle) {
+  if (!availability.any) {
     return null;
   }
 
   return (
     <View style={styles.wrap}>
-      {canUseApple ? (
+      {availability.apple ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Apple ile devam et"
@@ -143,7 +141,7 @@ export function SocialAuthButtons({ onError, showInlineError = true }: Props) {
         </Pressable>
       ) : null}
 
-      {canUseGoogle ? (
+      {availability.google ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Google ile devam et"

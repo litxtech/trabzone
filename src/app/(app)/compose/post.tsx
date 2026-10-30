@@ -1,10 +1,18 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, usePreventRemove } from 'expo-router';
 import { useRouter } from '@/utils/router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 
 import { AppText, Avatar, Button, Screen, ScreenHeader } from '@/components/ui';
 import { SelectSheet } from '@/components/ui/SelectSheet';
@@ -17,6 +25,7 @@ import {
   type UploadedMedia,
 } from '@/features/media/media-service';
 import {
+  cancelVideoPreparation,
   formatVideoSize,
   generateVideoPoster,
   prepareVideoForUpload,
@@ -24,11 +33,16 @@ import {
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { useCreatePost, usePost, useUpdatePost } from '@/features/feed/hooks/use-feed';
 import type { FeedPost, PostVisibility } from '@/features/feed/services/feed-service';
+import { useDeferredExit } from '@/hooks/use-deferred-exit';
+import { useMeasuredWidth } from '@/hooks/use-measured-width';
+import { useSafetyState } from '@/features/safety/hooks/use-safety';
 import { PlaceTagPicker, PlaceTagRow } from '@/features/explore/components/PlaceTagPicker';
 import { linkPlaceContent } from '@/features/explore/services/explore-service';
 import type { ExploreSearchItem } from '@/features/explore/types';
 import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
 import { PROVINCES } from '@/features/profile/constants/regions';
+import { attachFanMedia } from '@/features/sports/services/sports-service';
+import type { FanCategory } from '@/features/sports/types';
 import { useTheme } from '@/theme/ThemeProvider';
 import { toMessage } from '@/utils/error-message';
 import { haptics } from '@/utils/haptics';
@@ -66,7 +80,16 @@ type DraftPayload = {
   mediaType: 'image' | 'video';
   mimeType: string | null;
   fileName: string | null;
+  durationMs?: number | null;
+  width?: number | null;
+  height?: number | null;
+  fileSize?: number | null;
 };
+
+function finiteOrNull(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
 
 /** "+" menüsünden galeride seçilen medyayı taşıyan parametreyi çözer. */
 function parseDraft(raw: string | undefined): DraftAsset[] {
@@ -96,6 +119,12 @@ function parseDraft(raw: string | undefined): DraftAsset[] {
         mediaType: item.mediaType,
         mimeType: typeof item.mimeType === 'string' ? item.mimeType : null,
         fileName: typeof item.fileName === 'string' ? item.fileName : null,
+        // Meta veri taşınırsa "Paylaş" anında native okuma beklenmez ve
+        // sıkıştırma bit hızı doğru seçilir.
+        durationMs: finiteOrNull(item.durationMs),
+        width: finiteOrNull(item.width),
+        height: finiteOrNull(item.height),
+        fileSize: finiteOrNull(item.fileSize),
       }));
   } catch {
     return [];
@@ -133,6 +162,10 @@ function readSavedDraft(raw: string | null): SavedPostDraft | null {
             mediaType: item.mediaType,
             mimeType: typeof item.mimeType === 'string' ? item.mimeType : null,
             fileName: typeof item.fileName === 'string' ? item.fileName : null,
+            durationMs: finiteOrNull(item.durationMs),
+            width: finiteOrNull(item.width),
+            height: finiteOrNull(item.height),
+            fileSize: finiteOrNull(item.fileSize),
           }))
       : [];
     if (!body.trim() && !city && assets.length === 0) {
@@ -147,16 +180,32 @@ function readSavedDraft(raw: string | null): SavedPostDraft | null {
 export default function ComposePostScreen() {
   const { theme } = useTheme();
   const router = useRouter();
-  const params = useLocalSearchParams<{ postId?: string; media?: string; draft?: string }>();
+  const params = useLocalSearchParams<{
+    postId?: string;
+    media?: string;
+    draft?: string;
+    fixture?: string;
+    fanCategory?: string;
+  }>();
   const editingId = typeof params.postId === 'string' && params.postId ? params.postId : null;
+  const matchTag = useMemo(() => parseMatchTag(params.fixture, params.fanCategory), [params.fixture, params.fanCategory]);
 
   const { data: existing, isLoading } = usePost(editingId ?? '');
   const initialAssets = useMemo(() => parseDraft(params.draft), [params.draft]);
 
+  // Doğrudan bağlantıyla gelindiğinde geri gidilecek ekran olmayabilir.
+  const leaveEditor = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace('/feed' as never);
+  };
+
   if (editingId && !existing) {
     return (
       <Screen edges={['top', 'left', 'right', 'bottom']}>
-        <ScreenHeader title="Gönderiyi düzenle" onBack={() => router.back()} />
+        <ScreenHeader title="Gönderiyi düzenle" onBack={leaveEditor} />
         <View style={styles.loadingBox}>
           {isLoading ? (
             <ActivityIndicator color={theme.colors.primary} />
@@ -177,33 +226,82 @@ export default function ComposePostScreen() {
       editingId={editingId}
       existing={existing ?? null}
       initialAssets={initialAssets}
+      matchTag={editingId ? null : matchTag}
     />
   );
+}
+
+type MatchTag = { fixtureId: number; category: FanCategory };
+
+const FAN_CATEGORY_LABELS: Record<FanCategory, string> = {
+  prematch: 'Maç öncesi',
+  stadium: 'Stattan',
+  video: 'Video',
+  watch_party: 'Maç izleme',
+  celebration: 'Kutlama',
+  opinion: 'Yorum',
+};
+
+function parseMatchTag(fixture: unknown, category: unknown): MatchTag | null {
+  const id = Number(fixture);
+  if (!Number.isSafeInteger(id) || id === 0) return null;
+  const cat = typeof category === 'string' && category in FAN_CATEGORY_LABELS ? (category as FanCategory) : 'prematch';
+  return { fixtureId: id, category: cat };
 }
 
 function ComposePostForm({
   editingId,
   existing,
   initialAssets,
+  matchTag,
 }: {
   editingId: string | null;
   existing: FeedPost | null;
   initialAssets: DraftAsset[];
+  matchTag: MatchTag | null;
 }) {
   const { theme } = useTheme();
   const router = useRouter();
+  const { width: windowWidth } = useWindowDimensions();
+
+  /**
+   * Önizleme hücreleri kare ve üç sütunlu. Yüzde genişlik + `aspectRatio`
+   * Yoga'da yüksekliği 0'a düşürebildiği için boyut ızgaranın ölçülen
+   * genişliğinden sayısal olarak hesaplanır.
+   */
+  const mediaGrid = useMeasuredWidth(Math.max(1, Math.min(windowWidth - 40, 720)));
+  const mediaCellSize = Math.max(48, Math.round(mediaGrid.width * 0.315));
 
   const { data: profile } = useMyProfile();
   const createPost = useCreatePost();
   const updatePost = useUpdatePost();
 
+  /**
+   * Paylaşım ekranından çıkış niyeti.
+   *
+   * `router.replace`/`router.back` doğrudan çağrılmıyor: ekranda kaydedilmemiş
+   * içerik varken `usePreventRemove` bu navigasyonu engelliyor. Önce çıkış
+   * niyeti state'e yazılır, engel kalktıktan sonra effect gerçek navigasyonu
+   * yapar. Paylaşım başarılı olduğunda da aynı yol kullanılır, aksi halde
+   * "Paylaş" sonrası ekran açık kalırdı.
+   */
+  const [exit, setExit] = useState<{ replace: string } | { back: true } | null>(null);
+  // Onaydan sonra engellenen geri hareketini güvenli biçimde tamamlar.
+  const { approved: approvedExit, dispatchAfterApproval } = useDeferredExit();
+
   const [body, setBody] = useState(existing?.body ?? '');
-  const [visibility, setVisibility] = useState<PostVisibility>(existing?.visibility ?? 'public');
-  const [city, setCity] = useState<string | null>(existing?.city ?? null);
+  const [visibilityInput, setVisibility] = useState<PostVisibility>(existing?.visibility ?? 'public');
+  const [cityInput, setCity] = useState<string | null>(existing?.city ?? null);
+  // Kısıtlanmış (18 yaş altı) hesapta görünürlük ve konum sunucuda zorunlu
+  // olarak kapatılır; arayüz de aynı kuralı önceden uygular.
+  const { data: safetyState } = useSafetyState();
+  const restricted = safetyState?.is_child_protected ?? false;
   const [assets, setAssets] = useState<DraftAsset[]>(initialAssets);
   const [uploading, setUploading] = useState(false);
   const [progressLabel, setProgressLabel] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
+  /** Süren paylaşımın iptal anahtarı; "İptal" bunu tetikler. */
+  const uploadAbort = useRef<AbortController | null>(null);
   /**
    * Video seçilir seçilmez arka planda hazırlanır. Böylece "Paylaş"a
    * basıldığında bekleme süresi yalnızca yükleme olur.
@@ -212,13 +310,21 @@ function ComposePostForm({
     Record<string, { ratio: number; size: number | null }>
   >({});
   const [cityOpen, setCityOpen] = useState(false);
-  const [placeTag, setPlaceTag] = useState<ExploreSearchItem | null>(null);
+  const [placeTagInput, setPlaceTag] = useState<ExploreSearchItem | null>(null);
   const [placePickerOpen, setPlacePickerOpen] = useState(false);
   const [draftHydrated, setDraftHydrated] = useState(
     editingId !== null || initialAssets.length > 0,
   );
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
   const draftKey = profile?.id ? `${DRAFT_KEY}:${profile.id}` : null;
+
+  // Kısıtlanmış hesapta herkese açık görünürlük, şehir ve mekân etiketi
+  // kullanılamaz. Sunucu da bu değerleri zorla kapatır. Kısıt, state'e yazmak
+  // yerine değerler türetilerek uygulanır; böylece taslak geri yüklemesi ya da
+  // güvenlik durumunun sonradan gelmesi kısıtı atlatamaz.
+  const visibility: PostVisibility = restricted ? 'followers' : visibilityInput;
+  const city = restricted ? null : cityInput;
+  const placeTag = restricted ? null : placeTagInput;
 
   // Yeni gönderi taslağını kullanıcıya özel olarak cihazda saklar.
   useEffect(() => {
@@ -272,6 +378,10 @@ function ComposePostForm({
         mediaType: asset.mediaType,
         mimeType: asset.mimeType,
         fileName: asset.fileName,
+        durationMs: asset.durationMs ?? null,
+        width: asset.width ?? null,
+        height: asset.height ?? null,
+        fileSize: asset.fileSize ?? null,
       })),
       savedAt: Date.now(),
     };
@@ -440,6 +550,11 @@ function ComposePostForm({
   }, [addPicked]);
 
   const removeAsset = (key: string) => {
+    // Kaldırılan video arka planda sıkıştırılmaya devam etmesin.
+    const target = assets.find((asset) => asset.key === key);
+    if (target?.mediaType === 'video') {
+      cancelVideoPreparation(target.uri);
+    }
     setAssets((current) => current.filter((asset) => asset.key !== key));
   };
 
@@ -461,10 +576,13 @@ function ComposePostForm({
   }, []);
 
   const uploadAll = useCallback(
-    async (userId: string): Promise<UploadedMedia[] | null> => {
+    async (userId: string, signal: AbortSignal): Promise<UploadedMedia[] | null> => {
       const total = assets.length;
       if (total === 0) {
         return [];
+      }
+      if (signal.aborted) {
+        return null;
       }
 
       const uploaded: (UploadedMedia | null)[] = new Array<UploadedMedia | null>(total).fill(null);
@@ -500,7 +618,11 @@ function ComposePostForm({
             width: asset.width,
             height: asset.height,
             fileSize: asset.fileSize,
+            signal,
             onProgress: (stage, ratio) => {
+              if (signal.aborted) {
+                return;
+              }
               setProgressLabel(
                 stage === 'preparing'
                   ? `Video hazırlanıyor ${slot}/${total}`
@@ -510,7 +632,10 @@ function ComposePostForm({
             },
           });
           if (!result.ok) {
-            Alert.alert('Yükleme başarısız', result.error.message);
+            // İptal bir hata değil: kullanıcı bilinçli olarak vazgeçti.
+            if (result.error.code !== 'cancelled') {
+              Alert.alert('Yükleme başarısız', result.error.message);
+            }
             return null;
           }
           return result.data.video;
@@ -525,10 +650,17 @@ function ComposePostForm({
           fileName: asset.fileName,
           width: asset.width,
           height: asset.height,
-          onProgress: (_stage, ratio) => setRatio(ratio),
+          signal,
+          onProgress: (_stage, ratio) => {
+            if (!signal.aborted) {
+              setRatio(ratio);
+            }
+          },
         });
         if (!result.ok) {
-          Alert.alert('Yükleme başarısız', result.error.message);
+          if (result.error.code !== 'cancelled') {
+            Alert.alert('Yükleme başarısız', result.error.message);
+          }
           return null;
         }
         return result.data;
@@ -543,7 +675,7 @@ function ComposePostForm({
       );
 
       const worker = async () => {
-        while (!failed) {
+        while (!failed && !signal.aborted) {
           const index = nextIndex;
           nextIndex += 1;
           if (index >= total) {
@@ -589,7 +721,7 @@ function ComposePostForm({
         {
           onSuccess: () => {
             haptics.success();
-            router.back();
+            setExit({ back: true });
           },
           onError: (error) => Alert.alert('Güncellenemedi', toMessage(error)),
         },
@@ -608,9 +740,16 @@ function ComposePostForm({
 
     setUploading(true);
     setProgressLabel(assets.length > 0 ? 'Medya hazırlanıyor' : 'Paylaşılıyor');
+    // Yükleme sürerken "İptal" bu sinyali tetikler: süren sıkıştırma ve ağ
+    // isteği gerçekten durur, yarım dosya depoda bırakılmaz.
+    const controller = new AbortController();
+    uploadAbort.current = controller;
     try {
-      const media = await uploadAll(profile.id);
+      const media = await uploadAll(profile.id, controller.signal);
       if (!media) {
+        return;
+      }
+      if (controller.signal.aborted) {
         return;
       }
       const postId = await new Promise<string>((resolve, reject) => {
@@ -634,7 +773,7 @@ function ComposePostForm({
           },
         );
       });
-      if (placeTag) {
+      if (placeTag && !restricted) {
         try {
           await linkPlaceContent(String(placeTag.id), { postId });
         } catch (error) {
@@ -644,6 +783,15 @@ function ComposePostForm({
           );
         }
       }
+      let matchRoute: string | null = null;
+      if (matchTag && !restricted) {
+        const attached = await attachFanMedia(matchTag.fixtureId, postId, matchTag.category);
+        if (attached.ok) {
+          matchRoute = `/trabzonspor/mac/${matchTag.fixtureId}?tab=fans`;
+        } else {
+          Alert.alert('Gönderi yayınlandı', `Gönderi paylaşıldı ancak maç sayfasına eklenemedi: ${attached.error.message}`);
+        }
+      }
       haptics.success();
       if (draftKey) {
         await AsyncStorage.removeItem(draftKey).catch(() => undefined);
@@ -651,13 +799,20 @@ function ComposePostForm({
       setDraftSavedAt(null);
       setAssets([]);
       setBody('');
-      router.replace(`/post/${postId}` as never);
+      setExit({ replace: matchRoute ?? `/post/${postId}` });
     } catch (error) {
-      Alert.alert('Paylaşılamadı', toMessage(error));
+      if (!controller.signal.aborted) {
+        Alert.alert('Paylaşılamadı', toMessage(error));
+      }
     } finally {
-      setUploading(false);
-      setProgressLabel(null);
-      setUploadProgress(0);
+      // Kullanıcı iptal edip hemen yeniden paylaştıysa eski isteğin temizliği
+      // yeni yüklemenin durumunu sıfırlamamalı.
+      if (uploadAbort.current === controller) {
+        uploadAbort.current = null;
+        setUploading(false);
+        setProgressLabel(null);
+        setUploadProgress(0);
+      }
     }
   }, [
     assets,
@@ -667,9 +822,10 @@ function ComposePostForm({
     draftKey,
     editingId,
     existingMedia,
+    matchTag,
     placeTag,
     profile,
-    router,
+    restricted,
     updatePost,
     uploadAll,
     visibility,
@@ -677,6 +833,27 @@ function ComposePostForm({
 
   const busy = uploading || createPost.isPending || updatePost.isPending;
   const canInteract = !busy;
+
+  /** Kaydedilmemiş bir şey var mı? Çıkışta onay istemek için kullanılır. */
+  const hasChanges = editingId
+    ? body !== (existing?.body ?? '') || visibility !== (existing?.visibility ?? 'public')
+    : body.trim().length > 0 || assets.length > 0 || city !== null || placeTag !== null;
+
+  useEffect(() => {
+    if (!exit) {
+      return;
+    }
+    if ('back' in exit) {
+      // Doğrudan bağlantıyla gelindiğinde geri gidilecek ekran olmayabilir.
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/feed' as never);
+      }
+      return;
+    }
+    router.replace(exit.replace as never);
+  }, [exit, router]);
 
   const saveDraftAndClose = useCallback(async () => {
     if (!draftKey) {
@@ -688,18 +865,156 @@ function ComposePostForm({
       if (savedAt) {
         haptics.success();
       }
-      router.back();
+      setExit({ back: true });
     } catch {
       Alert.alert('Taslak kaydedilemedi', 'Bağlantını kontrol edip yeniden dene.');
     }
-  }, [draftKey, persistDraft, router]);
+  }, [draftKey, persistDraft]);
+
+  /**
+   * Arka planda başlamış video hazırlığını durdurur.
+   *
+   * Video seçildiği anda sıkıştırma başlıyor. Kullanıcı paylaşımdan
+   * vazgeçtiğinde bu iş kendiliğinden bitene kadar çalışmaya devam ediyordu:
+   * cihaz ısınıyor, pil tükeniyor ve native encoder açık kalıyordu.
+   */
+  const cancelVideoWork = useCallback(() => {
+    for (const asset of assets) {
+      if (asset.mediaType === 'video') {
+        cancelVideoPreparation(asset.uri);
+      }
+    }
+  }, [assets]);
+
+  /** Yükleme sürerken gösterilen "İptal" düğmesi. */
+  const cancelUpload = useCallback(() => {
+    if (!uploadAbort.current) {
+      return;
+    }
+    Alert.alert(
+      'Yükleme iptal edilsin mi?',
+      'Yüklenen medya silinir ve gönderi paylaşılmaz. Yazdıkların ekranda kalır.',
+      [
+        { text: 'Devam etsin', style: 'cancel' },
+        {
+          text: 'İptal et',
+          style: 'destructive',
+          onPress: () => {
+            haptics.tap();
+            uploadAbort.current?.abort();
+            cancelVideoWork();
+          },
+        },
+      ],
+    );
+  }, [cancelVideoWork]);
+
+  /**
+   * "İptal" akışı. Hem üst köşedeki düğme hem donanım/yüzey geri hareketi
+   * buradan geçer; böylece hiçbir çıkış yolu içeriği sessizce silmez.
+   */
+  const requestCancel = useCallback(
+    (proceed: () => void) => {
+      if (busy) {
+        Alert.alert(
+          'Paylaşım sürüyor',
+          'Yükleme tamamlanana kadar ekrandan ayrılamazsın. İstersen yüklemeyi iptal edebilirsin.',
+          uploading
+            ? [
+                { text: 'Bekle', style: 'cancel' },
+                {
+                  text: 'Yüklemeyi iptal et',
+                  style: 'destructive',
+                  onPress: () => {
+                    uploadAbort.current?.abort();
+                    cancelVideoWork();
+                  },
+                },
+              ]
+            : [{ text: 'Tamam' }],
+        );
+        return;
+      }
+      if (!hasChanges) {
+        cancelVideoWork();
+        proceed();
+        return;
+      }
+      if (editingId) {
+        Alert.alert('Vazgeçilsin mi?', 'Yaptığın değişiklikler kaydedilmeyecek.', [
+          { text: 'Düzenlemeye dön', style: 'cancel' },
+          {
+            text: 'Vazgeç',
+            style: 'destructive',
+            onPress: () => {
+              cancelVideoWork();
+              proceed();
+            },
+          },
+        ]);
+        return;
+      }
+      Alert.alert(
+        'Paylaşımdan vazgeçilsin mi?',
+        'Yazdıkların ve seçtiğin medya kaldırılacak. Devam etmek istersen taslak olarak saklayabilirsin.',
+        [
+          { text: 'Paylaşıma dön', style: 'cancel' },
+          {
+            text: 'Taslak olarak sakla',
+            onPress: () => {
+              void (async () => {
+                try {
+                  await persistDraft();
+                  haptics.success();
+                  cancelVideoWork();
+                  proceed();
+                } catch {
+                  Alert.alert('Taslak kaydedilemedi', 'Bağlantını kontrol edip yeniden dene.');
+                }
+              })();
+            },
+          },
+          {
+            text: 'Sil ve çık',
+            style: 'destructive',
+            onPress: () => {
+              cancelVideoWork();
+              if (draftKey) {
+                void AsyncStorage.removeItem(draftKey).catch(() => undefined);
+              }
+              proceed();
+            },
+          },
+        ],
+      );
+    },
+    [busy, cancelVideoWork, draftKey, editingId, hasChanges, persistDraft, uploading],
+  );
+
+  // Donanım geri tuşu, üst kenardan geri kaydırma ve başlıktaki geri oku
+  // aynı onay akışına bağlanır.
+  usePreventRemove(!exit && !approvedExit && (hasChanges || busy), ({ data }) => {
+    requestCancel(() => dispatchAfterApproval(data.action));
+  });
 
   return (
     <Screen edges={['top', 'left', 'right', 'bottom']} scroll keyboardAware>
       <ScreenHeader
         title={editingId ? 'Gönderiyi düzenle' : 'Yeni gönderi'}
         subtitle={editingId ? 'Metni ve görünürlüğü güncelle' : 'Topluluğunla bir şey paylaş'}
-        onBack={() => router.back()}
+        left={
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Paylaşımdan vazgeç"
+            disabled={busy}
+            onPress={() => requestCancel(() => setExit({ back: true }))}
+            style={({ pressed }) => [styles.cancel, { opacity: busy ? 0.4 : pressed ? 0.6 : 1 }]}
+          >
+            <AppText variant="label" color="textSecondary">
+              İptal
+            </AppText>
+          </Pressable>
+        }
         right={
           <Pressable
             accessibilityRole="button"
@@ -772,9 +1087,12 @@ function ComposePostForm({
 
       {editingId ? (
         existingMedia.length > 0 ? (
-          <View style={styles.mediaGrid}>
+          <View style={styles.mediaGrid} onLayout={mediaGrid.onLayout}>
             {existingMedia.map((item) => (
-              <View key={item.id} style={[styles.mediaCell, { borderRadius: theme.radius.md }]}>
+              <View
+                key={item.id}
+                style={[styles.mediaCell, { height: mediaCellSize, borderRadius: theme.radius.md }]}
+              >
                 {item.mediaType === 'video' ? (
                   <VideoThumbnail
                     posterUri={item.posterUri}
@@ -800,9 +1118,15 @@ function ComposePostForm({
       ) : (
         <>
           {assets.length > 0 ? (
-            <View style={styles.mediaGrid}>
+            <View style={styles.mediaGrid} onLayout={mediaGrid.onLayout}>
               {assets.map((asset, index) => (
-                <View key={asset.key} style={[styles.mediaCell, { borderRadius: theme.radius.md }]}>
+                <View
+                  key={asset.key}
+                  style={[
+                    styles.mediaCell,
+                    { height: mediaCellSize, borderRadius: theme.radius.md },
+                  ]}
+                >
                   {asset.mediaType === 'video' ? (
                     <VideoThumbnail
                       posterUri={asset.thumbnailUri}
@@ -904,32 +1228,44 @@ function ComposePostForm({
         <AppText variant="label" color="textSecondary">
           Görünürlük
         </AppText>
+        {restricted ? (
+          <View style={[styles.restrictedNote, { backgroundColor: theme.colors.primarySoft }]}>
+            <Ionicons name="shield-checkmark" size={15} color={theme.colors.primaryDeep} />
+            <AppText variant="caption" color="primaryDeep" style={styles.optionLabel}>
+              Çocuk Hesabı: Gönderilerin yalnızca arkadaşların tarafından görülebilir. Herkese açık
+              paylaşım ve konum etiketi bu hesapta kapalıdır.
+            </AppText>
+          </View>
+        ) : null}
         <View style={styles.segmentRow}>
           {(
-            [
-              { key: 'public', label: 'Herkes', icon: 'globe-outline' },
-              { key: 'followers', label: 'Takipçiler', icon: 'people-outline' },
-            ] as const
+            restricted
+              ? [{ key: 'followers', label: 'Arkadaşlar', icon: 'people-outline' }]
+              : [
+                  { key: 'public', label: 'Herkes', icon: 'globe-outline' },
+                  { key: 'followers', label: 'Takipçiler', icon: 'people-outline' },
+                ]
           ).map((option) => {
             const active = visibility === option.key;
             return (
               <Pressable
                 key={option.key}
                 accessibilityRole="button"
-                accessibilityState={{ selected: active }}
+                accessibilityState={{ selected: active, disabled: restricted }}
                 accessibilityLabel={option.label}
-                onPress={() => setVisibility(option.key)}
+                disabled={restricted}
+                onPress={() => setVisibility(option.key as PostVisibility)}
                 style={({ pressed }) => [
                   styles.segment,
                   {
                     backgroundColor: active ? theme.colors.primarySoft : theme.colors.surface,
                     borderColor: active ? theme.colors.primary : theme.colors.border,
-                    opacity: pressed ? 0.75 : 1,
+                    opacity: (pressed || restricted) ? 0.75 : 1,
                   },
                 ]}
               >
                 <Ionicons
-                  name={option.icon}
+                  name={option.icon as React.ComponentProps<typeof Ionicons>['name']}
                   size={15}
                   color={active ? theme.colors.primaryDeep : theme.colors.textSecondary}
                 />
@@ -942,38 +1278,50 @@ function ComposePostForm({
         </View>
       </View>
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Şehir ekle"
-        onPress={() => setCityOpen(true)}
-        style={({ pressed }) => [
-          styles.optionRow,
-          {
-            backgroundColor: theme.colors.surface,
-            borderColor: theme.colors.border,
-            opacity: pressed ? 0.8 : 1,
-          },
-        ]}
-      >
-        <Ionicons name="location-outline" size={18} color={theme.colors.textSecondary} />
-        <AppText variant="body" color={city ? 'text' : 'textTertiary'} style={styles.optionLabel}>
-          {city ?? 'Şehir ekle (isteğe bağlı)'}
-        </AppText>
-        {city ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Şehri kaldır"
-            onPress={() => setCity(null)}
-            hitSlop={8}
-          >
-            <Ionicons name="close-circle" size={18} color={theme.colors.textTertiary} />
-          </Pressable>
-        ) : (
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textTertiary} />
-        )}
-      </Pressable>
+      {!restricted ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Şehir ekle"
+          onPress={() => setCityOpen(true)}
+          style={({ pressed }) => [
+            styles.optionRow,
+            {
+              backgroundColor: theme.colors.surface,
+              borderColor: theme.colors.border,
+              opacity: pressed ? 0.8 : 1,
+            },
+          ]}
+        >
+          <Ionicons name="location-outline" size={18} color={theme.colors.textSecondary} />
+          <AppText variant="body" color={city ? 'text' : 'textTertiary'} style={styles.optionLabel}>
+            {city ?? 'Şehir ekle (isteğe bağlı)'}
+          </AppText>
+          {city ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Şehri kaldır"
+              onPress={() => setCity(null)}
+              hitSlop={8}
+            >
+              <Ionicons name="close-circle" size={18} color={theme.colors.textTertiary} />
+            </Pressable>
+          ) : (
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.textTertiary} />
+          )}
+        </Pressable>
+      ) : null}
 
-      {!editingId ? (
+      {matchTag && !restricted ? (
+        <View style={[styles.matchTag, { backgroundColor: theme.colors.primarySoft }]}>
+          <Ionicons name="football-outline" size={18} color={theme.colors.primaryDeep} />
+          <AppText variant="caption" color="primaryDeep" style={styles.optionLabel}>
+            Maç Arenası · Taraftarlar ({FAN_CATEGORY_LABELS[matchTag.category]}). Gönderi herkese açık olmalı; TV veya
+            maç yayını görüntüsü paylaşma.
+          </AppText>
+        </View>
+      ) : null}
+
+      {!editingId && !restricted ? (
         <PlaceTagRow
           value={placeTag}
           onPress={() => setPlacePickerOpen(true)}
@@ -993,6 +1341,25 @@ function ComposePostForm({
                 %{Math.round(uploadProgress * 100)}
               </AppText>
             ) : null}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Yüklemeyi iptal et"
+              hitSlop={8}
+              onPress={cancelUpload}
+              style={({ pressed }) => [
+                styles.progressCancel,
+                {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.primary,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <Ionicons name="close" size={12} color={theme.colors.primaryDeep} />
+              <AppText variant="caption" color="primaryDeep">
+                İptal
+              </AppText>
+            </Pressable>
           </View>
           <View style={[styles.progressTrack, { backgroundColor: theme.colors.surface }]}>
             <View
@@ -1111,6 +1478,12 @@ function VideoPrepBadge({ ratio, size }: { ratio: number; size: number | null })
 
 const styles = StyleSheet.create({
   loadingBox: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  cancel: {
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingRight: 4,
+  },
   publish: {
     paddingHorizontal: 16,
     paddingVertical: 9,
@@ -1137,7 +1510,7 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   mediaGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
-  mediaCell: { width: '31.5%', aspectRatio: 1, overflow: 'hidden', backgroundColor: '#00000010' },
+  mediaCell: { width: '31.5%', overflow: 'hidden', backgroundColor: '#00000010' },
   videoPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4 },
   removeMedia: {
     position: 'absolute',
@@ -1208,6 +1581,7 @@ const styles = StyleSheet.create({
   },
   optionGroup: { gap: 8, marginTop: 22 },
   segmentRow: { flexDirection: 'row', gap: 8 },
+  restrictedNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 10, borderRadius: 12 },
   segment: {
     flex: 1,
     flexDirection: 'row',
@@ -1229,6 +1603,7 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   optionLabel: { flex: 1 },
+  matchTag: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 14, padding: 12 },
   progress: {
     gap: 8,
     padding: 12,
@@ -1236,6 +1611,17 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   progressHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  progressCancel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    marginLeft: 'auto',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    minHeight: 26,
+  },
   progressLabel: { flex: 1 },
   progressTrack: { height: 4, borderRadius: 2, overflow: 'hidden' },
   progressFill: { height: 4, borderRadius: 2 },

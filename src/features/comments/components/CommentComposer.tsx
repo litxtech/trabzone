@@ -11,7 +11,11 @@ import {
 
 import { AppImage, AppText } from '@/components/ui';
 import { pickMedia, type PickedAsset } from '@/features/media/media-picker';
-import { generateVideoPoster } from '@/features/media/video-service';
+import {
+  cancelVideoPreparation,
+  generateVideoPoster,
+  prepareVideoForUpload,
+} from '@/features/media/video-service';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 
@@ -58,6 +62,8 @@ export function CommentComposer({
   const { theme } = useTheme();
   const [assets, setAssets] = useState<PickedAsset[]>([]);
   const [posters, setPosters] = useState<Record<string, string>>({});
+  /** Video sıkıştırma oranı (uri → 0..1); 1 olunca rozet gizlenir. */
+  const [preparing, setPreparing] = useState<Record<string, number>>({});
   const [pickerOpen, setPickerOpen] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -70,39 +76,116 @@ export function CommentComposer({
     };
   }, []);
 
-  const addAssets = useCallback(
-    async (source: 'library' | 'camera', kind: 'image' | 'video' | 'all') => {
-    setPickerOpen(false);
-    const remaining = MAX_ATTACHMENTS - assets.length;
-    if (remaining <= 0) {
-      return;
-    }
-    const picked = await pickMedia({
-      source,
-      kind,
-      multiple: source === 'library' && kind === 'image',
-      limit: remaining,
-      maxVideoDuration: 90,
-    });
-    if (!picked || picked.length === 0) {
-      return;
-    }
-    haptics.selection();
-    setAssets((current) => [...current, ...picked].slice(0, MAX_ATTACHMENTS));
-
+  /**
+   * Seçilen videoların kapak karesini ve sıkıştırmasını anında başlatır.
+   *
+   * Önceden sıkıştırma yalnızca "Gönder"e basıldığında başlıyordu: kullanıcı
+   * yorumu yazarken cihaz boş bekliyor, gönderimde ise yeniden kodlama ile ağ
+   * yüklemesi üst üste biniyordu. Artık kodlama yazma sırasında biter ve
+   * gönderimde yalnızca aktarım kalır. Sonuç `video-service` içinde URI bazında
+   * önbelleklendiği için yükleme aynı işi ikinci kez yapmaz.
+   */
+  const startVideoWork = useCallback((picked: PickedAsset[]) => {
     for (const asset of picked) {
       if (asset.mediaType !== 'video') {
         continue;
       }
-      const poster = await generateVideoPoster(asset.uri);
-      if (poster && mounted.current) {
-        setPosters((current) => ({ ...current, [asset.uri]: poster.uri }));
-      }
+
+      setPreparing((current) => ({ ...current, [asset.uri]: 0 }));
+
+      // Kapak üretimi önce kuyruğa girer: önizleme hızla görünür.
+      void generateVideoPoster(asset.uri)
+        .then((poster) => {
+          if (poster && mounted.current) {
+            setPosters((current) => ({ ...current, [asset.uri]: poster.uri }));
+          }
+        })
+        .catch(() => undefined);
+
+      void prepareVideoForUpload(
+        {
+          uri: asset.uri,
+          durationMs: asset.durationMs,
+          width: asset.width,
+          height: asset.height,
+          size: asset.fileSize,
+        },
+        {
+          onProgress: (ratio) => {
+            if (!mounted.current) {
+              return;
+            }
+            setPreparing((current) => {
+              const previous = current[asset.uri];
+              if (previous === undefined) {
+                return current;
+              }
+              const next = Math.max(previous, ratio);
+              return next === previous ? current : { ...current, [asset.uri]: next };
+            });
+          },
+        },
+      )
+        .then(() => {
+          if (!mounted.current) {
+            return;
+          }
+          setPreparing((current) =>
+            current[asset.uri] === undefined ? current : { ...current, [asset.uri]: 1 },
+          );
+        })
+        .catch(() => {
+          if (!mounted.current) {
+            return;
+          }
+          setPreparing((current) => {
+            if (current[asset.uri] === undefined) {
+              return current;
+            }
+            const next = { ...current };
+            delete next[asset.uri];
+            return next;
+          });
+        });
     }
-  }, [assets.length]);
+  }, []);
+
+  const addAssets = useCallback(
+    async (source: 'library' | 'camera', kind: 'image' | 'video' | 'all') => {
+      setPickerOpen(false);
+      const remaining = MAX_ATTACHMENTS - assets.length;
+      if (remaining <= 0) {
+        return;
+      }
+      const picked = await pickMedia({
+        source,
+        kind,
+        multiple: source === 'library' && kind === 'image',
+        limit: remaining,
+        maxVideoDuration: 90,
+      });
+      if (!picked || picked.length === 0) {
+        return;
+      }
+      haptics.selection();
+      setAssets((current) => [...current, ...picked].slice(0, MAX_ATTACHMENTS));
+      startVideoWork(picked);
+    },
+    [assets.length, startVideoWork],
+  );
 
   const removeAsset = (uri: string) => {
     haptics.tap();
+    // Kaldırılan video arka planda kodlanmaya devam edip cihazı yormasın.
+    cancelVideoPreparation(uri);
+    setPreparing((current) => {
+      if (current[uri] === undefined) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[uri];
+      return next;
+    });
     setAssets((current) => current.filter((asset) => asset.uri !== uri));
     setPosters((current) => {
       if (!current[uri]) {
@@ -159,6 +242,7 @@ export function CommentComposer({
     if (success && mounted.current) {
       setAssets([]);
       setPosters({});
+      setPreparing({});
       setPickerOpen(false);
     }
   };
@@ -219,7 +303,9 @@ export function CommentComposer({
           {assets.map((asset) => (
             <View key={asset.uri} style={styles.attachment}>
               {asset.mediaType === 'video' ? (
-                <View style={[styles.attachmentFill, { backgroundColor: theme.colors.surfaceMuted }]}>
+                <View
+                  style={[styles.attachmentFill, { backgroundColor: theme.colors.surfaceMuted }]}
+                >
                   {posters[asset.uri] ? (
                     <AppImage
                       source={{ uri: posters[asset.uri] }}
@@ -232,6 +318,13 @@ export function CommentComposer({
                   <View style={styles.videoBadge}>
                     <Ionicons name="play" size={10} color="#FFFFFF" />
                   </View>
+                  {(preparing[asset.uri] ?? 1) < 0.999 ? (
+                    <View style={styles.prepBadge}>
+                      <AppText variant="caption" color="#FFFFFF" style={styles.prepText}>
+                        %{Math.round((preparing[asset.uri] ?? 0) * 100)}
+                      </AppText>
+                    </View>
+                  ) : null}
                 </View>
               ) : (
                 <AppImage
@@ -426,6 +519,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  prepBadge: {
+    position: 'absolute',
+    left: 3,
+    bottom: 3,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 6,
+    backgroundColor: 'rgba(4,8,18,0.72)',
+  },
+  prepText: { fontSize: 9, lineHeight: 12 },
   pickerRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 2 },
   chip: {
     flexDirection: 'row',

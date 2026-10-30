@@ -193,9 +193,19 @@ export type AiSeoResult = {
   keywords: string[];
   tags: string[];
   faq: BlogFaq[];
+  category?: string;
+  cover_image_alt?: string;
 };
 
-export type AiAction = 'article' | 'seo' | 'improve' | 'title' | 'faq' | 'outline';
+/** Tek çağrıda yazı + tüm SEO/meta alanlarını döndüren sonuç. */
+export type AiFullResult = AiArticleResult &
+  AiSeoResult & {
+    reading_minutes?: number;
+    word_count?: number;
+    model?: string;
+  };
+
+export type AiAction = 'full' | 'article' | 'seo' | 'improve' | 'title' | 'faq' | 'outline';
 
 export type AiRequest = {
   action: AiAction;

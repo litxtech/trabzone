@@ -63,6 +63,10 @@ export type MapPoint = {
   tone?: 'primary' | 'accent' | 'success' | 'warning' | 'danger' | 'info';
   /** Kategoriye özel Ionicons adı. */
   icon?: string | null;
+  /** Etiketli işaretlerde dolgu rengi (ör. deprem büyüklük ölçeği); tondan önceliklidir. */
+  color?: string | null;
+  /** `color` verildiğinde etiket yazı rengi. */
+  textColor?: string | null;
   meta?: Record<string, unknown>;
 };
 

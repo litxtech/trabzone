@@ -361,6 +361,36 @@ export default function ChildSafetySettingsScreen() {
           </View>
 
           <View style={styles.section}>
+            <AppText variant="h3">İçerik kısıtlamaları</AppText>
+            <Card style={styles.toggleCard}>
+              <LockedInfoRow
+                icon="document-text-outline"
+                title="Gönderiler"
+                body="Gönderilerin yalnızca arkadaşlarına görünür. Herkese açık paylaşım yapılamaz."
+              />
+              <LockedInfoRow
+                icon="play-circle-outline"
+                title="Reels videoları"
+                body="Videoların keşfet akışında yabancılara önerilmez; yalnızca arkadaşların görür."
+              />
+              <LockedInfoRow
+                icon="location-outline"
+                title="Konum ve mekân etiketi"
+                body="Şehir, mekân ve canlı konum etiketi gönderilere eklenemez."
+              />
+              <LockedInfoRow
+                icon="chatbubble-ellipses-outline"
+                title="Yorumlar"
+                body={
+                  state.protection.comment_policy === 'nobody'
+                    ? 'Gönderilerine kimse yorum yapamaz.'
+                    : 'Gönderilerine yalnızca arkadaşların yorum yapabilir.'
+                }
+              />
+            </Card>
+          </View>
+
+          <View style={styles.section}>
             <AppText variant="h3">Veli onayı</AppText>
             <Card style={styles.guardianCard}>
               <View style={styles.rowBetween}>
@@ -641,6 +671,36 @@ function MenuLink({
   );
 }
 
+function LockedInfoRow({
+  icon,
+  title,
+  body,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  title: string;
+  body: string;
+}) {
+  const { theme } = useTheme();
+  return (
+    <View style={styles.lockedRow}>
+      <View style={[styles.toggleIcon, { backgroundColor: theme.colors.primarySoft }]}>
+        <Ionicons name={icon} size={17} color={theme.colors.primaryDeep} />
+      </View>
+      <View style={styles.flex}>
+        <View style={styles.rowBetween}>
+          <AppText variant="bodyStrong" style={styles.flex}>
+            {title}
+          </AppText>
+          <Badge label="Zorunlu" tone="neutral" />
+        </View>
+        <AppText variant="caption" color="textSecondary">
+          {body}
+        </AppText>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { alignItems: 'center', paddingVertical: 40 },
@@ -656,6 +716,7 @@ const styles = StyleSheet.create({
   toggleCard: { gap: 10, marginBottom: 8 },
   toggleIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   lockedNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, padding: 9, borderRadius: 10 },
+  lockedRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 6 },
   settingCard: { gap: 10, marginBottom: 8 },
   options: { gap: 7 },
   option: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, padding: 11, borderWidth: 1 },

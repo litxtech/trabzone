@@ -33,10 +33,14 @@ const ALLOWED_BUCKETS = [
   'avatars',
   'covers',
   'ride-vehicle-photos',
+  'accommodation-media',
   'message-media',
+  'ad-media',
 ];
 /** Public özel alan adından sunulmayan, yalnızca imzalı okunan kovalar. */
 const PRIVATE_BUCKETS = ['message-media'];
+/** Yalnızca belirli yönetici yetkisine sahip kullanıcıların yazabildiği kovalar. */
+const PERMISSION_BUCKETS: Record<string, string> = { 'ad-media': 'ads.manage' };
 // Görseller ve videolar aynı bucket'a gider; uzantı listesi medya türlerinin
 // tamamını kapsamak zorunda, aksi halde görsel yüklemeleri `invalid_key` döner.
 const ALLOWED_EXTENSIONS = [
@@ -205,42 +209,89 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
  * Sorgu, çağıranın JWT'si ile yapılır; `conversation_members` üzerindeki RLS
  * politikası yalnızca kendi üyelik satırını döndürür. Böylece function'ın
  * service_role anahtarına ihtiyacı olmaz ve yetki veritabanında kalır.
+ *
+ * Toplu imzalamada aynı konuşma için onlarca anahtar geldiği için sonuç
+ * istek başına önbelleklenir: N anahtar için N ağ turu yerine tek tur.
  */
-async function isConversationMember(
+type MembershipCache = Map<string, Promise<boolean>>;
+
+function isConversationMember(
   conversationId: string,
   uid: string,
   request: Request,
+  cache?: MembershipCache,
 ): Promise<boolean> {
   if (!UUID_PATTERN.test(conversationId)) {
-    return false;
+    return Promise.resolve(false);
   }
+  const cacheKey = `${conversationId}:${uid}`;
+  const cached = cache?.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+  const authorization = request.headers.get('Authorization') ?? '';
+  if (!supabaseUrl || !anonKey || !authorization) {
+    return Promise.resolve(false);
+  }
+
+  const query =
+    `${supabaseUrl}/rest/v1/conversation_members` +
+    `?conversation_id=eq.${encodeURIComponent(conversationId)}` +
+    `&user_id=eq.${encodeURIComponent(uid)}` +
+    '&left_at=is.null&select=conversation_id&limit=1';
+
+  const checked = (async () => {
+    try {
+      const response = await fetch(query, {
+        headers: { apikey: anonKey, Authorization: authorization },
+      });
+      if (!response.ok) {
+        return false;
+      }
+      const rows = (await response.json()) as unknown;
+      return Array.isArray(rows) && rows.length > 0;
+    } catch {
+      return false;
+    }
+  })();
+
+  cache?.set(cacheKey, checked);
+  return checked;
+}
+
+/**
+ * Çağıranın yönetici yetkisini, kendi JWT'siyle `has_permission` RPC'si
+ * üzerinden doğrular; yetki kararı veritabanında kalır.
+ */
+async function hasPermission(permission: string, request: Request): Promise<boolean> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
   const authorization = request.headers.get('Authorization') ?? '';
   if (!supabaseUrl || !anonKey || !authorization) {
     return false;
   }
-  const query =
-    `${supabaseUrl}/rest/v1/conversation_members` +
-    `?conversation_id=eq.${encodeURIComponent(conversationId)}` +
-    `&user_id=eq.${encodeURIComponent(uid)}` +
-    '&left_at=is.null&select=conversation_id&limit=1';
   try {
-    const response = await fetch(query, {
-      headers: { apikey: anonKey, Authorization: authorization },
+    const response = await fetch(`${supabaseUrl}/rest/v1/rpc/has_permission`, {
+      method: 'POST',
+      headers: { apikey: anonKey, Authorization: authorization, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_permission: permission }),
     });
-    if (!response.ok) {
-      return false;
-    }
-    const rows = (await response.json()) as unknown;
-    return Array.isArray(rows) && rows.length > 0;
+    return response.ok && (await response.json()) === true;
   } catch {
     return false;
   }
 }
 
 /** Anahtarın biçimini ve sahipliğini doğrular. */
-async function isAllowedKey(key: string, uid: string, request: Request): Promise<boolean> {
+async function isAllowedKey(
+  key: string,
+  uid: string,
+  request: Request,
+  cache?: MembershipCache,
+): Promise<boolean> {
   const parts = key.split('/');
   if (parts.length !== 4) {
     return false;
@@ -256,9 +307,13 @@ async function isAllowedKey(key: string, uid: string, request: Request): Promise
   // Gizli sohbet medyasında sahip, dosyayı yükleyen değil konuşmadır: her iki
   // katılımcı da okuyup yazabilmelidir.
   if (PRIVATE_BUCKETS.includes(bucket)) {
-    return await isConversationMember(owner, uid, request);
+    return await isConversationMember(owner, uid, request, cache);
   }
-  return owner === uid;
+  if (owner !== uid) {
+    return false;
+  }
+  const permission = PERMISSION_BUCKETS[bucket];
+  return permission ? await hasPermission(permission, request) : true;
 }
 
 const corsHeaders = {
@@ -323,19 +378,37 @@ Deno.serve(async (request) => {
   // Toplu okuma: sohbet ekranı onlarca medyayı tek turda imzalar. Yetkisiz
   // anahtarlar sessizce atlanır; istemci eksik adresi gösteremez.
   if (action === 'get' && Array.isArray(payload.keys)) {
-    const keys = payload.keys.filter((key): key is string => typeof key === 'string').slice(0, 60);
+    const keys = Array.from(
+      new Set(payload.keys.filter((key): key is string => typeof key === 'string')),
+    ).slice(0, 60);
     const urls: Record<string, string> = {};
-    for (const key of keys) {
-      if (!(await isAllowedKey(key, uid, request))) {
-        continue;
+    // Üyelik doğrulaması istek başına önbelleklenir: aynı konuşmanın 40 medyası
+    // için 40 veritabanı turu atılmaz, tek tur atılır.
+    const membership: MembershipCache = new Map();
+    const allowed = await Promise.all(
+      keys.map((key) => isAllowedKey(key, uid, request, membership)),
+    );
+    const signed = await Promise.all(
+      keys.map(async (key, index) => {
+        if (!allowed[index]) {
+          return null;
+        }
+        return [
+          key,
+          await presign({
+            method: 'GET',
+            host: config.host,
+            path: `/${bucketFor(key)}/${key}`,
+            accessKey: config.accessKey,
+            secretKey: config.secretKey,
+          }),
+        ] as const;
+      }),
+    );
+    for (const entry of signed) {
+      if (entry) {
+        urls[entry[0]] = entry[1];
       }
-      urls[key] = await presign({
-        method: 'GET',
-        host: config.host,
-        path: `/${bucketFor(key)}/${key}`,
-        accessKey: config.accessKey,
-        secretKey: config.secretKey,
-      });
     }
     return json({ urls, expiresIn: URL_TTL_SECONDS });
   }

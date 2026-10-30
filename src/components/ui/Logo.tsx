@@ -1,15 +1,22 @@
 import { Image } from 'expo-image';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { useTheme } from '@/theme/ThemeProvider';
 import { fontFamilies } from '@/theme/typography';
 
 import { AppText } from './AppText';
 
+// Web'de logo en fazla ~44 pt çizilir; 512 px'lik PNG (~300 KB) yerine
+// 192 px WebP (~7 KB) yüklenir.
+const LOGO_SOURCE =
+  Platform.OS === 'web'
+    ? require('../../../assets/brand/splash/logo-web.webp')
+    : require('../../../assets/brand/splash/splash-logo.png');
+
 export function Logo({ size = 72 }: { size?: number }) {
   return (
     <Image
-      source={require('../../../assets/brand/splash/splash-logo.png')}
+      source={LOGO_SOURCE}
       style={{ width: size, height: size, borderRadius: size * 0.2237 }}
       contentFit="cover"
       transition={0}

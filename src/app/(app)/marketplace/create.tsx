@@ -768,12 +768,9 @@ function MarketListingWizard({
       haptics.success();
       setStage(null);
       setPublishing(false);
-      const pending = result.status === 'pending';
       Alert.alert(
-        pending ? 'Doğrulama bekliyor' : editingId ? 'İlan güncellendi' : 'İlan yayınlandı',
-        pending
-          ? 'Emlak ve araç ilanları EİDS/yetki doğrulaması tamamlanmadan herkese açık yayınlanmaz. İlanın İncelemede sekmesinde.'
-          : 'İlanın Trabzone Marketplace’te yayında.',
+        editingId ? 'İlan güncellendi' : 'İlan yayınlandı',
+        'İlanın Trabzone Marketplace’te yayında. Onay beklemez; yayındaki ilanını dilediğin an düzenleyebilirsin.',
         [
           {
             text: 'İlanı gör',
@@ -1308,15 +1305,15 @@ function BasicsStep({
         <View
           style={[
             styles.verifyCard,
-            { backgroundColor: theme.colors.warningSoft, borderColor: theme.colors.warning },
+            { backgroundColor: theme.colors.successSoft, borderColor: theme.colors.success },
           ]}
         >
-          <Ionicons name="shield-checkmark-outline" size={18} color={theme.colors.warning} />
+          <Ionicons name="flash-outline" size={18} color={theme.colors.success} />
           <View style={styles.flex}>
-            <AppText variant="label">EİDS / yetki doğrulaması</AppText>
+            <AppText variant="label">Anında yayın</AppText>
             <AppText variant="caption" color="textSecondary">
-              Bu ilan doğrulama tamamlanana kadar yayında görünmez. Doğrulanmamış ilanı
-              yayınlamıyoruz.
+              Emlak ve araç ilanların da onay beklemeden yayınlanır. Doğrulama belgesi eklersen
+              ilanın yayında kalır, inceleme sonucu ayrıca bildirilir.
             </AppText>
           </View>
         </View>
@@ -1984,7 +1981,7 @@ function PublishStep({
   stage: string | null;
 }) {
   const { theme } = useTheme();
-  const pending = form.kind === 'real_estate' || form.kind === 'vehicle';
+  const instantPublishKind = form.kind === 'real_estate' || form.kind === 'vehicle';
   return (
     <View style={styles.step}>
       <SectionTitle
@@ -2011,19 +2008,19 @@ function PublishStep({
         />
       </View>
 
-      {pending ? (
+      {instantPublishKind ? (
         <View
           style={[
             styles.verifyCard,
-            { backgroundColor: theme.colors.warningSoft, borderColor: theme.colors.warning },
+            { backgroundColor: theme.colors.successSoft, borderColor: theme.colors.success },
           ]}
         >
-          <Ionicons name="shield-checkmark-outline" size={18} color={theme.colors.warning} />
+          <Ionicons name="flash-outline" size={18} color={theme.colors.success} />
           <View style={styles.flex}>
-            <AppText variant="label">EİDS doğrulaması gerekli</AppText>
+            <AppText variant="label">İlanın anında yayında</AppText>
             <AppText variant="caption" color="textSecondary">
-              Emlak ve araç ilanları, kimlik ve ilan verme yetkisi doğrulanana kadar “İncelemede”
-              kalır. Doğrulanmamış ilan herkese açık yayınlanmaz.
+              Emlak ve araç ilanları moderasyon onayı beklemez. Yayındaki ilanını dilediğin an
+              düzenleyebilir, doğrulama belgesi ekleyebilirsin.
             </AppText>
           </View>
         </View>

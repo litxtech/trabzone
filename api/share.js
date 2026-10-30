@@ -18,6 +18,7 @@ const {
 } = require('../server/share');
 
 const KEY_RE = /^[a-zA-Z0-9._-]{3,80}$/;
+const MATCH_KEY_RE = /^[1-9][0-9]{0,11}$/;
 
 function readParam(req, name) {
   const value = req.query ? req.query[name] : undefined;
@@ -61,7 +62,7 @@ module.exports = async function handler(req, res) {
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
 
-  if (!type || !KEY_RE.test(key)) {
+  if (!type || !(type === 'match' ? MATCH_KEY_RE : KEY_RE).test(key)) {
     res.statusCode = 404;
     res.setHeader('X-Robots-Tag', 'noindex, follow');
     res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=30');

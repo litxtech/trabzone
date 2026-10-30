@@ -1,5 +1,4 @@
-import { Linking as NativeLinking } from 'react-native';
-
+import { openUrl } from '@/features/in-app-browser';
 import { shareLink } from '@/features/share/links';
 
 export type TextToken =
@@ -68,11 +67,11 @@ function normalizeHttps(value: string): string | null {
  * değilse önizleme kartı ve mağaza bağlantıları görünür.
  */
 export function commentDeepLink(
-  contentType: 'post' | 'reel',
-  contentId: string,
+  contentType: 'post' | 'reel' | 'match',
+  contentKey: string,
   commentId: string,
 ): string {
-  return shareLink(contentType, contentId, { comment: commentId });
+  return shareLink(contentType, contentKey, { comment: commentId });
 }
 
 export async function openSafeLink(href: string): Promise<boolean> {
@@ -80,14 +79,5 @@ export async function openSafeLink(href: string): Promise<boolean> {
   if (!safe) {
     return false;
   }
-  try {
-    const supported = await NativeLinking.canOpenURL(safe);
-    if (!supported) {
-      return false;
-    }
-    await NativeLinking.openURL(safe);
-    return true;
-  } catch {
-    return false;
-  }
+  return openUrl(safe);
 }

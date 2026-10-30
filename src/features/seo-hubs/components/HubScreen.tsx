@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Link, useRouter, type Href } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -11,6 +11,8 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+
+import { useQuery } from '@tanstack/react-query';
 
 import { AppText } from '@/components/ui';
 import { authLinkHref } from '@/features/auth/use-require-auth';
@@ -306,39 +308,22 @@ function Card({ page, item, width }: { page: HubPage; item: HubItem; width: stri
 export function HubScreen({ segments }: { segments: string[] }) {
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const [page, setPage] = useState<HubPage | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-
   const segmentsKey = segments.join('/');
   const web = Platform.OS === 'web';
 
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    setError(null);
-    setPage(null);
-
-    fetchHubPage(segments, 24)
-      .then((result) => {
-        if (!active) return;
-        setPage(result);
-      })
-      .catch(() => {
-        if (!active) return;
-        setError('Bu sayfa şu anda yüklenemedi. Bağlantınızı kontrol edip yeniden deneyin.');
-      })
-      .finally(() => {
-        if (!active) return;
-        setLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segmentsKey, reloadKey]);
+  // Sayfa verisi react-query ile yüklenir: yükleme/hata durumları türetilir,
+  // effect içinde setState çağrılmaz (çift render ve eski istek yarışı olmaz).
+  const hubQuery = useQuery({
+    queryKey: ['seo-hub', segmentsKey],
+    queryFn: () => fetchHubPage(segments, 24),
+    staleTime: 60_000,
+  });
+  const page = hubQuery.data ?? null;
+  const loading = hubQuery.isPending;
+  const error = hubQuery.isError
+    ? 'Bu sayfa şu anda yüklenemedi. Bağlantınızı kontrol edip yeniden deneyin.'
+    : null;
+  const retry = () => void hubQuery.refetch();
 
   const meta = useMemo(
     () =>
@@ -477,7 +462,7 @@ export function HubScreen({ segments }: { segments: string[] }) {
               </AppText>
               <Pressable
                 accessibilityRole="button"
-                onPress={() => setReloadKey((value) => value + 1)}
+                onPress={retry}
                 style={styles.retryButton}
               >
                 <AppText variant="button" color="#08111F">

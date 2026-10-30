@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import type { ReactNode } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, type ReactNode } from 'react';
+import { Keyboard, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppText } from '@/components/ui';
+import { useKeyboardBottomInset } from '@/providers/keyboard';
 import { useTheme } from '@/theme/ThemeProvider';
 
 /**
@@ -32,15 +34,23 @@ export function MapSheet({
 }) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboardInset = useKeyboardBottomInset();
+
+  // Panel içindeki arama alanı odaklanınca klavye paneli kapatıyordu; klavye
+  // yüksekliği kadar boşluk bırakarak paneli daima klavyenin üstünde tutuyoruz.
+  const close = useCallback(() => {
+    Keyboard.dismiss();
+    onClose();
+  }, [onClose]);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <View style={styles.root}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={close} statusBarTranslucent>
+      <Animated.View style={[styles.root, keyboardInset]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Paneli kapat"
           style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.overlay }]}
-          onPress={onClose}
+          onPress={close}
         />
         <View
           style={[
@@ -69,7 +79,7 @@ export function MapSheet({
               accessibilityRole="button"
               accessibilityLabel="Kapat"
               hitSlop={10}
-              onPress={onClose}
+              onPress={close}
               style={[styles.close, { backgroundColor: theme.colors.surfaceMuted }]}
             >
               <Ionicons name="close" size={18} color={theme.colors.text} />
@@ -92,7 +102,7 @@ export function MapSheet({
 
           {footer ? <View style={styles.footer}>{footer}</View> : null}
         </View>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }

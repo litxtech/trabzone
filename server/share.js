@@ -24,6 +24,7 @@ const {
   rpc,
   truncate,
 } = require('./seo');
+const { matchShareCard } = require('./match');
 
 const APP_STORE_URL = 'https://apps.apple.com/app/id6825082780';
 const PLAY_STORE_URL =
@@ -38,6 +39,9 @@ const TYPE_LABELS = {
   place: 'Mekân',
   listing: 'İlan',
   estate: 'Emlak',
+  live: 'Anlık Gelişme',
+  earthquake: 'Deprem Kaydı',
+  match: 'Maç',
 };
 
 /** `/p/...` adresindeki tür adlarını kanonik türlere çevirir. */
@@ -57,6 +61,16 @@ const TYPE_ALIASES = {
   emlak: 'estate',
   estate: 'estate',
   'real-estate': 'estate',
+  gelisme: 'live',
+  live: 'live',
+  'live-news': 'live',
+  live_news: 'live',
+  'anlik-haber': 'live',
+  breaking: 'live',
+  deprem: 'earthquake',
+  earthquake: 'earthquake',
+  mac: 'match',
+  match: 'match',
 };
 
 const SHARE_TYPE_SEGMENTS = {
@@ -66,6 +80,9 @@ const SHARE_TYPE_SEGMENTS = {
   place: 'mekan',
   listing: 'ilan',
   estate: 'emlak',
+  live: 'gelisme',
+  earthquake: 'deprem',
+  match: 'mac',
 };
 
 function normalizeType(value) {
@@ -112,8 +129,39 @@ function normalizeCard(raw) {
 }
 
 async function fetchCard(type, key) {
+  if (type === 'earthquake') {
+    return fetchEarthquakeCard(key);
+  }
+  if (type === 'match') {
+    return matchShareCard(key);
+  }
   const raw = await rpc('share_card', { p_type: type, p_key: key });
   return normalizeCard(raw);
+}
+
+/**
+ * Deprem kaydı kartı. Değerler yalnızca `earthquake_share_card` RPC'sinden
+ * (resmî kaynak kaydı) gelir; kaldırılmış veya bulunamayan kayıt 404 olur.
+ */
+async function fetchEarthquakeCard(key) {
+  let raw;
+  try {
+    raw = await rpc('earthquake_share_card', { p_key: String(key).toLowerCase() });
+  } catch (error) {
+    const message = String((error && error.message) || '');
+    if (message.includes('earthquake_not_found') || message.includes('earthquake_removed')) {
+      return null;
+    }
+    throw error;
+  }
+  const card = normalizeCard(raw);
+  if (!card) return null;
+  return {
+    ...card,
+    label: TYPE_LABELS.earthquake,
+    metrics: 'Resmî sismik kayıt · Tahmin veya erken uyarı değildir',
+    publishedAt: raw.occurred_at || null,
+  };
 }
 
 function cardUrl(type, key, extra = '') {
@@ -123,6 +171,22 @@ function cardUrl(type, key, extra = '') {
 function jsonScript(value) {
   // `</script>` kaçışı: JSON içine gömülen metin betiği kapatamasın.
   return JSON.stringify(String(value)).replace(/</g, '\\u003c');
+}
+
+/**
+ * Önizleme görselinin MIME türü.
+ *
+ * WhatsApp/Telegram kartı çizerken türü uzantıdan tahmin etmek zorunda
+ * kalmasın diye `og:image:type` açıkça yazılır; bilinmeyen uzantıda etiket
+ * hiç eklenmez.
+ */
+function imageMime(url) {
+  const path = String(url || '').split('?')[0].toLowerCase();
+  if (/\.(jpe?g)$/.test(path)) return 'image/jpeg';
+  if (/\.png$/.test(path)) return 'image/png';
+  if (/\.webp$/.test(path)) return 'image/webp';
+  if (/\.gif$/.test(path)) return 'image/gif';
+  return '';
 }
 
 function renderSharePage(card, options = {}) {
@@ -149,6 +213,10 @@ function renderSharePage(card, options = {}) {
   const facts = [card.price, card.metrics].filter(Boolean).join(' · ');
 
   const ogType = card.type === 'profile' ? 'profile' : 'article';
+  const imageType = imageMime(image);
+  const imageTypeTag = imageType
+    ? `<meta property="og:image:type" content="${imageType}" />\n`
+    : '';
 
   return `<!DOCTYPE html>
 <html lang="tr">
@@ -166,12 +234,14 @@ function renderSharePage(card, options = {}) {
 <meta property="og:description" content="${escapeHtml(description)}" />
 <meta property="og:url" content="${escapeHtml(shareUrl)}" />
 <meta property="og:image" content="${escapeHtml(image)}" />
+${imageTypeTag}<meta property="og:image:secure_url" content="${escapeHtml(image)}" />
 <meta property="og:image:alt" content="${escapeHtml(card.title)}" />
 <meta property="og:locale" content="tr_TR" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="${escapeHtml(card.title)}" />
 <meta name="twitter:description" content="${escapeHtml(description)}" />
 <meta name="twitter:image" content="${escapeHtml(image)}" />
+<meta name="twitter:image:alt" content="${escapeHtml(card.title)}" />
 <meta property="al:ios:url" content="${escapeHtml(deepLink)}" />
 <meta property="al:ios:app_store_id" content="${IOS_APP_ID}" />
 <meta property="al:ios:app_name" content="Trabzone" />

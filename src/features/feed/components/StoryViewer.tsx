@@ -6,7 +6,7 @@ import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, View } from 're
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppText, Avatar, IconButton } from '@/components/ui';
-import { publicMediaUrl } from '@/features/media/media-service';
+import { publicMediaUrl, removeMedia } from '@/features/media/media-service';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatRelativeTr } from '@/utils/date';
@@ -15,6 +15,12 @@ import { useDeleteStory, useMarkStoryViewed, useStoryViewers } from '../hooks/us
 import type { StoryGroup } from '../services/stories-service';
 
 const IMAGE_DURATION = 5000;
+
+// Üst çubuk yüksekliği: 6 (üst boşluk) + 9 (ilerleme çubuğu) + 10 (gap) +
+// 44 (buton yüksekliği) = 69. 6px'lik hitSlop payıyla birlikte 80'e yuvarlanır.
+// Dokunma alanları bu sınırın ALTINDAN başlamalı; aksi halde silme/kapat
+// butonlarının üzerine binip dokunuşları yutuyorlar.
+const HEADER_OFFSET = 80;
 
 export function StoryViewer({
   group,
@@ -30,10 +36,16 @@ export function StoryViewer({
   const [index, setIndex] = useState(startIndex);
   const [progress, setProgress] = useState(0);
   const [showViewers, setShowViewers] = useState(false);
+  // Silinen hikâyeler yerelde de düşülür: sorgu yenilenene kadar izleyici
+  // eski kareyi oynatmaya ve ilerleme çubuğunda göstermeye devam ediyordu.
+  const [removedIds, setRemovedIds] = useState<Set<string>>(() => new Set());
   const markViewed = useMarkStoryViewed();
   const deleteStory = useDeleteStory();
 
-  const items = useMemo(() => group?.items ?? [], [group?.items]);
+  const items = useMemo(
+    () => (group?.items ?? []).filter((item) => !removedIds.has(item.id)),
+    [group?.items, removedIds],
+  );
   const active = items[index];
   const isVideo = active?.media_type === 'video';
   const mediaUri = active ? publicMediaUrl('stories', active.media_path) : null;
@@ -163,25 +175,40 @@ export function StoryViewer({
     if (!active) {
       return;
     }
+    const deleted = active;
     Alert.alert('Hikâyeyi sil', 'Bu hikâye kalıcı olarak silinecek.', [
       { text: 'Vazgeç', style: 'cancel' },
       {
         text: 'Sil',
         style: 'destructive',
         onPress: () =>
-          deleteStory.mutate(active.id, {
+          deleteStory.mutate(deleted.id, {
             onSuccess: () => {
-              if (items.length <= 1) {
+              const remaining = items.filter((item) => item.id !== deleted.id);
+              setRemovedIds((current) => {
+                const next = new Set(current);
+                next.add(deleted.id);
+                return next;
+              });
+              // Kayıt silinse bile dosya depolamada kalırsa hikâye
+              // "platformdan kalkmamış" gibi görünür; en iyi çabayla temizle.
+              void removeMedia('stories', [deleted.media_path]).catch(() => {
+                // Depolama temizliği başarısız olsa da hikâye kaydı silindi.
+              });
+              if (remaining.length === 0) {
                 close();
-              } else {
-                advance(1);
+                return;
               }
+              const nextIndex = Math.min(index, remaining.length - 1);
+              setProgress(0);
+              indexRef.current = nextIndex;
+              setIndex(nextIndex);
             },
             onError: (error) => Alert.alert('Silinemedi', error.message),
           }),
       },
     ]);
-  }, [active, advance, close, deleteStory, items.length]);
+  }, [active, close, deleteStory, index, items]);
 
   const segments = useMemo(() => items.map((item) => item.id), [items]);
 
@@ -205,7 +232,25 @@ export function StoryViewer({
         )}
         <View style={styles.scrim} pointerEvents="none" />
 
-        <View style={[styles.top, { paddingTop: insets.top + 6 }]}>
+        {/* Dokunma alanları header'dan ÖNCE çizilir ve header'ın altından
+            başlar. Önceden sonra çiziliyorlardı: absolute konumlu bu iki alan
+            üst çubuğun üzerine binince trash (sil) ve close (kapat)
+            butonlarına yapılan dokunuşlar bu alanlara gidiyor, buton hiç
+            tepki vermiyor gibi görünüyordu. */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Önceki hikâye"
+          style={[styles.prevZone, { top: insets.top + HEADER_OFFSET }]}
+          onPress={() => advance(-1)}
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Sonraki hikâye"
+          style={[styles.nextZone, { top: insets.top + HEADER_OFFSET }]}
+          onPress={() => advance(1)}
+        />
+
+        <View pointerEvents="box-none" style={[styles.top, { paddingTop: insets.top + 6 }]}>
           <View style={styles.progress}>
             {segments.map((id, segmentIndex) => (
               <View key={id} style={styles.segmentTrack}>
@@ -258,19 +303,6 @@ export function StoryViewer({
             />
           </View>
         </View>
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Önceki hikâye"
-          style={styles.prevZone}
-          onPress={() => advance(-1)}
-        />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Sonraki hikâye"
-          style={styles.nextZone}
-          onPress={() => advance(1)}
-        />
 
         <View style={[styles.bottom, { paddingBottom: insets.bottom + 16 }]}>
           {active.caption ? (
@@ -347,7 +379,10 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: 'rgba(5,8,15,0.15)',
   },
-  top: { paddingHorizontal: 12, gap: 10 },
+  // `zIndex`: absolute konumlu dokunma alanları web'de varsayılan olarak
+  // normal akıştaki bu çubuğun üzerine boyanıyor; bu yüzden üst çubuk açıkça
+  // bir kat yukarı alınır (aksi halde sil/kapat butonları tıklanamıyordu).
+  top: { paddingHorizontal: 12, gap: 10, zIndex: 2 },
   progress: { flexDirection: 'row', gap: 4, paddingTop: 6 },
   segmentTrack: {
     flex: 1,
@@ -359,8 +394,8 @@ const styles = StyleSheet.create({
   segmentFill: { height: '100%', borderRadius: 2 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   headerText: { flex: 1, gap: 1 },
-  prevZone: { position: 'absolute', left: 0, top: 90, bottom: 110, width: '32%' },
-  nextZone: { position: 'absolute', right: 0, top: 90, bottom: 110, width: '68%' },
+  prevZone: { position: 'absolute', left: 0, bottom: 110, width: '32%' },
+  nextZone: { position: 'absolute', right: 0, bottom: 110, width: '68%' },
   bottom: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 20, gap: 12 },
   captionWrap: {
     alignSelf: 'center',

@@ -23,7 +23,7 @@ import {
 } from '@/features/admin/hooks/use-admin';
 import type { Campaign } from '@/features/admin/types';
 import { useTheme } from '@/theme/ThemeProvider';
-import { formatDateTimeTr, formatRelativeTr } from '@/utils/date';
+import { formatDateTimeTr } from '@/utils/date';
 
 const STATUS: Record<
   Campaign['status'],

@@ -78,7 +78,7 @@ export function MapCanvasFallback({ camera, markers = [], message, onMarkerPress
                 <View
                   style={[
                     styles.staticPinBody,
-                    { backgroundColor: toneColor(theme, markerTone(point.kind)) },
+                    { backgroundColor: point.color ?? toneColor(theme, markerTone(point.kind)) },
                   ]}
                 >
                   <AppText variant="caption" style={styles.staticPinText}>

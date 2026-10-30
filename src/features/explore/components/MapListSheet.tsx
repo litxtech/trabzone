@@ -7,6 +7,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 
 import type { ExploreMarker } from '../types';
 import { formatDecimal, formatPrice, metersLabel } from '../utils/format';
+import { PlaceCoverImage } from './PlaceCoverImage';
 import { StorageImage } from './StorageImage';
 
 type Props = {
@@ -47,11 +48,22 @@ export function MapListSheet({ visible, markers, total, truncated, onSelect, onC
               },
             ]}
           >
-            <StorageImage
-              path={marker.cover_path}
-              bucket={isPlace ? 'place-media' : 'real-estate-media'}
-              style={styles.thumb}
-            />
+            {isPlace ? (
+              <PlaceCoverImage
+                coverPath={marker.cover_path}
+                name={marker.name}
+                lat={marker.lat}
+                lng={marker.lng}
+                size="thumb"
+                recycleKey={marker.id}
+                style={styles.thumb}
+                fallback={
+                  <Ionicons name="storefront-outline" size={20} color={theme.colors.textTertiary} />
+                }
+              />
+            ) : (
+              <StorageImage path={marker.cover_path} bucket="real-estate-media" style={styles.thumb} />
+            )}
             <View style={styles.text}>
               <AppText variant="bodyStrong" numberOfLines={1}>
                 {isPlace ? marker.name : marker.title}

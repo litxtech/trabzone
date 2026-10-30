@@ -224,6 +224,93 @@ export function RouteLineText({ origin, dest }: { origin: string; dest: string }
   );
 }
 
+/**
+ * Nereden → nereye bilgisini iki satırda, kesintisiz ve okunur biçimde gösterir.
+ * Kartların başlığı budur: tek bakışta kalkış ve varış anlaşılır.
+ */
+export function RideRouteBlock({
+  origin,
+  dest,
+  emphasis = false,
+}: {
+  origin: string;
+  dest: string;
+  emphasis?: boolean;
+}) {
+  const { theme } = useTheme();
+  const variant = emphasis ? 'title' : 'bodyStrong';
+  return (
+    <View style={styles.routeBlock}>
+      <View style={styles.routeDotRow}>
+        <View style={[styles.routeDot, { backgroundColor: theme.colors.success }]} />
+        <AppText variant={variant} numberOfLines={1} style={styles.flex}>
+          {origin}
+        </AppText>
+      </View>
+      <View style={[styles.routeConnector, { borderColor: theme.colors.borderStrong }]} />
+      <View style={styles.routeDotRow}>
+        <View style={[styles.routeDot, { backgroundColor: theme.colors.primary }]} />
+        <AppText variant={variant} numberOfLines={1} style={styles.flex}>
+          {dest}
+        </AppText>
+      </View>
+    </View>
+  );
+}
+
+/** Ana sayfadaki iki temel akış için kompakt, büyümeyen eylem kartı. */
+export function RideQuickAction({
+  icon,
+  title,
+  subtitle,
+  tone = 'surface',
+  onPress,
+}: {
+  icon: IconName;
+  title: string;
+  subtitle?: string;
+  tone?: 'surface' | 'primary' | 'accent';
+  onPress: () => void;
+}) {
+  const { theme } = useTheme();
+  const accent =
+    tone === 'primary'
+      ? theme.colors.primary
+      : tone === 'accent'
+        ? theme.colors.accent
+        : theme.colors.primaryDeep;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.quickAction,
+        {
+          backgroundColor: theme.colors.surface,
+          borderColor: theme.colors.border,
+          opacity: pressed ? 0.8 : 1,
+        },
+      ]}
+    >
+      <View style={[styles.quickActionIcon, { backgroundColor: theme.colors.surfaceMuted }]}>
+        <Ionicons name={icon} size={17} color={accent} />
+      </View>
+      <View style={styles.flex}>
+        <AppText variant="label" numberOfLines={1}>
+          {title}
+        </AppText>
+        {subtitle ? (
+          <AppText variant="caption" color="textTertiary" numberOfLines={1}>
+            {subtitle}
+          </AppText>
+        ) : null}
+      </View>
+      <Ionicons name="chevron-forward" size={14} color={theme.colors.textTertiary} />
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   stat: { alignItems: 'center', gap: 1, minWidth: 58 },
@@ -275,4 +362,25 @@ const styles = StyleSheet.create({
   routeLine: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   routeDot: { width: 7, height: 7, borderRadius: 4 },
   routeText: { flexShrink: 1, maxWidth: '40%' },
+  routeBlock: { gap: 0, minWidth: 0 },
+  routeDotRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  routeConnector: { borderLeftWidth: 1, borderStyle: 'dashed', height: 11, marginLeft: 3 },
+  quickAction: {
+    flex: 1,
+    minWidth: 140,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+  },
+  quickActionIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

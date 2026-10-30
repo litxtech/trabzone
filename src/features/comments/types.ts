@@ -1,4 +1,5 @@
-export type CommentContentType = 'post' | 'reel';
+/** `match`: Maç Arenası yorumları; content_id = sports_fixtures.uid. */
+export type CommentContentType = 'post' | 'reel' | 'match';
 
 export type CommentMediaItem = {
   id: string;

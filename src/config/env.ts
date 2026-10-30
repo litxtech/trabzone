@@ -14,6 +14,7 @@ const rawEnv = {
   EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
   EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
   EXPO_PUBLIC_R2_PUBLIC_URL: process.env.EXPO_PUBLIC_R2_PUBLIC_URL,
+  EXPO_PUBLIC_PLACE_SEARCH_URL: process.env.EXPO_PUBLIC_PLACE_SEARCH_URL,
 };
 
 const booleanFlag = z
@@ -60,6 +61,15 @@ const envSchema = z.object({
     .optional()
     .transform((value) => (value && value.trim().length > 0 ? value.trim() : undefined))
     .pipe(z.string().url().optional()),
+  /**
+   * Harici işletme araması uç noktası (Google + Apple haritaları).
+   * Boş bırakılırsa `EXPO_PUBLIC_APP_URL/api/place-search` kullanılır.
+   */
+  EXPO_PUBLIC_PLACE_SEARCH_URL: z
+    .string()
+    .optional()
+    .transform((value) => (value && value.trim().length > 0 ? value.trim() : undefined))
+    .pipe(z.string().url().optional()),
 });
 
 const parsed = envSchema.safeParse(rawEnv);
@@ -70,6 +80,10 @@ if (!parsed.success) {
     .join('\n');
   throw new Error(`Ortam değişkenleri eksik veya hatalı:\n${details}`);
 }
+
+const placeSearchUrl =
+  parsed.data.EXPO_PUBLIC_PLACE_SEARCH_URL ??
+  `${parsed.data.EXPO_PUBLIC_APP_URL.replace(/\/+$/, '')}/api/place-search`;
 
 export const env = {
   supabaseUrl: parsed.data.EXPO_PUBLIC_SUPABASE_URL,
@@ -87,5 +101,11 @@ export const env = {
    * kalır ve imzalı GET ile okunur.
    */
   r2PublicUrl: parsed.data.EXPO_PUBLIC_R2_PUBLIC_URL ?? null,
+  /** Harici (Google/Apple) işletme araması uç noktası. */
+  placeSearchUrl,
+  /** Fotoğrafı olmayan işletmeler için Google fotoğrafı uç noktası (arama ucunun kardeşi). */
+  placePhotoUrl: /\/place-search\/?$/.test(placeSearchUrl)
+    ? placeSearchUrl.replace(/\/place-search\/?$/, '/place-photo')
+    : `${parsed.data.EXPO_PUBLIC_APP_URL.replace(/\/+$/, '')}/api/place-photo`,
   isDev: __DEV__,
 } as const;

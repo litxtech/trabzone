@@ -336,6 +336,11 @@ export const CHILD_PROTECTED_EXPLANATION = [
     body: 'Hesabın 18 yaşına gelene kadar yalnızca arkadaşlarına görünür. Profilini herkese açamazsın.',
   },
   {
+    icon: 'document-text-outline' as IoniconName,
+    title: 'Gönderilerin sınırlı paylaşılır',
+    body: 'Gönderilerin ve Reels videoların yalnızca arkadaşlarına görünür; keşfet akışında yabancılara önerilmez.',
+  },
+  {
     icon: 'chatbubbles-outline' as IoniconName,
     title: 'Tanımadığın kişiler ulaşamaz',
     body: 'Mesaj, arama ve yorumlar varsayılan olarak arkadaşlarınla sınırlıdır. Bu korumayı gevşetemezsin.',
@@ -343,12 +348,12 @@ export const CHILD_PROTECTED_EXPLANATION = [
   {
     icon: 'location-outline' as IoniconName,
     title: 'Konumun paylaşılmaz',
-    body: 'Canlı konum paylaşımı ve haritada görünme özelliği hesabın için kapalıdır.',
+    body: 'Canlı konum, şehir ve mekân etiketi gönderilere eklenemez; haritada görünme kapalıdır.',
   },
   {
     icon: 'shield-checkmark-outline' as IoniconName,
-    title: 'Sadece sen, velin ve yönetim görür',
-    body: 'Çocuk Korumalı Hesap rozetini yalnızca sen, velin ve yetkili moderasyon ekibi görebilir. Yabancılar göremez.',
+    title: 'Sadece sen, arkadaşların ve yönetim görür',
+    body: 'Çocuk Hesabı rozetini yabancılar göremez; yalnızca sen, arkadaşların ve yetkili moderasyon ekibi görür.',
   },
 ];
 

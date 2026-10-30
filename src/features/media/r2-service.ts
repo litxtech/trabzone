@@ -126,15 +126,28 @@ export type R2UploadInput = {
   uri: string;
   contentType: string;
   onProgress?: (ratio: number) => void;
+  /**
+   * İptal sinyali. Kullanıcı yükleme sürerken vazgeçerse istek hemen kesilir;
+   * aksi halde büyük bir video arka planda yüklenmeye devam eder.
+   */
+  signal?: AbortSignal;
 };
+
+const cancelledError = () => appError('cancelled');
 
 /** Dosyayı imzalı PUT ile doğrudan R2'ye akıtır. */
 export async function uploadToR2(input: R2UploadInput): Promise<Result<R2UploadResult>> {
   if (!R2_ENABLED) {
     return fail(appError('unknown', 'Büyük dosya deposu yapılandırılmamış.'));
   }
+  if (input.signal?.aborted) {
+    return fail(cancelledError());
+  }
 
   const signedUrl = await requestSignedPut(r2Key(input.bucket, input.path), input.contentType);
+  if (input.signal?.aborted) {
+    return fail(cancelledError());
+  }
   if (!signedUrl) {
     return fail(appError('network', 'Büyük dosya yüklemesi başlatılamadı. Tekrar dene.'));
   }
@@ -161,24 +174,45 @@ export async function uploadToR2(input: R2UploadInput): Promise<Result<R2UploadR
           }
         },
       );
-      const result = await task.uploadAsync();
-      if (!result || result.status < 200 || result.status >= 300) {
-        return fail(failed);
+      // İptal, native yükleme isteğini de keser: yalnızca JS tarafında
+      // beklemeyi bırakmak bağlantıyı ve pili boşa tüketirdi.
+      const abort = () => {
+        void task.cancelAsync().catch(() => undefined);
+      };
+      input.signal?.addEventListener('abort', abort);
+      try {
+        const result = await task.uploadAsync();
+        if (input.signal?.aborted) {
+          return fail(cancelledError());
+        }
+        // İptal edilen yükleme `null` döner.
+        if (!result || result.status < 200 || result.status >= 300) {
+          return fail(failed);
+        }
+      } finally {
+        input.signal?.removeEventListener('abort', abort);
       }
     } else {
       // Web: dosya bellekten gönderilir (R2 tarafında CORS izni gerekir).
       const response = await fetch(input.uri);
       const blob = await response.blob();
+      if (input.signal?.aborted) {
+        return fail(cancelledError());
+      }
       const put = await fetch(signedUrl, {
         method: 'PUT',
         headers: { 'Content-Type': input.contentType },
         body: blob,
+        signal: input.signal,
       });
       if (!put.ok) {
         return fail(failed);
       }
     }
-  } catch {
+  } catch (error) {
+    if (input.signal?.aborted || (error as { name?: string } | null)?.name === 'AbortError') {
+      return fail(cancelledError());
+    }
     return fail(failed);
   }
 

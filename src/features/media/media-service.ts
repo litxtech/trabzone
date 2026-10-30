@@ -5,7 +5,7 @@ import { appError } from '@/services/errors';
 import { supabase } from '@/services/supabase/client';
 import { fail, ok, type Result } from '@/utils/result';
 
-import { localFileSize } from './local-file';
+import { localFileSize, releaseTempFile } from './local-file';
 import {
   deleteFromR2,
   isPrivateBucket,
@@ -28,7 +28,8 @@ export type MediaBucket =
   | 'message-media'
   | 'reels'
   | 'place-media'
-  | 'real-estate-media';
+  | 'real-estate-media'
+  | 'ad-media';
 
 export type UploadInput = {
   bucket: MediaBucket;
@@ -50,6 +51,11 @@ export type UploadInput = {
   fileSize?: number | null;
   /** Sıkıştırma (0..1) ve yükleme aşamaları için ilerleme bildirimi. */
   onProgress?: (stage: UploadStage, ratio: number) => void;
+  /**
+   * İptal sinyali. Paylaşım sürerken kullanıcı vazgeçerse hazırlık ve yükleme
+   * durdurulur; yarım kalan dosya depoda bırakılmaz.
+   */
+  signal?: AbortSignal;
 };
 
 export type UploadStage = 'preparing' | 'uploading';
@@ -228,6 +234,10 @@ export async function uploadMedia(input: UploadInput): Promise<Result<UploadedMe
   const guessedMime = inferMime(input.uri, input.mime);
   const kind = kindFor(guessedMime);
 
+  if (input.signal?.aborted) {
+    return fail(appError('cancelled'));
+  }
+
   if (kind === 'audio' || kind === 'file') {
     if (input.bucket !== 'message-media') {
       return fail(appError('invalid_input', 'Bu dosya türü yalnızca mesajlarda paylaşılabilir.'));
@@ -273,7 +283,15 @@ export async function uploadMedia(input: UploadInput): Promise<Result<UploadedMe
     preparedVideo = await prepareVideoForUpload(source, {
       // Sohbet medyası da sınırsız: R2'ye gider, sıkıştırma yalnızca hız için.
       onProgress: (ratio) => input.onProgress?.('preparing', ratio),
+      signal: input.signal,
     });
+    if (input.signal?.aborted) {
+      // Sıkıştırma sırasında vazgeçildiyse geçici çıktıyı depoya taşımayalım.
+      if (preparedVideo.compressed) {
+        void releaseTempFile(preparedVideo.uri);
+      }
+      return fail(appError('cancelled'));
+    }
     preparedUri = preparedVideo.uri;
     width = preparedVideo.width ?? width;
     height = preparedVideo.height ?? height;
@@ -314,6 +332,7 @@ export async function uploadMedia(input: UploadInput): Promise<Result<UploadedMe
     path: r2Path,
     uri: preparedUri,
     contentType,
+    signal: input.signal,
     onProgress: (ratio) => input.onProgress?.('uploading', ratio),
   });
   if (!uploaded.ok) {
@@ -361,6 +380,7 @@ export async function uploadVideoWithPoster(input: UploadInput): Promise<Result<
       fileName: 'poster.jpg',
       // Kapak zaten 0.72 kalitede küçük bir JPEG; yeniden kodlamak gereksiz.
       compressImages: false,
+      signal: input.signal,
     });
     return uploaded.ok ? uploaded.data : null;
   })();
@@ -391,6 +411,11 @@ export async function uploadVideoWithPoster(input: UploadInput): Promise<Result<
   return ok({
     video: {
       ...video.data,
+      // Sıkıştırıcı video boyutlarını bildirmezse kapak karesinin oranı
+      // kullanılır. Aksi hâlde akış kartı videoyu kare kırpıyordu.
+      width: video.data.width ?? poster.width ?? null,
+      height: video.data.height ?? poster.height ?? null,
+      durationMs: video.data.durationMs ?? input.durationMs ?? null,
       thumbnailPath: poster.path,
       thumbnailUrl: poster.publicUrl,
     },

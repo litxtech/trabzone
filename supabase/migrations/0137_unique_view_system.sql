@@ -1035,8 +1035,7 @@ insert into public.content_view_daily as d (view_date, content_type, new_views)
 select (v.viewed_at at time zone 'utc')::date, 'reel', count(*)
 from public.reel_views v
 group by 1
-on conflict (view_date, content_type) do update
-  set new_views = d.new_views + excluded.new_views;
+on conflict (view_date, content_type) do nothing;
 
 insert into public.content_view_counters (
   content_type, content_id, unique_views, legacy_views, legacy_label,

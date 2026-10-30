@@ -30,7 +30,7 @@ export function ReelEditSheet({
   const [caption, setCaption] = useState(reel?.caption ?? '');
   const [coverPath, setCoverPath] = useState<string | null>(reel?.cover_path ?? null);
   const [coverUri, setCoverUri] = useState<string | null>(
-    reelUrl(reel?.cover_path) ?? null,
+    reelUrl(reel?.cover_path, reel?.storage_bucket ?? 'reels') ?? null,
   );
   const [uploadingCover, setUploadingCover] = useState(false);
 

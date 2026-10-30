@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ComponentRef } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { AppText, Button, TextField } from '@/components/ui';
-import { env } from '@/config/env';
+import { socialAvailability } from '@/features/auth/social-availability';
 import { safeNextPath } from '@/features/auth/next-path';
 import { finishSignUpFromMetadata } from '@/features/auth/signup-completion';
 import { SavedAccountsPicker } from '@/features/auth/components/SavedAccountsPicker';
@@ -16,6 +16,7 @@ import {
   type SavedAccount,
 } from '@/features/auth/saved-accounts';
 import { fetchPendingAcceptances } from '@/features/legal/services/legal-service';
+import { PolicyLinks } from '@/features/legal/components/RegistrationPolicies';
 import { fetchMyProfile } from '@/features/profile/services/profile-service';
 import { signInWithPassword } from '@/services/supabase/auth';
 import { useAuthStatus, useSession } from '@/stores/auth-store';
@@ -241,7 +242,7 @@ export function WebLoginPage() {
         />
       </View>
 
-      {env.enableSocialAuth ? (
+      {socialAvailability().any ? (
         <>
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
@@ -271,10 +272,13 @@ export function WebLoginPage() {
         </Link>
       </View>
 
-      <AppText variant="caption" color="textTertiary" align="center" style={styles.legal}>
-        Giriş yaparak Kullanım Koşulları ve Gizlilik Politikası kapsamında hesabına erişirsin.
-        Mevcut kabul kayıtların korunur.
-      </AppText>
+      <View style={styles.legal}>
+        <AppText variant="caption" color="textTertiary" align="center">
+          Giriş yaparak mevcut kabul kayıtların korunur; kayıt sırasında onayladığın sözleşme ve
+          politikalar geçerli kalır.
+        </AppText>
+        <PolicyLinks align="center" />
+      </View>
     </WebAuthLayout>
   );
 }
@@ -291,5 +295,5 @@ const styles = StyleSheet.create({
   notice: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 10 },
   smallButton: { width: 100 },
   helpLinks: { alignItems: 'center', gap: 8 },
-  legal: { lineHeight: 17 },
+  legal: { gap: 8 },
 });

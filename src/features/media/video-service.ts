@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 
 import { releaseTempFile } from './local-file';
 
@@ -202,6 +203,16 @@ const META_TIMEOUT_MS = 4_000;
 /** Kapak üretimi bu sürede bitmezse kapaksız devam edilir. */
 const POSTER_TIMEOUT_MS = 8_000;
 /**
+ * Kapağın uzun kenarı.
+ *
+ * Kapak; akış kartı, sohbet balonu ve paylaşım kartı (`og:image`) için
+ * kullanılır. Native üretici kareyi videonun **tam** çözünürlüğünde veriyor
+ * (ör. 2160x3840 → ~650 KB). WhatsApp/Telegram bağlantı önizlemesi ~300 KB
+ * üstündeki görselleri yok saydığı için paylaşılan gönderide görsel
+ * görünmüyordu. 1080 px uzun kenar her yerde net görünür ve ~150 KB kalır.
+ */
+const POSTER_MAX_SIDE = 1080;
+/**
  * Kodlama ilerlemesi bu süre boyunca hiç gelmezse iş takılmış sayılır.
  *
  * MediaCodec/AVAssetWriter bazı bozuk kaynaklarda hatayı bildirmeden kilitlenir
@@ -362,6 +373,11 @@ export type PrepareVideoOptions = {
   targetBytes?: number | null;
   /** 0..1 arası kodlama ilerlemesi. */
   onProgress?: (progress: number) => void;
+  /**
+   * İptal sinyali. Paylaşımdan vazgeçilirse süren kodlama durdurulur ve
+   * orijinal dosya döner; yeni kodlama başlatılmaz.
+   */
+  signal?: AbortSignal;
 };
 
 type PreparedEntry = {
@@ -416,6 +432,18 @@ export function prepareVideoForUpload(
   const key = preparedKey(source.uri, maxLongSide, targetBytes);
   let entry = preparedCache.get(key);
 
+  // Vazgeçilmiş bir istek için yeni kodlama başlatılmaz: kullanıcı zaten
+  // paylaşımdan dönmüş, cihazı yormak gereksiz.
+  if (!entry && options.signal?.aborted) {
+    return Promise.resolve({
+      uri: source.uri,
+      ...normalizeMeta(source),
+      compressed: false,
+      compressorUnavailable: false,
+      exceedsLimit: false,
+    });
+  }
+
   if (!entry) {
     const created: PreparedEntry = {
       promise: Promise.resolve({
@@ -428,10 +456,16 @@ export function prepareVideoForUpload(
       ratio: 0,
       listeners: new Set(),
     };
-    created.promise = runPrepare(source, maxLongSide, targetBytes, (ratio) => {
-      created.ratio = ratio;
-      created.listeners.forEach((listener) => listener(ratio));
-    }).then((prepared) => {
+    created.promise = runPrepare(
+      source,
+      maxLongSide,
+      targetBytes,
+      (ratio) => {
+        created.ratio = ratio;
+        created.listeners.forEach((listener) => listener(ratio));
+      },
+      options.signal,
+    ).then((prepared) => {
       created.ratio = 1;
       created.listeners.forEach((listener) => listener(1));
       return prepared;
@@ -454,6 +488,24 @@ export function prepareVideoForUpload(
       });
   }
 
+  // İptal sinyali, süren native kodlamayı da durdurur. Aksi halde kullanıcı
+  // vazgeçse bile encoder çalışmaya devam ediyordu.
+  const signal = options.signal;
+  if (signal) {
+    const onAbort = () => cancelVideoPreparation(source.uri);
+    if (signal.aborted) {
+      onAbort();
+    } else {
+      signal.addEventListener('abort', onAbort, { once: true });
+      const current = entry;
+      void current.promise
+        .catch(() => undefined)
+        .then(() => {
+          signal.removeEventListener('abort', onAbort);
+        });
+    }
+  }
+
   return entry.promise;
 }
 
@@ -471,10 +523,11 @@ async function runPrepare(
   maxLongSide: number,
   targetBytes: number | null,
   report: (ratio: number) => void,
+  signal?: AbortSignal,
 ): Promise<PreparedVideo> {
   const meta = normalizeMeta(source);
   try {
-    return await encodeForUpload(source, maxLongSide, targetBytes, report);
+    return await encodeForUpload(source, maxLongSide, targetBytes, report, signal);
   } catch {
     // Beklenmeyen bir hata paylaşımı engellemesin: orijinal dosya yüklenir.
     return {
@@ -616,6 +669,7 @@ async function encodeForUpload(
   maxLongSide: number,
   targetBytes: number | null,
   report: (ratio: number) => void,
+  signal?: AbortSignal,
 ): Promise<PreparedVideo> {
   const compressor = await loadVideoCompressor();
   const sourceMeta = normalizeMeta(source);
@@ -663,6 +717,10 @@ async function encodeForUpload(
     bitrate: number,
     maxSize: number,
   ): Promise<PreparedVideo | null> => {
+    // Sırada beklerken vazgeçilmiş olabilir: boşuna kodlama başlatma.
+    if (signal?.aborted) {
+      return null;
+    }
     try {
       const uri = await runExclusiveNativeVideo(() =>
         compressWithStallGuard(compressor, source.uri, bitrate, maxSize, report),
@@ -757,6 +815,112 @@ export function cachedVideoPoster(uri: string, timeMs = 400): string | null {
 }
 
 /**
+ * Web'de kapak üretimi: `<video>` ilk karesi tuvale çizilip JPEG'e çevrilir.
+ *
+ * `expo-video-thumbnails` web'de native modül olmadığı için `null` dönüyordu ve
+ * paylaşım ekranında video kutusu boş görünüyordu. R2 medyası
+ * `Access-Control-Allow-Origin: *` gönderdiği için tuval kirlenmez; tarayıcı
+ * dosyası (`blob:`) ve uzak adresler aynı yolla çalışır.
+ */
+async function webVideoPoster(uri: string, timeMs: number): Promise<PosterResult | null> {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+  const video = document.createElement('video');
+  video.crossOrigin = 'anonymous';
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = 'auto';
+  video.src = uri;
+
+  const release = () => {
+    video.removeAttribute('src');
+    try {
+      video.load();
+    } catch {
+      // Yoksay: zaten boşaltılmış bir öğe.
+    }
+  };
+
+  try {
+    await withTimeout(
+      new Promise<void>((resolve, reject) => {
+        video.onloadeddata = () => resolve();
+        video.onerror = () => reject(new Error('poster-load-failed'));
+      }),
+      POSTER_TIMEOUT_MS,
+      'poster-web',
+    );
+
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    const wanted = Math.max(0, Math.min(timeMs, 1000)) / 1000;
+    const target = duration > 0.1 ? Math.min(wanted, duration * 0.5, duration - 0.05) : 0;
+    if (target > 0.02) {
+      try {
+        await withTimeout(
+          new Promise<void>((resolve, reject) => {
+            video.onseeked = () => resolve();
+            video.onerror = () => reject(new Error('poster-seek-failed'));
+            video.currentTime = target;
+          }),
+          POSTER_TIMEOUT_MS,
+          'poster-seek',
+        );
+      } catch {
+        // Arama başarısızsa yüklenen ilk kare kullanılır.
+      }
+    }
+
+    const sourceWidth = video.videoWidth || 720;
+    const sourceHeight = video.videoHeight || 1280;
+    const scale = Math.min(1, POSTER_MAX_SIDE / Math.max(sourceWidth, sourceHeight));
+    const width = Math.max(1, Math.round(sourceWidth * scale));
+    const height = Math.max(1, Math.round(sourceHeight * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) {
+      return null;
+    }
+    context.drawImage(video, 0, 0, width, height);
+    return { uri: canvas.toDataURL('image/jpeg', 0.72), width, height };
+  } catch {
+    return null;
+  } finally {
+    release();
+  }
+}
+
+/**
+ * Kapağı `POSTER_MAX_SIDE` ile sınırlar. Native üretici tam çözünürlük verdiği
+ * için hem akışta bellek hem paylaşım kartında dosya boyutu bundan etkilenir.
+ */
+async function shrinkPoster(poster: PosterResult): Promise<PosterResult> {
+  const { uri, width, height } = poster;
+  // Boyut bilinmiyorsa ölçekleme yapılmaz: yanlış yönde büyütmek dosyayı
+  // küçültmek yerine büyütür.
+  if (!width || !height || Math.max(width, height) <= POSTER_MAX_SIDE) {
+    return poster;
+  }
+  try {
+    const context = ImageManipulator.manipulate(uri);
+    context.resize(width >= height ? { width: POSTER_MAX_SIDE } : { height: POSTER_MAX_SIDE });
+    const rendered = await context.renderAsync();
+    const saved = await rendered.saveAsync({ compress: 0.7, format: SaveFormat.JPEG });
+    return {
+      uri: saved.uri,
+      width: positive(saved.width) ?? width,
+      height: positive(saved.height) ?? height,
+    };
+  } catch {
+    return poster;
+  }
+}
+
+type PosterResult = { uri: string; width: number | null; height: number | null };
+
+/**
  * Video için yerel bir kapak (ilk kare) üretir. Sonuç ekranlar arasında
  * paylaşılan bir bellek önbelleğinde tutulur; aynı video için tekrar
  * üretilmez.
@@ -764,11 +928,19 @@ export function cachedVideoPoster(uri: string, timeMs = 400): string | null {
 export async function generateVideoPoster(
   uri: string,
   timeMs = 400,
-): Promise<{ uri: string; width: number | null; height: number | null } | null> {
+): Promise<PosterResult | null> {
   const key = `${uri}#${timeMs}`;
   const cached = posterCache.get(key);
   if (cached) {
     return { uri: cached, width: null, height: null };
+  }
+  if (Platform.OS === 'web') {
+    const web = await webVideoPoster(uri, timeMs);
+    if (!web) {
+      return null;
+    }
+    posterCache.set(key, web.uri);
+    return web;
   }
   const thumbnails = loadVideoThumbnails();
   if (!thumbnails) {
@@ -785,12 +957,13 @@ export async function generateVideoPoster(
         'poster',
       ),
     );
-    posterCache.set(key, thumbnail.uri);
-    return {
+    const sized = await shrinkPoster({
       uri: thumbnail.uri,
       width: positive(thumbnail.width),
       height: positive(thumbnail.height),
-    };
+    });
+    posterCache.set(key, sized.uri);
+    return sized;
   } catch {
     return null;
   }

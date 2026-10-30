@@ -5,7 +5,6 @@ import { unwrap } from '@/utils/result';
 import type {
   NewsCategoryMapping,
   NewsFieldMapping,
-  NewsPermissions,
   NewsSourceProfile,
 } from '@/features/news-api/types';
 

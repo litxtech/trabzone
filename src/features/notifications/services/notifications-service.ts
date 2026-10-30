@@ -13,7 +13,11 @@ export type NotificationKind =
   | 'support'
   | 'security'
   | 'system'
-  | 'mention';
+  | 'mention'
+  | 'earthquake'
+  | 'sports'
+  | 'ride'
+  | 'pharmacy';
 
 export type AppNotification = {
   id: string;
@@ -40,6 +44,7 @@ export type NotificationPage = {
 export const notificationQueryKeys = {
   list: ['notifications', 'list'] as const,
   unread: ['notifications', 'unread'] as const,
+  prefs: ['notifications', 'prefs'] as const,
 };
 
 export async function fetchNotifications(limit = 30, offset = 0): Promise<Result<NotificationPage>> {
@@ -64,6 +69,18 @@ export async function fetchUnreadCount(): Promise<Result<number>> {
   return ok(typeof data === 'number' ? data : 0);
 }
 
+/** `ids` verilmezse kullanıcının tüm bildirimleri silinir. */
+export async function deleteNotifications(ids?: string[]): Promise<Result<number>> {
+  const { data, error } = await supabase.rpc('notifications_delete', {
+    p_ids: ids && ids.length > 0 ? ids : null,
+  });
+
+  if (error) {
+    return fail(rpcError(error));
+  }
+  return ok(typeof data === 'number' ? data : 0);
+}
+
 export async function markNotificationsRead(ids?: string[]): Promise<Result<number>> {
   const { data, error } = await supabase.rpc('notifications_mark_read', {
     p_ids: ids && ids.length > 0 ? ids : null,
@@ -73,4 +90,61 @@ export async function markNotificationsRead(ids?: string[]): Promise<Result<numb
     return fail(rpcError(error));
   }
   return ok(typeof data === 'number' ? data : 0);
+}
+
+export type NotificationPrefs = {
+  saved: boolean;
+  push_enabled: boolean;
+  sound_enabled: boolean;
+  quiet_hours_enabled: boolean;
+  quiet_start_hour: number;
+  quiet_end_hour: number;
+  likes: boolean;
+  comments: boolean;
+  follows: boolean;
+  messages: boolean;
+  orders: boolean;
+  support: boolean;
+  devices: {
+    platform: string | null;
+    app_version: string | null;
+    os_version: string | null;
+    last_seen_at: string | null;
+  }[];
+};
+
+export type NotificationPrefsInput = Omit<NotificationPrefs, 'saved' | 'devices'>;
+
+/** Uygulama içi + push tercihleri tek çağrıda (sunucu varsayılanlarıyla). */
+export async function fetchNotificationPrefs(): Promise<Result<NotificationPrefs>> {
+  const { data, error } = await supabase.rpc('notification_prefs_get');
+  if (error) {
+    return fail(rpcError(error));
+  }
+  return ok(data as NotificationPrefs);
+}
+
+export async function saveNotificationPrefs(input: NotificationPrefsInput): Promise<Result<NotificationPrefs>> {
+  const { data, error } = await supabase.rpc('notification_prefs_set', { p_payload: input });
+  if (error) {
+    return fail(rpcError(error));
+  }
+  return ok(data as NotificationPrefs);
+}
+
+export type PushTestResult = { ok: boolean; reason?: 'no_device' | string; devices?: number };
+
+export type PushTestKind = 'system' | 'pharmacy';
+
+/**
+ * Test bildirimi kuyruğa girer; push-dispatch bir sonraki turda gönderir.
+ * `pharmacy` nöbetçi eczane bildirimiyle aynı kanalı/başlığı kullanır, böylece
+ * arka plan teslimatı gerçek duyuruyla birebir doğrulanır.
+ */
+export async function sendPushTest(kind: PushTestKind = 'system'): Promise<Result<PushTestResult>> {
+  const { data, error } = await supabase.rpc('notification_push_test', { p_kind: kind });
+  if (error) {
+    return fail(rpcError(error));
+  }
+  return ok((data ?? { ok: false }) as PushTestResult);
 }

@@ -3,7 +3,7 @@
  * Post-build SEO generator for the Expo web export.
  * Writes route-specific HTML shells, sitemap.xml, robots.txt and webmanifest.
  */
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -414,13 +414,89 @@ function headFor(page) {
     <script type="application/ld+json">${pageJsonLd(page)}</script>`;
 }
 
+/**
+ * Açılış kabuğu `#root` dışında sabit bir katmandır; uygulama hazır olunca
+ * `src/features/web/boot-shell.ts` onu kaldırır. Ana sayfada (yalnızca `/`)
+ * JS beklenmeden gerçek hero (görsel + başlık + giriş bağlantıları) çizilir;
+ * böylece LCP, ~5 MB'lık uygulama paketinin inip çalışmasını beklemez.
+ * Diğer rotalarda yalnızca yükleniyor ekranı görünür.
+ */
+const SHELL_ROUTE_SCRIPT = `<script>(function(){var d=document.documentElement,p=location.pathname;d.classList.add('tz-shell-on');if(p==='/'||p==='/index.html'){d.classList.add('tz-home');}})();</script>`;
+
 const BOOT_STYLES = `
+    ${SHELL_ROUTE_SCRIPT}
     <style id="tz-boot-style">
       html, body { height: 100%; margin: 0; background: #0b1020; }
       /* Sayfa kaydırması açık: içerik ekran yüksekliğini aştığında tekerlek,
          klavye ve tarayıcı kaydırma çubuğu çalışır. */
       body { overflow-x: hidden; overflow-y: auto; }
+      html.tz-shell-on, html.tz-shell-on body { overflow: hidden; }
       #root { display: flex; height: 100%; flex: 1; }
+      #tz-shell { position: fixed; inset: 0; z-index: 9999; transition: opacity .2s ease; }
+      #tz-shell.tz-shell--out { opacity: 0; pointer-events: none; }
+      .tz-hero { display: none; }
+      html.tz-home .tz-hero { display: block; }
+      html.tz-home .tz-boot { display: none; }
+      .tz-hero {
+        position: absolute; inset: 0; overflow: hidden; background: #05080f; color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      .tz-hero__bar {
+        position: absolute; top: 0; left: 0; right: 0; z-index: 2; height: 56px; box-sizing: border-box;
+        display: flex; align-items: center; gap: 9px; padding: 0 16px;
+        background: rgba(5, 8, 15, .92); border-bottom: 1px solid rgba(120, 150, 220, .16);
+      }
+      .tz-hero__mark {
+        width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+        background: linear-gradient(135deg, #6284ff, #8057f4); font-weight: 800; font-size: 16px;
+      }
+      .tz-hero__brand { font-weight: 800; font-size: 15px; letter-spacing: 3px; flex: 1; }
+      .tz-hero__login { color: #dce6ff; font-size: 13px; font-weight: 600; padding: 8px 12px; }
+      /* Görsel tam ekranı kaplamaz (alttan 2px boşluk): Chrome tam ekran
+         görselleri arka plan sayıp LCP adayı yapmaz. Üst bar görselin üstüne
+         biner; böylece görsel, React hero'sundan (başlığın altında başlar)
+         daha büyük kalır ve LCP JS paketini beklemez. */
+      .tz-hero__stage { position: absolute; top: 0; left: 0; right: 0; bottom: 2px; overflow: hidden; padding-top: 56px; }
+      .tz-hero__img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      .tz-hero__shade {
+        position: absolute; inset: 0;
+        background:
+          linear-gradient(180deg, rgba(4,7,14,0) 0%, rgba(4,7,14,.55) 60%, rgba(4,7,14,.9) 100%),
+          linear-gradient(135deg, rgba(4,7,14,.94) 0%, rgba(8,18,40,.88) 50%, rgba(12,23,48,.8) 100%);
+      }
+      .tz-hero__inner {
+        position: relative; box-sizing: border-box; max-width: 1280px; margin: 0 auto;
+        padding: 46px 24px 40px; display: flex; flex-direction: column; gap: 14px;
+      }
+      .tz-hero__chip {
+        align-self: flex-start; display: inline-flex; align-items: center; gap: 7px; margin: 0;
+        padding: 6px 11px; border-radius: 999px; background: rgba(65,105,245,.14);
+        border: 1px solid rgba(100,140,240,.28); color: #9db6ff; font-size: 10px; font-weight: 700; letter-spacing: 1.1px;
+      }
+      .tz-hero__chip::before { content: ''; width: 6px; height: 6px; border-radius: 3px; background: #4ad295; }
+      .tz-hero__word {
+        margin: 2px 0 0; font-size: 44px; line-height: 1.16; font-weight: 800; letter-spacing: .06em;
+        background: linear-gradient(90deg, #fff, #9db6ff 55%, #a78bfa); -webkit-background-clip: text;
+        background-clip: text; color: transparent;
+      }
+      .tz-hero__title { margin: 0; max-width: 560px; font-size: 23px; line-height: 32px; font-weight: 700; letter-spacing: -.4px; }
+      .tz-hero__desc { margin: 0; max-width: 510px; font-size: 15.5px; line-height: 24px; color: #a7b4cf; }
+      .tz-hero__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+      .tz-hero__btn {
+        display: inline-flex; align-items: center; justify-content: center; height: 50px; box-sizing: border-box;
+        padding: 0 18px; border-radius: 14px; color: #fff; font-size: 14px; font-weight: 700;
+      }
+      .tz-hero__btn--primary { min-width: 150px; background: linear-gradient(135deg, #6284ff, #8057f4); }
+      .tz-hero__btn--glass { background: rgba(255,255,255,.07); border: 1px solid rgba(170,195,245,.26); }
+      @media (max-width: 379px) { .tz-hero__word { font-size: 38px; } }
+      @media (min-width: 720px) { .tz-hero__word { font-size: 48px; } }
+      @media (min-width: 1024px) {
+        .tz-hero__bar { height: 72px; padding: 0 28px; }
+        .tz-hero__stage { padding-top: 72px; }
+        .tz-hero__inner { min-height: 640px; justify-content: center; padding: 54px 24px 48px; }
+        .tz-hero__word { font-size: 66px; }
+        .tz-hero__title { font-size: 31px; line-height: 42px; }
+      }
       .tz-boot {
         position: fixed; inset: 0; z-index: 9999;
         display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -485,6 +561,69 @@ const BOOT_STYLES = `
 const BOOT_MARKUP =
   '<div class="tz-boot"><div class="tz-boot__mark">T</div><div class="tz-boot__name">TRABZONE</div><div class="tz-boot__hint">Yükleniyor…</div><div class="tz-boot__bar"></div></div>';
 
+/** Masaüstü için `public/` altındaki daha yüksek çözünürlüklü hero varyantı. */
+const HERO_WIDE = { path: '/hero-trabzon-1800.webp', width: 1800 };
+const HERO_NARROW_WIDTH = 1280;
+
+/**
+ * Metro dışa aktarımı hero görselini içerik hash'iyle adlandırır; uygulama
+ * aynı adresi kullandığından kabuk ile React aynı dosyayı paylaşır (tek indirme).
+ */
+async function findHeroImage() {
+  const dir = path.join(dist, 'assets', 'assets', 'web');
+  let files = [];
+  try {
+    files = await readdir(dir);
+  } catch {
+    return null;
+  }
+  const name = files.find((file) => /^hero-trabzon\.[0-9a-f]+\.webp$/.test(file));
+  if (!name) {
+    return null;
+  }
+  const narrow = `/assets/assets/web/${name}`;
+  let wide = null;
+  try {
+    await access(path.join(dist, HERO_WIDE.path.slice(1)));
+    wide = HERO_WIDE.path;
+  } catch {
+    wide = null;
+  }
+  return { narrow, wide };
+}
+
+function heroMarkup(hero) {
+  const srcset = hero.wide
+    ? ` srcset="${hero.narrow} ${HERO_NARROW_WIDTH}w, ${hero.wide} ${HERO_WIDE.width}w" sizes="100vw"`
+    : '';
+  return `<div class="tz-hero">
+      <div class="tz-hero__bar"><span class="tz-hero__mark">T</span><span class="tz-hero__brand">TRABZONE</span><a class="tz-hero__login" href="/login">Giriş</a></div>
+      <div class="tz-hero__stage">
+        <img class="tz-hero__img" src="${hero.narrow}"${srcset} width="${HERO_NARROW_WIDTH}" height="711" alt="Trabzon şehir manzarası" fetchpriority="high" />
+        <div class="tz-hero__shade"></div>
+        <div class="tz-hero__inner">
+          <p class="tz-hero__chip">TRABZON&apos;UN DİJİTAL MERKEZİ</p>
+          <p class="tz-hero__word" aria-hidden="true">TRABZONE</p>
+          <h1 class="tz-hero__title">Bir Şehirden Daha Fazlası. Birlikte Daha Güçlüyüz.</h1>
+          <p class="tz-hero__desc">Paylaş, keşfet, yeni insanlarla tanış ve Trabzon&apos;un dijital dünyasına katıl.</p>
+          <div class="tz-hero__actions">
+            <a class="tz-hero__btn tz-hero__btn--primary" href="/register">Hemen Katıl</a>
+            <a class="tz-hero__btn tz-hero__btn--glass" href="/login">Giriş Yap</a>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/**
+ * Ana sayfa hero'su `tz-home` işaretleri arasında durur; `server/seo.js` bu
+ * dosyayı başka sayfalar için şablon olarak kullanırken bloğu çıkarır.
+ */
+function shellFor(page, hero) {
+  const home = page.slug === 'home' && hero ? `<!-- tz-home:start -->${heroMarkup(hero)}<!-- tz-home:end -->` : '';
+  return `<!-- tz-shell:start --><div id="tz-shell">${home}${BOOT_MARKUP}</div><!-- tz-shell:end -->`;
+}
+
 function noscriptFor(page) {
   return `<noscript>
       <div style="max-width:760px;margin:0 auto;padding:48px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#10203f;background:#ffffff">
@@ -502,10 +641,11 @@ function noscriptFor(page) {
     </noscript>`;
 }
 
-function inject(template, page) {
+function inject(template, page, hero) {
   let html = template;
   // Önceki çalıştırmadan kalan SEO bloğunu temizle (idempotent üretim).
   html = html.replace(/<!-- tz-seo:start -->[\s\S]*?<!-- tz-seo:end -->/g, '');
+  html = html.replace(/<!-- tz-shell:start -->[\s\S]*?<!-- tz-shell:end -->/g, '');
   html = html.replace(/<html[^>]*>/i, '<html lang="tr">');
   html = html.replace(/<title>[\s\S]*?<\/title>/i, '');
   html = html.replace(/<meta\s+charset=["'][^"']*["'][^>]*>/gi, '');
@@ -516,7 +656,7 @@ function inject(template, page) {
   html = html.replace(/<link\s+rel=["']icon["'][^>]*>/i, '');
   const seoBlock = `<!-- tz-seo:start -->${BOOT_STYLES}\n${headFor(page)}\n<!-- tz-seo:end -->`;
   html = html.replace('</head>', `${seoBlock}\n</head>`);
-  html = html.replace(/<div id="root"><\/div>/i, `<div id="root">${BOOT_MARKUP}</div>`);
+  html = html.replace(/<div id="root">/i, `${shellFor(page, hero)}\n    <div id="root">`);
   html = html.replace(/<noscript>[\s\S]*?<\/noscript>/i, noscriptFor(page));
   return html;
 }
@@ -576,6 +716,18 @@ function sitemapIndex() {
     <loc>${SITE}/sitemap-news.xml</loc>
     <lastmod>${TODAY}</lastmod>
   </sitemap>
+  <sitemap>
+    <loc>${SITE}/sitemap-live-news.xml</loc>
+    <lastmod>${TODAY}</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>${SITE}/sitemap-pharmacy.xml</loc>
+    <lastmod>${TODAY}</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>${SITE}/sitemap-sports.xml</loc>
+    <lastmod>${TODAY}</lastmod>
+  </sitemap>
 </sitemapindex>
 `;
 }
@@ -618,6 +770,7 @@ Disallow: /ride/create
 Disallow: /ride/garage
 Disallow: /ride/trips
 Disallow: /ride/offers
+Disallow: /trabzonspor/bildirimler
 Disallow: /*?q=
 Disallow: /*?ref=
 
@@ -669,6 +822,10 @@ function appleAppSiteAssociation() {
     { '/': '/profile/*' },
     { '/': '/marketplace/place/*' },
     { '/': '/business/*' },
+    { '/': '/eczaneler/*', comment: 'Eczane rehberi ve nöbet detayları' },
+    { '/': '/nobetci-eczaneler/*', comment: 'İlçe nöbetçi eczane listeleri' },
+    { '/': '/deprem', comment: 'Deprem Merkezi' },
+    { '/': '/deprem/*', comment: 'Deprem kaydı ayrıntıları' },
   ];
 
   return {
@@ -713,13 +870,17 @@ function androidAssetLinks() {
 async function main() {
   const templatePath = path.join(dist, 'index.html');
   const template = await readFile(templatePath, 'utf8');
-  await writeFile(templatePath, inject(template, PAGES[0]), 'utf8');
+  const hero = await findHeroImage();
+  if (!hero) {
+    console.warn('Uyarı: hero görseli dist içinde bulunamadı; ana sayfa yalnızca yükleniyor ekranıyla açılacak.');
+  }
+  await writeFile(templatePath, inject(template, PAGES[0], hero), 'utf8');
 
   const seoDir = path.join(dist, 'seo');
   await mkdir(seoDir, { recursive: true });
 
   for (const page of PAGES.slice(1)) {
-    const html = inject(template, page);
+    const html = inject(template, page, hero);
     await writeFile(path.join(seoDir, `${page.slug}.html`), html, 'utf8');
   }
 

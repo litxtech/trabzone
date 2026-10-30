@@ -54,7 +54,7 @@ export default function AdminSupportQueueScreen() {
     assigned,
   });
 
-  const tickets = data?.items ?? [];
+  const tickets = useMemo(() => data?.items ?? [], [data]);
   const stats = useMemo(() => {
     const overdue = tickets.filter((ticket) => ticket.overdue).length;
     const unread = tickets.reduce((sum, ticket) => sum + (ticket.unread ?? 0), 0);

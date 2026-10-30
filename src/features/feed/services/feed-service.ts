@@ -81,6 +81,45 @@ export type PostSource = {
   source_count?: number | null;
 };
 
+/**
+ * Anlık gelişme özeti. `posts` kaydına 1:1 bağlı `live_news` satırıdır; aynı
+ * kanonik `post_id` akışta, Reels'te, ilçe akışında ve web sayfasında kullanılır.
+ */
+export type PostLiveNewsMeta = {
+  post_id: string;
+  canonical_id: string;
+  title: string;
+  summary: string | null;
+  category: string;
+  city: string;
+  district: string | null;
+  location_precision: 'none' | 'district' | 'city' | 'approximate';
+  media_kind: 'text' | 'photo' | 'video' | 'mixed';
+  publish_targets: string[];
+  cross_post_reel: boolean;
+  reel_id: string | null;
+  verification_status:
+    | 'citizen'
+    | 'reviewing'
+    | 'verified'
+    | 'corrected'
+    | 'unverified'
+    | 'removed';
+  verification_note: string | null;
+  verified_at: string | null;
+  moderation_status: 'pending' | 'visible' | 'hidden' | 'removed';
+  risk_level: 'low' | 'medium' | 'high' | null;
+  risk_flags: string[];
+  usage_consent: boolean;
+  newsroom_state: string;
+  published_at: string | null;
+  reports_count: number;
+  is_mine: boolean;
+  is_admin: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type FeedPost = {
   id: string;
   author_id: string;
@@ -89,6 +128,13 @@ export type FeedPost = {
   author_last_name: string | null;
   author_avatar_path: string | null;
   author_is_verified: boolean;
+  /**
+   * Yazar 18 yaş altı (kısıtlanmış hesap) mı?
+   *
+   * Sunucu bu alanı yalnızca gönderiyi görebilen kişilere döner; çocuk
+   * hesapların gönderileri zaten arkadaş dışına kapalıdır.
+   */
+  author_is_child_protected?: boolean;
   body: string | null;
   visibility: PostVisibility;
   city: string | null;
@@ -109,6 +155,10 @@ export type FeedPost = {
   is_mine: boolean;
   news?: PostNewsMeta | null;
   source?: PostSource | null;
+  /** Varsa içerik anlık gelişmedir (vatandaş muhabirliği). */
+  live_news?: PostLiveNewsMeta | null;
+  /** Yalnızca `live_news_list` yakınımda filtresinde döner. */
+  distance_km?: number | null;
   media: PostMedia[];
 };
 

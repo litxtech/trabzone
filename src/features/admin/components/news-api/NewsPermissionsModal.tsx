@@ -101,7 +101,7 @@ export function NewsPermissionsModal({
       <View style={[styles.note, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }]}>
         <AppText variant="caption" color="textSecondary">
           Kaynak listesinde bulunmak yayın izni anlamına gelmez. Her kaynağın yayın hakkı ayrı kaydedilir ve audit
-          log'a işlenir. İzin yoksa yalnızca keşif modu kullanılabilir.
+          log’a işlenir. İzin yoksa yalnızca keşif modu kullanılabilir.
         </AppText>
       </View>
 

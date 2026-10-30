@@ -220,10 +220,55 @@ export function toggleListingFavorite(listingId: string) {
   });
 }
 
-export function fetchExploreSearch(query: string) {
+export function fetchExploreSearch(query: string, limit = 24) {
   return call<{ items: ExploreSearchItem[] }>('explore_search', {
     p_query: query.trim(),
-    p_limit: 24,
+    p_limit: limit,
+  });
+}
+
+/**
+ * Harita sağlayıcısından seçilen işletmeyi gerçek bir `places` kaydına çevirir.
+ *
+ * Sunucu önce aynı işletmenin kayıtlı olup olmadığını kontrol eder (dış kimlik
+ * ya da 150 m içinde benzer ad); varsa onu döner. Böylece gönderi etiketi,
+ * harita işaretçisi ve işletme sayfası hep aynı kaydı kullanır.
+ */
+export function importExternalPlace(input: {
+  name: string;
+  lat: number;
+  lng: number;
+  address?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  provider: string;
+  externalId?: string | null;
+  categorySlug?: string | null;
+  rating?: number | null;
+  ratingCount?: number | null;
+}) {
+  return call<{
+    place_id: string;
+    created: boolean;
+    name: string;
+    category: string | null;
+    address: string | null;
+    lat: number;
+    lng: number;
+  }>('place_import_external', {
+    p_payload: {
+      name: input.name,
+      lat: input.lat,
+      lng: input.lng,
+      address: input.address ?? null,
+      phone: input.phone ?? null,
+      website: input.website ?? null,
+      provider: input.provider,
+      external_id: input.externalId ?? null,
+      category_slug: input.categorySlug ?? null,
+      rating: input.rating ?? null,
+      rating_count: input.ratingCount ?? null,
+    },
   });
 }
 

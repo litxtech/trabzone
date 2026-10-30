@@ -146,8 +146,18 @@ export const updateChildSettings = (input: ChildSettingsPatch) =>
     p_location_sharing: input.locationSharing ?? null,
   });
 
+export type ProfileSafetyFlags = {
+  user_id?: string;
+  is_child_protected?: boolean;
+  restricted_account?: boolean;
+  account_label?: string | null;
+  restricted_label?: string | null;
+  relation?: 'self' | 'friend' | 'admin' | string;
+  badge_visible?: boolean;
+};
+
 export const fetchProfileFlags = (userId: string) =>
-  callRpc<{ is_child_protected?: boolean }>('safety_profile_flags', { p_user_id: userId });
+  callRpc<ProfileSafetyFlags>('safety_profile_flags', { p_user_id: userId });
 
 export const requestGuardianConsent = (input: {
   email: string;

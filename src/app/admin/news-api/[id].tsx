@@ -38,7 +38,6 @@ import {
   useNewsApiSetStatus,
   useNewsApiTest,
 } from '@/features/admin/hooks/use-admin-news-api';
-import type { NewsConnection } from '@/features/news-api/types';
 import { errorMessage } from '@/services/errors';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatDateTimeTr } from '@/utils/date';

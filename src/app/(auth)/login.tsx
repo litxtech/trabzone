@@ -14,9 +14,10 @@ import { finishSignUpFromMetadata } from '@/features/auth/signup-completion';
 import { rememberAccount, useSavedAccountsStore, useSavedAccounts, type SavedAccount } from '@/features/auth/saved-accounts';
 import { WebLoginPage } from '@/features/web/components/WebLoginPage';
 import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons';
-import { env } from '@/config/env';
+import { socialAvailability } from '@/features/auth/social-availability';
 import { FormError } from '@/features/auth/components/FormError';
 import { loginSchema, type LoginValues } from '@/features/auth/validators';
+import { PolicyLinks } from '@/features/legal/components/RegistrationPolicies';
 import { fetchPendingAcceptances } from '@/features/legal/services/legal-service';
 import { fetchMyProfile } from '@/features/profile/services/profile-service';
 import { signInWithPassword } from '@/services/supabase/auth';
@@ -156,7 +157,7 @@ function LoginScreen() {
 
       <Button label="Giriş Yap" loading={formState.isSubmitting} onPress={() => void onSubmit()} />
 
-      {env.enableSocialAuth ? (
+      {socialAvailability().any ? (
         <>
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
@@ -176,6 +177,13 @@ function LoginScreen() {
         </AppText>
         <InlineLink label="Hesap oluştur" onPress={() => router.replace('/register')} />
       </View>
+
+      <View style={styles.legal}>
+        <AppText variant="caption" color="textTertiary" align="center">
+          Giriş yaparak mevcut kabul kayıtların korunur. Sözleşme, politika ve kurallar:
+        </AppText>
+        <PolicyLinks align="center" />
+      </View>
     </AuthScreen>
   );
 }
@@ -185,4 +193,5 @@ const styles = StyleSheet.create({
   divider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: -2 },
   dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.1)' },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  legal: { gap: 8 },
 });

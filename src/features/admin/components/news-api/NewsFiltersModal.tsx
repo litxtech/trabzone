@@ -134,7 +134,7 @@ export function NewsFiltersModal({
           onToggle={(value) => setNewsTypes((current) => (value === 'all' ? [] : toggle(current, value)))}
         />
         <AppText variant="caption" color="textTertiary">
-          Boş bırakılırsa kategori filtresi esas alınır. "Tüm izinli kategoriler" tür filtresini kaldırır.
+          Boş bırakılırsa kategori filtresi esas alınır. “Tüm izinli kategoriler” tür filtresini kaldırır.
         </AppText>
       </View>
 

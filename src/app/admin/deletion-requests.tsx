@@ -70,7 +70,7 @@ export default function AdminDeletionRequestsScreen() {
   const update = useAdminUpdateDeletionRequest();
   const execute = useExecuteDeletionRequest();
 
-  const items = query.data ?? [];
+  const items = useMemo(() => query.data ?? [], [query.data]);
   const stats = useMemo(() => {
     return {
       total: items.length,

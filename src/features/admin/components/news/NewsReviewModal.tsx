@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -20,6 +19,7 @@ import {
   useAdminNewsReviewAction,
   useAdminNewsRetract,
 } from '@/features/admin/hooks/use-admin-news';
+import { openUrl } from '@/features/in-app-browser';
 import type { NewsReviewDetail } from '@/features/news/types';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatDateTimeTr } from '@/utils/date';
@@ -523,7 +523,7 @@ export function NewsReviewModal({
                       <Pressable
                         key={`${item.url}-${item.retrieved_at}`}
                         accessibilityRole="link"
-                        onPress={() => void Linking.openURL(item.url)}
+                        onPress={() => void openUrl(item.url)}
                         style={styles.sourceRow}
                       >
                         <Ionicons name="link-outline" size={13} color={theme.colors.textTertiary} />

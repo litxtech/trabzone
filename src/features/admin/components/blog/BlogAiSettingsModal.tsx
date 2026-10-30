@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 
 import { AppText, Badge, Button, TextField } from '@/components/ui';
@@ -24,15 +24,25 @@ export function BlogAiSettingsModal({ visible, onClose }: { visible: boolean; on
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!visible || !settings.data) return;
-    setEnabled(settings.data.enabled);
-    setModel(settings.data.model);
-    setTemperature(String(settings.data.temperature));
-    setPrompt(settings.data.system_prompt);
-    setReason('');
-    setError(null);
-  }, [settings.data, visible]);
+  // Form alanları, modal açıldığında ve ayarlar sunucudan geldiğinde render
+  // sırasında bir kez senkronlanır. Effect içinde setState çağrısı yapılmaz:
+  // bu, ekstra render turu ve ESLint `set-state-in-effect` hatası üretiyordu.
+  const source = settings.data ?? null;
+  const [synced, setSynced] = useState<{ visible: boolean; source: typeof source }>({
+    visible: false,
+    source: null,
+  });
+  if (synced.visible !== visible || synced.source !== source) {
+    setSynced({ visible, source });
+    if (visible && source) {
+      setEnabled(source.enabled);
+      setModel(source.model);
+      setTemperature(String(source.temperature));
+      setPrompt(source.system_prompt);
+      setReason('');
+      setError(null);
+    }
+  }
 
   const submit = async () => {
     const value = Number(temperature);

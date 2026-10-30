@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText, Avatar } from '@/components/ui';
 import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
+import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { useTheme } from '@/theme/ThemeProvider';
 
 type Props = {
@@ -16,6 +17,7 @@ export function DrawerIdentity({ onPress, caption }: Props) {
   const { data: profile } = useMyProfile();
 
   const fullName = profile ? `${profile.first_name} ${profile.last_name}`.trim() : 'Trabzone üyesi';
+  const avatarUrl = mediaPublicUrl('avatar', profile?.avatar_path);
 
   return (
     <Pressable
@@ -32,7 +34,7 @@ export function DrawerIdentity({ onPress, caption }: Props) {
         },
       ]}
     >
-      <Avatar name={fullName} size={52} ring />
+      <Avatar uri={avatarUrl} name={fullName} size={52} ring />
 
       <View style={styles.text}>
         <View style={styles.nameRow}>

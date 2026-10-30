@@ -92,13 +92,13 @@ export function ChildSafetyInfoSheet({ visible, onClose, isOwner = true }: Props
           <View style={styles.visibilityRow}>
             <Ionicons name="checkmark-circle" size={18} color={theme.colors.success} />
             <AppText variant="body" style={styles.flex}>
-              Hesap sahibi (sen), doğrulanmış velin ve yetkili güvenlik ekibi
+              Hesap sahibi (sen), arkadaşların, doğrulanmış velin ve yetkili güvenlik ekibi
             </AppText>
           </View>
           <View style={styles.visibilityRow}>
             <Ionicons name="close-circle" size={18} color={theme.colors.danger} />
             <AppText variant="body" style={styles.flex}>
-              Diğer kullanıcılar, tanımadığın kişiler ve reklamverenler göremez
+              Tanımadığın kişiler ve reklamverenler göremez
             </AppText>
           </View>
         </Card>

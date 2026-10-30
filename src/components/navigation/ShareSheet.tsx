@@ -14,7 +14,7 @@ type Props = {
   onClose: () => void;
 };
 
-type ActionKey = 'post' | 'photo' | 'video' | 'reel' | 'story' | 'listing';
+type ActionKey = 'post' | 'live' | 'photo' | 'video' | 'reel' | 'story' | 'listing';
 
 const ACTIONS: {
   key: ActionKey;
@@ -29,6 +29,12 @@ const ACTIONS: {
     title: 'Gönderi oluştur',
     subtitle: 'Metin, fotoğraf veya video ile paylaş',
     gradient: true,
+  },
+  {
+    key: 'live',
+    icon: 'radio-outline',
+    title: 'Anlık Haber',
+    subtitle: 'Bulunduğun yerden gelişmeyi fotoğraf veya videoyla bildir',
   },
   {
     key: 'photo',
@@ -82,6 +88,13 @@ export function ShareSheet({ visible, onClose }: Props) {
             mediaType: asset.mediaType,
             mimeType: asset.mimeType,
             fileName: asset.fileName,
+            // Süre ve boyut bilgisi taşınmazsa paylaşım ekranı bunları native
+            // taraftan yeniden okumak zorunda kalıyor; bu da videoda ekstra
+            // bekleme ve çökme riski demek.
+            durationMs: asset.durationMs,
+            width: asset.width,
+            height: asset.height,
+            fileSize: asset.fileSize,
           })),
         );
       }
@@ -100,8 +113,9 @@ export function ShareSheet({ visible, onClose }: Props) {
         setTimeout(() => void openComposerFromLibrary(key === 'photo' ? 'image' : 'video'), 140);
         return;
       }
-      const routes: Record<'post' | 'reel' | 'story' | 'listing', string> = {
+      const routes: Record<'post' | 'live' | 'reel' | 'story' | 'listing', string> = {
         post: '/compose/post',
+        live: '/compose/live-news',
         reel: '/compose/reel',
         story: '/compose/story',
         listing: '/marketplace/create',

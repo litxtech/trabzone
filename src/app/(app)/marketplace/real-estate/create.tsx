@@ -246,7 +246,7 @@ export default function RealEstateCreateScreen() {
     if (districtId == null) return 'İlçe seç.';
     if (!point || !isInsideTrabzon(point)) return 'Trabzon sınırları içinde bir konum seç.';
     if (media.length === 0 && forSubmit)
-      return 'Doğrulamaya göndermek için en az bir fotoğraf ekle.';
+      return 'İlanı yayınlamak için en az bir fotoğraf ekle.';
     const gross = parseInteger(grossM2);
     const net = parseInteger(netM2);
     if (gross != null && net != null && net > gross)
@@ -342,8 +342,12 @@ export default function RealEstateCreateScreen() {
       setError('Oturum bilgisi bulunamadı. Tekrar giriş yap.');
       return;
     }
-    if (editingId && existing.data && !['draft', 'rejected'].includes(existing.data.status)) {
-      setError('Yalnızca taslak veya reddedilmiş ilanlar düzenlenebilir.');
+    if (
+      editingId &&
+      existing.data &&
+      !['draft', 'rejected', 'published', 'expired', 'archived'].includes(existing.data.status)
+    ) {
+      setError('Bu ilan şu anda düzenlenemiyor. Yalnızca taslak, reddedilmiş, yayındaki, süresi dolmuş veya arşivlenmiş ilanlar düzenlenebilir.');
       return;
     }
 
@@ -361,8 +365,11 @@ export default function RealEstateCreateScreen() {
 
       await uploadAll(listingId, profile.data.id);
 
-      if (submit) {
-        setStage('EİDS doğrulama kuyruğuna gönderiliyor…');
+      const publishNow =
+        submit && (!existing.data || ['draft', 'rejected'].includes(existing.data.status));
+
+      if (publishNow) {
+        setStage('İlan yayınlanıyor…');
         let documentPath: string | null = null;
         if (documentAsset) {
           setStage('Yetki belgesi yükleniyor…');
@@ -384,16 +391,12 @@ export default function RealEstateCreateScreen() {
         haptics.success();
         setStage(null);
         setSubmitting(false);
-        Alert.alert(
-          result.eids_enabled ? 'Doğrulamaya gönderildi' : 'İlan doğrulama bekliyor',
-          result.message,
-          [
-            {
-              text: 'İlanı gör',
-              onPress: () => router.replace(`/marketplace/real-estate/${listingId}` as never),
-            },
-          ],
-        );
+        Alert.alert('İlanın yayında', result.message, [
+          {
+            text: 'İlanı gör',
+            onPress: () => router.replace(`/marketplace/real-estate/${listingId}` as never),
+          },
+        ]);
         return;
       }
 
@@ -401,8 +404,10 @@ export default function RealEstateCreateScreen() {
       setStage(null);
       setSubmitting(false);
       Alert.alert(
-        'Taslak kaydedildi',
-        'İlan yayınlanmadı. Doğrulamaya göndermek için ilanı düzenleyebilirsin.',
+        editingId ? 'İlan güncellendi' : 'Taslak kaydedildi',
+        editingId
+          ? 'Değişikliklerin kaydedildi. İlanın yayında kalmaya devam ediyor.'
+          : 'İlan taslak olarak kaydedildi. Hazır olduğunda “İlanı oluştur” ile anında yayınlayabilirsin.',
         [
           {
             text: 'İlanı gör',
@@ -446,29 +451,18 @@ export default function RealEstateCreateScreen() {
     <Screen edges={['top', 'left', 'right']} scroll>
       <ScreenHeader
         title={editingId ? 'İlanı düzenle' : 'Yeni emlak ilanı'}
-        subtitle="Trabzon · EİDS doğrulama akışı"
+        subtitle="Trabzon · anında yayın"
         onBack={() => router.back()}
       />
 
-      <View
-        style={[
-          styles.eidsCard,
-          { backgroundColor: eidsEnabled ? theme.colors.successSoft : theme.colors.warningSoft },
-        ]}
-      >
-        <Ionicons
-          name={eidsEnabled ? 'shield-checkmark-outline' : 'alert-circle-outline'}
-          size={19}
-          color={eidsEnabled ? theme.colors.success : theme.colors.warning}
-        />
+      <View style={[styles.eidsCard, { backgroundColor: theme.colors.successSoft }]}>
+        <Ionicons name="shield-checkmark-outline" size={19} color={theme.colors.success} />
         <View style={styles.flex}>
-          <AppText variant="bodyStrong">
-            {eidsEnabled ? 'EİDS doğrulaması etkin' : 'EİDS entegrasyonu henüz etkin değil'}
-          </AppText>
+          <AppText variant="bodyStrong">İlanın anında yayınlanır</AppText>
           <AppText variant="caption" color="textSecondary">
             {eidsEnabled
-              ? 'İlan yalnızca kimlik ve ilan verme yetkisi doğrulandıktan sonra yayınlanır.'
-              : 'İlan güvenli taslak/doğrulama bekleme durumunda kalır. Hiçbir ilan doğrulanmış gibi yayınlanmaz.'}
+              ? 'Onay beklemezsin. EİDS/yetki doğrulaması istersen aşağıdaki alandan talep edebilirsin; sonuç sonradan bildirilir.'
+              : 'Onay beklemezsin. Doğrulama belgesi yüklersen ilanın yine yayında kalır, inceleme sonucu ayrıca bildirilir.'}
           </AppText>
         </View>
         {statusInfo ? <Badge label={statusInfo.label} tone={statusInfo.tone} /> : null}
@@ -996,8 +990,8 @@ export default function RealEstateCreateScreen() {
       </FormSection>
 
       <FormSection
-        title="6. EİDS / yetki doğrulama"
-        subtitle="Resmî entegrasyon olmadan hiçbir ilan doğrulanmış sayılmaz."
+        title="6. EİDS / yetki doğrulama (isteğe bağlı)"
+        subtitle="İlanı yayınlamak için gerekmez. Belge eklersen doğrulama ekibi sonradan inceler."
       >
         <TextField
           label="EİDS referans numarası (varsa)"
@@ -1034,8 +1028,8 @@ export default function RealEstateCreateScreen() {
             </AppText>
             <AppText variant="caption" color="textTertiary">
               {ownerType === 'owner'
-                ? 'Sahibinden ilanlarda isteğe bağlı; admin doğrulaması için yükleyebilirsin.'
-                : 'Danışman ve işletme ilanlarında referans veya belge zorunlu.'}
+                ? 'Sahibinden ilanlarda isteğe bağlı. Yüklersen doğrulama rozeti eklenir.'
+                : 'Danışman ve işletme ilanlarında yetki belgesi veya EİDS referansı zorunlu.'}
             </AppText>
           </View>
           {documentAsset ? (
@@ -1052,8 +1046,8 @@ export default function RealEstateCreateScreen() {
         <View style={[styles.privacyNote, { backgroundColor: theme.colors.surfaceMuted }]}>
           <Ionicons name="lock-closed-outline" size={16} color={theme.colors.textSecondary} />
           <AppText variant="caption" color="textSecondary" style={styles.flex}>
-            Belge yalnızca doğrulama kuyruğunda yetkili moderatörlere gösterilir; ilan galerisinde
-            yayınlanmaz. API secret veya kimlik numarası istemciye yazılmaz.
+            Belge yalnızca doğrulama ekibine gösterilir; ilan galerisinde yayınlanmaz. API secret
+            veya kimlik numarası istemciye yazılmaz.
           </AppText>
         </View>
       </FormSection>
@@ -1095,7 +1089,7 @@ export default function RealEstateCreateScreen() {
           disabled={busy}
         />
         <AppText variant="caption" color="textTertiary" align="center">
-          “İlanı oluştur” ilanı doğrulama kuyruğuna gönderir; EİDS onayı olmadan yayınlanmaz.
+          “İlanı oluştur” ilanını anında yayınlar; moderasyon onayı beklenmez.
         </AppText>
       </View>
 

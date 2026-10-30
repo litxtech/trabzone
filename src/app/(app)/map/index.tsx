@@ -69,11 +69,21 @@ function radiusForZoom(zoom: number): number {
   return clamp(30 * 2 ** (12 - zoom), 2, 200);
 }
 
+function formatRouteDistance(meters: number): string {
+  return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`;
+}
+
 export default function MapScreen() {
   const { theme } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ lat?: string; lng?: string; zoom?: string; label?: string }>();
+  const params = useLocalSearchParams<{
+    lat?: string;
+    lng?: string;
+    zoom?: string;
+    label?: string;
+    directions?: string;
+  }>();
   const prefsQuery = useMapPreferences();
 
   const deepLink = useMemo<MapPoint | null>(() => {
@@ -99,6 +109,13 @@ export default function MapScreen() {
     };
   }, [params.lat, params.lng, params.zoom, params.label]);
 
+  // `directions=1` niyeti: dış haritaya gitmeden, uygulama içi haritada
+  // cihaz konumundan hedefe güzergâh çiz.
+  const wantsDirections = useMemo(() => {
+    const value = Array.isArray(params.directions) ? params.directions[0] : params.directions;
+    return value === '1' || value === 'true';
+  }, [params.directions]);
+
   if (prefsQuery.isLoading) {
     return <MapPlaceholder onBack={() => router.back()} message="Harita tercihleri yükleniyor" loading />;
   }
@@ -115,7 +132,12 @@ export default function MapScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-      <MapExperience prefs={prefsQuery.data} topInset={insets.top} deepLink={deepLink} />
+      <MapExperience
+        prefs={prefsQuery.data}
+        topInset={insets.top}
+        deepLink={deepLink}
+        wantsDirections={wantsDirections}
+      />
     </View>
   );
 }
@@ -171,15 +193,17 @@ function MapExperience({
   prefs,
   topInset,
   deepLink,
+  wantsDirections,
 }: {
   prefs: MapPreferences;
   topInset: number;
   deepLink: MapPoint | null;
+  /** Bağlantı `directions=1` ile geldiyse rota otomatik hesaplanır. */
+  wantsDirections: boolean;
 }) {
   const { theme } = useTheme();
   const router = useRouter();
   const { width, height } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
   // Üstteki yüzen katmanın gerçek yüksekliği; harita kontrolleri bunun altına
   // yerleşir. Ölçüm yapılmadan önce makul bir varsayılan kullanılır.
   const [headerHeight, setHeaderHeight] = useState(0);
@@ -238,9 +262,15 @@ function MapExperience({
   const [selected, setSelected] = useState<MapPoint | null>(deepLink);
   const [searchedPin, setSearchedPin] = useState<MapPoint | null>(null);
   const [routeLine, setRouteLine] = useState<LatLng[] | null>(null);
+  const [routeInfo, setRouteInfo] = useState<{ distanceMeters: number; durationMinutes: number } | null>(
+    null,
+  );
   const [banner, setBanner] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [routeBusy, setRouteBusy] = useState(false);
+  // Aynı niyet için izin istemi ve ağ isteği bir kez çalışır; ekran yeniden
+  // çizildiğinde güzergâh tekrar tekrar hesaplanmaz.
+  const directionsStarted = useRef(false);
 
   const cameraRef = useRef(camera);
   const cameraTick = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -398,13 +428,25 @@ function MapExperience({
     setPanel((current) => (current === 'expanded' ? 'half' : current));
   }, [location, moveCamera]);
 
+  const devicePoint = location.point;
+  const requestDevicePoint = location.request;
+
   const handleDirections = useCallback(
     async (target: LatLng) => {
       if (!hasMapboxToken()) {
         Alert.alert('Güzergâh kullanılamıyor', mapApiMessage('no_token'));
         return;
       }
-      const origin = location.point ?? { lat: camera.lat, lng: camera.lng };
+      // Güzergâh her zaman bulunulan konumdan hesaplanır. Cihaz konumu yoksa
+      // izin istenir; harita merkezinden uydurma bir başlangıç kullanılmaz.
+      const origin = devicePoint ?? (await requestDevicePoint());
+      if (!origin) {
+        Alert.alert(
+          'Konum gerekli',
+          'Yol tarifi uygulama içi haritada bulunduğun konumdan hesaplanır. Konum izni vermeden güzergâh çizilemez.',
+        );
+        return;
+      }
       setRouteBusy(true);
       const response = await fetchRoute({ origin, dest: target });
       setRouteBusy(false);
@@ -413,6 +455,10 @@ function MapExperience({
         return;
       }
       setRouteLine(response.data.geometry);
+      setRouteInfo({
+        distanceMeters: response.data.distanceMeters,
+        durationMinutes: response.data.durationMinutes,
+      });
       const bounds = boundsOf([origin, target, ...response.data.geometry]);
       if (bounds) {
         const zoom = zoomForBounds(bounds, mapSize);
@@ -427,8 +473,18 @@ function MapExperience({
         `Güzergâh hazır · ${(response.data.distanceMeters / 1000).toFixed(1)} km · ~${response.data.durationMinutes} dk`,
       );
     },
-    [camera.lat, camera.lng, location.point, mapSize, moveCamera],
+    [devicePoint, mapSize, moveCamera, requestDevicePoint],
   );
+
+  // `Yol tarifi` düğmeleri `/map?directions=1` bağlantısıyla gelir. Harita
+  // hazır olduğunda rota bir kez hesaplanır; dış harita uygulaması açılmaz.
+  useEffect(() => {
+    if (!wantsDirections || !deepLink || directionsStarted.current) {
+      return;
+    }
+    directionsStarted.current = true;
+    void handleDirections({ lat: deepLink.lat, lng: deepLink.lng });
+  }, [deepLink, handleDirections, wantsDirections]);
 
   const handleControl = useCallback(
     (key: MapControlKey) => {
@@ -459,6 +515,7 @@ function MapExperience({
     (next: MapMode) => {
       setMode(next);
       setRouteLine(null);
+      setRouteInfo(null);
       // Mod geçişinde kamera korunur; harita yeniden oluşturulmaz.
       savePrefsNow({ active_mode: next });
     },
@@ -572,10 +629,6 @@ function MapExperience({
         ? 'Seçili kişiler'
         : 'Arkadaşlar';
 
-  // Alt panelin kompakt yüksekliği: harita üzerindeki geçici rozetler bunun
-  // üstünde durur ki panelin arkasında kalmasın.
-  const panelCompactHeight = 118 + Math.max(insets.bottom, 8);
-
   return (
     <View style={styles.root}>
       {/* Harita tüm ekranı kaplar; başlık, arama ve panel üzerinde yüzer. */}
@@ -638,19 +691,6 @@ function MapExperience({
         locations={[0, 0.55, 1]}
         style={[styles.topScrim, { height: headerHeight + 24 }]}
       />
-
-      {routeBusy ? (
-        <View
-          style={[
-            styles.routeBadge,
-            { bottom: panelCompactHeight + 12, backgroundColor: theme.colors.surface },
-          ]}
-        >
-          <AppText variant="caption" color="textSecondary">
-            Güzergâh hesaplanıyor…
-          </AppText>
-        </View>
-      ) : null}
 
       <View
         pointerEvents="box-none"
@@ -767,6 +807,42 @@ function MapExperience({
         </Pressable>
 
         <MapModeChips mode={mode} onChange={handleMode} />
+
+        {routeBusy || routeInfo ? (
+          <View
+            style={[
+              styles.routePill,
+              theme.shadows.sm,
+              { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+            ]}
+          >
+            {routeBusy || !routeInfo ? (
+              <ActivityIndicator size="small" color={theme.colors.primaryDeep} />
+            ) : (
+              <Ionicons name="navigate" size={14} color={theme.colors.primaryDeep} />
+            )}
+            <AppText variant="caption" color="textSecondary" style={styles.flex}>
+              {routeBusy || !routeInfo
+                ? 'Güzergâh hesaplanıyor…'
+                : `${formatRouteDistance(routeInfo.distanceMeters)} · ${
+                    routeInfo.durationMinutes < 1 ? '<1 dk' : `~${routeInfo.durationMinutes} dk`
+                  }`}
+            </AppText>
+            {!routeBusy && routeInfo ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Güzergâhı kapat"
+                hitSlop={8}
+                onPress={() => {
+                  setRouteLine(null);
+                  setRouteInfo(null);
+                }}
+              >
+                <Ionicons name="close" size={14} color={theme.colors.textTertiary} />
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
 
         {banner ? (
           <View
@@ -975,11 +1051,13 @@ const styles = StyleSheet.create({
   },
   placeholderHead: { paddingHorizontal: 16, paddingTop: 6 },
   placeholderBody: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 32 },
-  routeBadge: {
-    position: 'absolute',
-    alignSelf: 'center',
+  routePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
     paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 999,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
   },
 });

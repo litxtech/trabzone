@@ -4,8 +4,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/components/ui';
 import { useWebMeta } from '@/features/web/use-web-meta';
-import { WebFooter } from '@/features/web/components/WebFooter';
-import { WebHeader } from '@/features/web/components/WebHeader';
+import { PublicShell } from '@/features/web/components/PublicShell';
 import { useTheme } from '@/theme/ThemeProvider';
 
 export default function NotFoundScreen() {
@@ -19,10 +18,14 @@ export default function NotFoundScreen() {
   });
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-      <WebHeader />
+    <PublicShell title="Sayfa bulunamadı" fallbackHref="/feed">
       <View style={styles.body}>
-        <View style={[styles.card, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+          ]}
+        >
           <View style={[styles.icon, { backgroundColor: theme.colors.primarySoft }]}>
             <Ionicons name="compass-outline" size={26} color={theme.colors.primaryDeep} />
           </View>
@@ -63,13 +66,11 @@ export default function NotFoundScreen() {
           </View>
         </View>
       </View>
-      <WebFooter />
-    </View>
+    </PublicShell>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
   body: { flex: 1, padding: 24, alignItems: 'center', justifyContent: 'center' },
   card: {
     width: '100%',
@@ -90,7 +91,13 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 30, lineHeight: 38 },
   copy: { maxWidth: 440, lineHeight: 24 },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 6, justifyContent: 'center' },
+  actions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 6,
+    justifyContent: 'center',
+  },
   primary: {
     flexDirection: 'row',
     alignItems: 'center',

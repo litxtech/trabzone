@@ -1,0 +1,35 @@
+# Trabzone
+
+> Trabzone, Trabzon için yerel bir sosyal keşif ve ilan platformudur: kiralık ve satılık emlak, ikinci el ürünler, araçlar, yerel işletmeler, şehir haberleri, nöbetçi eczaneler ve şehir rehberleri tek yerde. Site Türkçedir; iOS, Android ve web üzerinde çalışır.
+
+Aşağıdaki sayfalar oturum açmadan erişilebilir ve sunucu tarafında üretilmiş HTML döndürür. Mesajlaşma, profil, akış ve ilan oluşturma gibi alanlar oturum gerektirir ve `robots.txt` ile taramaya kapalıdır.
+
+## Şehir rehberi ve ilanlar
+
+- [Trabzon emlak, ikinci el ve işletmeler](https://www.trabzoneapp.com/trabzon): İlçe ve kategoriye göre ilan ve işletme sayfaları
+- [Emlak ilanları](https://www.trabzoneapp.com/marketplace/real-estate): Trabzon'da kiralık ve satılık konut, işyeri ve arsa
+- [Yerel işletmeler](https://www.trabzoneapp.com/marketplace/places): Trabzon'daki işletmeler ve ustalar
+
+## Haber ve içerik
+
+- [Trabzon haberleri](https://www.trabzoneapp.com/haber): Yerel haber merkezi
+- [Blog](https://www.trabzoneapp.com/blog): Trabzon gezi, yaşam ve şehir rehberleri
+
+## Sağlık
+
+- [Nöbetçi eczaneler](https://www.trabzoneapp.com/nobetci-eczaneler): Günlük güncellenen, ilçelere göre nöbetçi eczane listesi
+- [Tüm eczaneler](https://www.trabzoneapp.com/eczaneler): Trabzon eczane rehberi
+
+## Kurumsal ve destek
+
+- [Hakkımızda](https://www.trabzoneapp.com/about)
+- [İletişim](https://www.trabzoneapp.com/contact)
+- [Destek merkezi](https://www.trabzoneapp.com/support)
+- [Topluluk kuralları](https://www.trabzoneapp.com/community-guidelines)
+
+## Optional
+
+- [Kullanım koşulları](https://www.trabzoneapp.com/terms)
+- [Gizlilik politikası](https://www.trabzoneapp.com/privacy)
+- [KVKK aydınlatma metni](https://www.trabzoneapp.com/kvkk)
+- [Site haritası](https://www.trabzoneapp.com/sitemap.xml)

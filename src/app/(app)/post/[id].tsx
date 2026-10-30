@@ -21,7 +21,12 @@ export default function PostDetailScreen() {
   const initialCommentId = typeof params.comment === 'string' ? params.comment : undefined;
 
   const post = usePost(postId);
-  const news = useNewsDetail(postId);
+  // Yalnızca haber gönderilerinde ağır `news_post_detail` çağrısı yapılır;
+  // normal gönderiler detay ekranını ikinci bir tur beklemeden açar. Gönderi
+  // henüz önbellekte yoksa (derin bağlantı) çağrı gönderiyle paralel başlar,
+  // aksi hâlde haber detayı için iki tur üst üste beklenirdi.
+  const isNewsPost = Boolean(post.data?.news || post.data?.source);
+  const news = useNewsDetail(postId, isNewsPost || post.isPending);
   // Detay ekranı gerçekten yüklendiğinde tekil görüntüleme kaydedilir.
   useContentViewRegistration({
     type: 'post',
@@ -54,7 +59,9 @@ export default function PostDetailScreen() {
         </View>
       ) : (
         <>
-          <PostCard post={post.data} />
+          {/* Detayda kart önizleme değil içeriğin kendisidir: "Devamını Oku"
+              çağrısı gizlenir, aksi hâlde aynı gönderi üst üste açılıyordu. */}
+          <PostCard post={post.data} detail />
 
           <Pressable
             accessibilityRole="button"

@@ -164,7 +164,7 @@ export function RealEstateDetailModal({ listingId, canPublish, canModerate, onCl
                 />
                 <DetailField label="Oda" value={data.room_count != null ? String(data.room_count) : '—'} />
                 <DetailField label="Bina yaşı" value={data.building_age != null ? String(data.building_age) : '—'} />
-                <DetailField label="Görüntülenme" value={`${formatNumber(data.view_count)} · ${formatNumber(data.favorite_count)} favori`} />
+                <DetailField label="Eski toplam görüntüleme" value={`${formatNumber(data.view_count)} · ${formatNumber(data.favorite_count)} favori`} />
                 <DetailField label="Yayın tarihi" value={formatDate(data.published_at)} />
                 <DetailField label="Bitiş tarihi" value={formatDate(data.expires_at)} />
                 <DetailField label="Oluşturulma" value={formatDate(data.created_at)} />

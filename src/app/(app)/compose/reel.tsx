@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useFocusEffect, useNavigation, usePreventRemove } from 'expo-router';
+import { useFocusEffect, usePreventRemove } from 'expo-router';
 import { useRouter } from '@/utils/router';
 import { setStatusBarStyle } from 'expo-status-bar';
 import { useVideoPlayer, VideoView } from 'expo-video';
@@ -24,6 +24,7 @@ import { pickMedia, type PickedAsset } from '@/features/media/media-picker';
 import { uploadMedia } from '@/features/media/media-service';
 import { loadVideoThumbnails, prepareVideoForUpload } from '@/features/media/video-service';
 import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
+import { useSafetyState } from '@/features/safety/hooks/use-safety';
 import { useTheme } from '@/theme/ThemeProvider';
 import { toMessage } from '@/utils/error-message';
 import { haptics } from '@/utils/haptics';
@@ -81,7 +82,6 @@ function VideoPreview({ uri, muted }: { uri: string; muted: boolean }) {
 export default function ComposeReelScreen() {
   const { theme, scheme } = useTheme();
   const router = useRouter();
-  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
 
   const { data: profile } = useMyProfile();
@@ -91,7 +91,7 @@ export default function ComposeReelScreen() {
   const [cover, setCover] = useState<CoverAsset | null>(null);
   const [caption, setCaption] = useState('');
   const [audioTitle, setAudioTitle] = useState('');
-  const [placeTag, setPlaceTag] = useState<ExploreSearchItem | null>(null);
+  const [placeTagInput, setPlaceTag] = useState<ExploreSearchItem | null>(null);
   const [placePickerOpen, setPlacePickerOpen] = useState(false);
   const [muted, setMuted] = useState(true);
   const [thumbBusy, setThumbBusy] = useState(false);
@@ -100,6 +100,14 @@ export default function ComposeReelScreen() {
   const coverRequest = useRef(0);
 
   const busy = Boolean(stage) || createReel.isPending;
+
+  /**
+   * Çocuk hesabı (18 yaş altı): Reels yalnızca arkadaşlara görünür ve keşfet
+   * akışına dağıtılmaz. İşletme/konum etiketi politik gereği kapalıdır.
+   */
+  const { data: safetyState } = useSafetyState();
+  const restricted = safetyState?.is_child_protected ?? false;
+  const placeTag = restricted ? null : placeTagInput;
 
   useFocusEffect(
     useCallback(() => {
@@ -127,7 +135,7 @@ export default function ComposeReelScreen() {
       {
         text: 'Sil ve çık',
         style: 'destructive',
-        onPress: () => navigation.dispatch(data.action),
+        onPress: () => setLeaving(true),
       },
     ]);
   });
@@ -584,22 +592,32 @@ export default function ComposeReelScreen() {
               </View>
             ) : null}
 
-            <View style={styles.fieldGroup}>
-              <View style={styles.labelRow}>
-                <AppText variant="caption" color={MUTED}>
-                  İŞLETME ETİKETİ
-                </AppText>
-                <AppText variant="caption" color={MUTED}>
-                  İsteğe bağlı
+            {restricted ? (
+              <View style={styles.notice}>
+                <Ionicons name="shield-checkmark" size={16} color="#7DD3FC" />
+                <AppText variant="caption" color={MUTED} style={styles.warningText}>
+                  Çocuk Hesabı: Reels yalnızca arkadaşlarına görünür, keşfet akışına dağıtılmaz.
+                  İşletme ve konum etiketi bu hesapta kapalıdır.
                 </AppText>
               </View>
-              <PlaceTagRow
-                dark
-                value={placeTag}
-                onPress={() => setPlacePickerOpen(true)}
-                onClear={() => setPlaceTag(null)}
-              />
-            </View>
+            ) : (
+              <View style={styles.fieldGroup}>
+                <View style={styles.labelRow}>
+                  <AppText variant="caption" color={MUTED}>
+                    İŞLETME ETİKETİ
+                  </AppText>
+                  <AppText variant="caption" color={MUTED}>
+                    İsteğe bağlı
+                  </AppText>
+                </View>
+                <PlaceTagRow
+                  dark
+                  value={placeTag}
+                  onPress={() => setPlacePickerOpen(true)}
+                  onClear={() => setPlaceTag(null)}
+                />
+              </View>
+            )}
 
             <View style={styles.fieldGroup}>
               <View style={styles.labelRow}>
@@ -856,6 +874,16 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(251,191,36,0.24)',
   },
   warningText: { flex: 1, lineHeight: 17 },
+  notice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 7,
+    padding: 11,
+    borderRadius: 13,
+    backgroundColor: 'rgba(125,211,252,0.1)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(125,211,252,0.24)',
+  },
   fieldGroup: { gap: 7 },
   labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   captionInput: {

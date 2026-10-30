@@ -79,7 +79,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const sessionAgent = typeof navigator === 'undefined' ? Platform.OS : navigator.userAgent;
   useAdminSessionHeartbeat(Boolean(me.data?.is_admin), sessionAgent);
 
-  const permissions = me.data?.permissions ?? [];
+  const permissions = useMemo(() => me.data?.permissions ?? [], [me.data]);
   const current = findNavItem(pathname);
   const currentGroup = ADMIN_NAV.find((group) =>
     group.items.some((item) => item.key === current?.key),

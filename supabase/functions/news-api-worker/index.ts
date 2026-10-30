@@ -11,6 +11,13 @@
 // Gizli anahtarlar yalnızca burada, Vault'tan service_role ile okunur ve
 // istemciye asla dönmez.
 
+import {
+  NEWS_STYLE_RULES,
+  isPageChromeHeavy,
+  polishNewsText,
+  stripSourceCredits,
+} from '../_shared/news-style.ts';
+
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-ai-news-token',
@@ -23,6 +30,9 @@ const MAX_REDIRECTS = 3;
 const HARD_MAX_BYTES = 2_621_440; // 2.5 MB üst sınır
 const IMAGE_MAX_BYTES = 5_242_880;
 const USER_AGENT = 'TrabzoneNewsBot/1.0 (+https://www.trabzoneapp.com)';
+// Bot koruması olan sitelerde ikinci deneme için tarayıcı kimliği.
+const BROWSER_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 const DISTRICTS = [
   'Ortahisar', 'Akçaabat', 'Yomra', 'Arsin', 'Araklı', 'Sürmene', 'Of', 'Çaykara',
@@ -1195,6 +1205,464 @@ async function classifyWithAi(item: Normalized, allowedCategories: string[]): Pr
 }
 
 // ---------------------------------------------------------------------------
+// AI editoryal gövde
+//
+// Kaynak akışlarının çoğu (RSS/JSON) yalnızca 1-2 cümlelik özet taşıyor. Bu
+// durumda yayımlanan haber "özet" olarak kalıyor ve okuma ekranı birkaç satır
+// sürüyordu. Yayından önce kaynak metinden özgün, çok paragraflı bir gövde
+// yazılır. Metin yalnızca kaynakta doğrulanan bilgilerden üretilir; yeni olgu
+// eklenmez.
+// ---------------------------------------------------------------------------
+type EditorialDraft = {
+  title: string | null;
+  subtitle: string | null;
+  spot: string;
+  lead: string;
+  body: string;
+  facts: string[];
+  quality: number | null;
+};
+
+function countWords(text: string): number {
+  const clean = text.trim();
+  if (!clean) return 0;
+  return clean.split(/\s+/).length;
+}
+
+/** HTML'i paragraf sınırlarını koruyan düz metne çevirir. */
+function htmlToText(html: string): string {
+  return decodeEntities(
+    (html ?? '')
+      .replace(/<(script|style|noscript|svg|form)[\s\S]*?<\/\1>/gi, ' ')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|li|h[1-6]|blockquote|section|article)>/gi, '\n')
+      .replace(/<[^>]+>/g, ' '),
+  )
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+const BOILERPLATE_BLOCK =
+  /(çerez|cerez policy|kurabiye|gizlilik|kvkk|kişisel veriler|tüm hakları|telif|reklam|abone|bülten|bulten|instagram|facebook|twitter|linkedin|youtube|whatsapp|telegram|anasayfa|son dakika haberleri|iletişim|iletisim|hakkımızda|hakkimizda|künye|kunye|©)/i;
+
+function trimBoilerplate(text: string): string {
+  const blocks = text
+    .split(/\n+/)
+    .map((block) => block.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  const kept = blocks.filter((block) => {
+    // Menü ve etiket listeleri kısa satırlar hâlinde gelir.
+    if (block.length < 55) return false;
+    if (block.length < 260 && BOILERPLATE_BLOCK.test(block)) return false;
+    return true;
+  });
+  const result = kept.join('\n\n');
+  return result.length >= 600 ? result : text;
+}
+
+// JSON-LD haber şemalarında tam metin "articleBody" alanında durur; bu alan
+// menü/footer gürültüsü içermediği için en temiz kaynak metnidir.
+function extractJsonLdArticleBody(html: string): string {
+  const pattern = /"articleBody"\s*:\s*"((?:\\.|[^"\\])*)"/gi;
+  let best = '';
+  for (const match of html.matchAll(pattern)) {
+    const raw = match[1] ?? '';
+    let text = raw;
+    try {
+      text = JSON.parse(`"${raw}"`) as string;
+    } catch {
+      text = raw.replace(/\\"/g, '"').replace(/\\n/g, ' ');
+    }
+    const cleaned = decodeEntities(text.replace(/<[^>]+>/g, ' '))
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (cleaned.length > best.length) best = cleaned;
+  }
+  return best;
+}
+
+/** Kaynak sayfanın tam metnini getirir. Başarısızsa boş döner. */
+async function fetchArticleText(
+  url: string,
+  diagnostics?: { pageChars?: number; fetchError?: string | null },
+): Promise<string> {
+  if (!/^https?:\/\//i.test(url)) return '';
+  const accept = 'text/html,application/xhtml+xml,application/xml;q=0.8,*/*;q=0.5';
+  let result = await safeFetch(url, { timeoutMs: 9000, maxBytes: 1_200_000, headers: { Accept: accept } });
+  // Bazı siteler bot koruması nedeniyle bilgilendirici UA'yı engelliyor;
+  // ikinci deneme tarayıcı kimliğiyle yapılır.
+  if (!result.ok || !result.text) {
+    if (diagnostics) diagnostics.fetchError = result.error ?? `http_${result.status}`;
+    result = await safeFetch(url, {
+      timeoutMs: 9000,
+      maxBytes: 1_200_000,
+      headers: { Accept: accept, 'User-Agent': BROWSER_USER_AGENT },
+    });
+  }
+  if (!result.ok || !result.text) {
+    if (diagnostics) diagnostics.fetchError = result.error ?? `http_${result.status}`;
+    return '';
+  }
+  if (diagnostics) diagnostics.fetchError = null;
+  const html = result.text;
+  // Bazı sitelerde <article> yalnızca başlığı taşır. Bu yüzden önce makul
+  // uzunluktaki içerik kapsayıcıları denenir; hiçbiri yeterli değilse sayfanın
+  // tamamı kullanılır. Böylece menü/footer metni habere karışmaz.
+  const containers = [
+    htmlToText(html.match(/<article[\s\S]*?<\/article>/i)?.[0] ?? ''),
+    htmlToText(html.match(/<main[\s\S]*?<\/main>/i)?.[0] ?? ''),
+  ]
+    .filter((text) => text.length >= 900)
+    .sort((a, b) => b.length - a.length);
+  const containerText = trimBoilerplate(containers[0] ?? htmlToText(html));
+  const structured = extractJsonLdArticleBody(html);
+  const text =
+    structured.length >= 900 && structured.length >= containerText.length * 0.6
+      ? structured
+      : containerText;
+  if (diagnostics) diagnostics.pageChars = text.length;
+  return text.slice(0, 16000);
+}
+
+type EditorialWriterState = { enabled: boolean; remaining: number };
+
+/** AI yazımı açık mı ve günlük bütçeden kaç metin kaldı? */
+async function loadEditorialWriter(): Promise<EditorialWriterState> {
+  if (!env('DEEPSEEK_API_KEY')) return { enabled: false, remaining: 0 };
+  const [settingRows, usedResult] = await Promise.all([
+    selectRows<Json>('news_api_settings', 'id=eq.true&select=ai_enabled,ai_daily_budget&limit=1'),
+    svc<number>('news_editorial_writes_today'),
+  ]);
+  const row = settingRows[0] ?? {};
+  const enabled = row.ai_enabled !== false;
+  if (!enabled) return { enabled: false, remaining: 0 };
+  const budget = Math.max(0, asNumber(row.ai_daily_budget, 500));
+  const used = Math.max(0, asNumber(usedResult.data, 0));
+  const perRun = Math.max(1, asNumber(env('NEWS_AI_WRITE_MAX_PER_RUN') || '6', 6));
+  return { enabled: true, remaining: Math.min(perRun, Math.max(0, budget - used)) };
+}
+
+async function callWriterModel(
+  system: string,
+  prompt: string,
+  maxTokens: number,
+): Promise<Json | null> {
+  const key = env('DEEPSEEK_API_KEY');
+  if (!key) return null;
+  const base = (env('DEEPSEEK_BASE_URL') || 'https://api.deepseek.com').replace(/\/+$/, '');
+  const model = env('DEEPSEEK_WRITER_MODEL') || env('DEEPSEEK_CLASSIFIER_MODEL') || 'deepseek-chat';
+  try {
+    const response = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        temperature: 0.35,
+        max_tokens: maxTokens,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: prompt },
+        ],
+      }),
+      signal: AbortSignal.timeout(90000),
+    });
+    if (!response.ok) return null;
+    const payload = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const content = payload.choices?.[0]?.message?.content ?? '';
+    return JSON.parse(content.replace(/```json|```/g, '').trim()) as Json;
+  } catch {
+    return null;
+  }
+}
+
+async function writeEditorialDraft(
+  item: Normalized,
+  context: { district: string | null; categorySlug: string | null },
+  diagnostics?: {
+    materialChars?: number;
+    pageChars?: number;
+    fetchError?: string | null;
+    words?: number;
+    reason?: string;
+  },
+): Promise<EditorialDraft | null> {
+  if (!env('DEEPSEEK_API_KEY')) return null;
+
+  const feedText = [item.summary ?? '', item.body ?? '']
+    .filter((value) => value && value.trim().length > 0)
+    .join('\n\n')
+    .trim();
+  // Özet kısa kaldıysa kaynak sayfanın tam metni getirilir: doyurucu haber
+  // için gerçek malzeme gerekir.
+  const pageText = feedText.length < 2400 ? await fetchArticleText(item.url, diagnostics) : '';
+  const material = stripSourceCredits([feedText, pageText].filter(Boolean).join('\n\n')).slice(
+    0,
+    18000,
+  );
+  const materialChars = material.replace(/\s+/g, ' ').trim().length;
+  if (diagnostics) {
+    diagnostics.materialChars = materialChars;
+    if (!diagnostics.pageChars) diagnostics.pageChars = pageText.length;
+  }
+  if (materialChars < 500) return null;
+  // Kaynak sayfa yalnızca menü, çerez bildirimi, künye ve yazı boyutu
+  // düğmelerinden oluşuyorsa haber yoktur; böyle malzemeden metin yazılmaz.
+  if (isPageChromeHeavy(material)) {
+    if (diagnostics) diagnostics.reason = 'page_chrome_material';
+    return null;
+  }
+
+  const system = [
+    'Sen Trabzone Haber için çalışan deneyimli bir Türkçe yerel haber muhabirisin.',
+    'Yalnızca verilen malzemedeki bilgileri kullanırsın; bilgi yetmediğinde metni kısa tutarsın, asla uydurmazsın.',
+    'Haberi doğrudan anlatırsın; malzeme, kaynak veya yazım süreci hakkında konuşmazsın.',
+    'Yanıtı yalnızca JSON olarak verirsin.',
+  ].join('\n');
+
+  const prompt = `Aşağıdaki malzemeden Trabzone Haber için özgün, doyurucu bir Türkçe haber metni yaz.
+
+BAŞLIK: ${item.title}
+İLÇE: ${context.district ?? 'Trabzon'}
+KATEGORİ: ${context.categorySlug ?? 'trabzon-gundem'}
+
+KAYNAK METNİ:
+${material}
+
+HEDEF: 400-650 kelime ve en az 5 paragraf. Kaynakta bu uzunluğu dolduracak
+doğrulanmış bilgi yoksa metni kısa bırak; ASLA bilgi uydurarak uzatma.
+
+EDİTORYAL YAPI:
+- spot: haberin en önemli gelişmesini 1-2 cümlede anlatır (110-320 karakter).
+- lead: ne oldu, nerede, ne zaman, kimleri ilgilendiriyor sorularını yanıtlayan giriş paragrafı.
+- body: doğrulanmış ayrıntıları ayrı paragraflarda açıkla. Her paragraf tek bir bilgiyi
+  geliştirsin; kaynaktaki rakam, tarih, yer, kurum, kişi ve sözleri koru.
+- Kaynakta açıkça geçen arka plan/bağlam bilgisini ayrı bir paragrafta kullan.
+- Okuyucuyu ilgilendiren pratik bilgiyi (tarih, saat, yer, ulaşım, başvuru, kapanış)
+  ayrı paragrafta ver; yalnızca kaynakta varsa yaz.
+- Gerekliyse gövdede "## " ile en az bir kısa alt başlık kullan.
+
+Kurallar:
+- Yalnızca yukarıdaki kaynak metinlerde açıkça geçen bilgileri kullan.
+- Yeni olgu, sayı, tarih, isim, unvan, kurum, fiyat, alıntı veya iddia ekleme.
+- Kaynakta tırnak içinde olmayan sözü doğrudan alıntı yapma.
+- Kaynağın cümlelerini kopyalama; kendi gazetecilik dilinle, olguları koruyarak yaz.
+- Her paragraf yeni bir doğrulanmış bilgi getirsin; aynı bilgiyi ikinci cümlede
+  farklı kelimelerle tekrar etme. Bilgi yetmiyorsa paragraf açma.
+- Dolgu cümle, tekrar ve "detaylar haberimizde" gibi içeriksiz ifade kullanma.
+- Sansasyon, abartı ve yorum yok; başlıkla metin birebir uyumlu olsun.
+- Metinde "yapay zekâ", "AI", "otomatik", "bot", "derleme" geçmesin.
+- Türkçe yazım kurallarına uy; resmî kurum adlarını doğru yaz.
+
+${NEWS_STYLE_RULES}
+
+Yanıt yalnızca şu JSON olsun:
+{"title":"...","subtitle":"... veya boş","spot":"...","lead":"...","body":"paragraflar \\n\\n ile ayrılmış","source_facts":["..."],"quality_score":0.8}`;
+
+  let parsed = await callWriterModel(system, prompt, 2800);
+  if (!parsed) {
+    if (diagnostics) diagnostics.reason = 'writer_model_failed';
+    return null;
+  }
+
+  let body = asString(parsed.body).slice(0, 18000);
+
+  // Hedefin belirgin biçimde altında kalan metin, aynı kaynak malzemeyle en
+  // fazla iki kez genişletilir. Yeni olgu eklenmez; kaynakta geçen bilgiler açılır.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (countWords(body) >= 380 || material.length < 1500) break;
+    const expandPrompt = `Aşağıdaki haber metni hedef uzunluğun altında kaldı. Metni, yalnızca
+KAYNAK METNİNDE açıkça geçen bilgileri kullanarak genişlet.
+
+BAŞLIK: ${item.title}
+MEVCUT METİN:
+${body}
+
+KAYNAK METNİ:
+${material.slice(0, 16000)}
+
+HEDEF: 400-650 kelime (şu an ${countWords(body)} kelime).
+
+Kurallar:
+- Yeni olgu, sayı, tarih, isim, unvan, kurum, fiyat, alıntı veya iddia EKLEME.
+- Kaynakta geçen ayrıntıları kendi cümlelerinle aç; her ayrıntıyı ayrı paragrafta geliştir.
+- Kaynakta geçen arka plan bilgisini ayrı bir bağlam paragrafı olarak kullan.
+- Aynı cümleyi veya bilgiyi tekrar etme; dolgu cümle yazma.
+- Her paragraf yeni bir ayrıntı getirsin; mevcut cümleyi başka kelimelerle yeniden kurma.
+- Kaynakta olmayan yorum, olasılık ve sonuç cümlesi yazma.
+- Türkçe yazım kurallarına uy.
+
+${NEWS_STYLE_RULES}
+
+Yanıt yalnızca şu JSON olsun:
+{"lead":"...","body":"paragraflar \\n\\n ile ayrılmış"}`;
+
+    const expanded = await callWriterModel(system, expandPrompt, 2600);
+    const expandedBody = asString(expanded?.body).slice(0, 18000);
+    // Genişletme anlamlı katkı sağlamadıysa ikinci deneme de sonuç vermez.
+    if (countWords(expandedBody) < countWords(body) + 25) break;
+    parsed = {
+      ...parsed,
+      body: expandedBody,
+      lead: asString(expanded?.lead) || parsed.lead,
+      source_facts: Array.isArray(expanded?.source_facts)
+        ? expanded?.source_facts
+        : parsed.source_facts,
+      quality_score: expanded?.quality_score ?? parsed.quality_score,
+    };
+    body = expandedBody;
+  }
+
+  body = polishNewsText(body);
+  const words = countWords(body);
+  if (diagnostics) diagnostics.words = words;
+  // Modelin ürettiği metin kaynak sayfanın arayüzünü anlatıyorsa (menü,
+  // çerez, RSS, künye, yazı boyutu düğmeleri) bu bir haber değildir.
+  if (isPageChromeHeavy(body)) {
+    if (diagnostics) diagnostics.reason = 'page_chrome_body';
+    return null;
+  }
+  // Özetten farksız metinler kaydedilmez; 180 kelimeyi aşan kısa ama doyurucu
+  // metinler, iki cümlelik kaynak özetinden kat kat iyidir.
+  if (words < 180 || body.length < 1100) {
+    if (diagnostics) diagnostics.reason = `body_too_short_${words}`;
+    return null;
+  }
+
+  const polishedLead = polishNewsText(asString(parsed.lead));
+  const spot =
+    polishNewsText(asString(parsed.spot)) || polishedLead || polishNewsText(asString(item.summary));
+  const lead = polishedLead || polishNewsText(asString(item.summary));
+  if (!spot || !lead) {
+    if (diagnostics) diagnostics.reason = 'missing_spot_or_lead';
+    return null;
+  }
+
+  const rawQuality = asNumber(parsed.quality_score, Number.NaN);
+
+  return {
+    title: polishNewsText(asString(parsed.title)).slice(0, 160) || null,
+    subtitle: polishNewsText(asString(parsed.subtitle)).slice(0, 220) || null,
+    spot: spot.slice(0, 400),
+    lead: lead.slice(0, 1600),
+    body,
+    facts: Array.isArray(parsed.source_facts)
+      ? (parsed.source_facts as unknown[]).map((entry) => asString(entry)).filter(Boolean).slice(0, 16)
+      : [],
+    quality: Number.isFinite(rawQuality) ? Math.min(Math.max(rawQuality, 0), 1) : null,
+  };
+}
+
+async function saveEditorialDraft(itemId: string, draft: EditorialDraft): Promise<boolean> {
+  const saved = await svc<Json>('news_item_save_editorial', {
+    p_id: itemId,
+    p_payload: {
+      title: draft.title,
+      subtitle: draft.subtitle,
+      spot: draft.spot,
+      lead: draft.lead,
+      body: draft.body,
+      body_source: 'ai',
+      quality_score: draft.quality,
+      editorial_checks: {
+        kind: 'ai_editorial_body',
+        word_count: countWords(draft.body),
+        source_fact_count: draft.facts.length,
+        source_facts: draft.facts,
+        written_at: new Date().toISOString(),
+      },
+    },
+  });
+  return saved.data?.ok === true;
+}
+
+/**
+ * Yayımlanmış ya da yayına hazır, gövdesi özetten ibaret kalmış haberleri
+ * toplu olarak doyurucu metne çevirir.
+ */
+async function enrichEditorialBacklog(limit: number): Promise<Json> {
+  const writer = await loadEditorialWriter();
+  if (!writer.enabled) {
+    return { ok: false, skipped: 'ai_disabled', processed: 0, results: [] };
+  }
+
+  const backlog = await svc<Json[]>('news_editorial_backlog', { p_limit: limit });
+  const rows = Array.isArray(backlog.data) ? (backlog.data as Json[]) : [];
+  const results: Json[] = [];
+  let written = 0;
+
+  for (const row of rows) {
+    const itemId = asString(row.item_id);
+    if (!itemId) continue;
+    if (writer.remaining <= 0) {
+      results.push({ item_id: itemId, skipped: 'daily_budget' });
+      continue;
+    }
+    const item: Normalized = {
+      external_id: null,
+      title: asString(row.title),
+      summary: asString(row.summary) || null,
+      body: asString(row.body) || null,
+      url: asString(row.url),
+      published_at: null,
+      updated_at: null,
+      image_url: null,
+      video_url: null,
+      author: null,
+      source_name: asString(row.source_name) || null,
+      source_category: asString(row.source_category) || null,
+      city: 'Trabzon',
+      district: asString(row.district) || null,
+      tags: [],
+      raw: {},
+    };
+    const diagnostics: {
+      materialChars?: number;
+      pageChars?: number;
+      fetchError?: string | null;
+      words?: number;
+      reason?: string;
+    } = {};
+    const draft = await writeEditorialDraft(
+      item,
+      {
+        district: item.district,
+        categorySlug: asString(row.category_slug) || null,
+      },
+      diagnostics,
+    );
+    if (!draft) {
+      results.push({
+        item_id: itemId,
+        ok: false,
+        reason: 'insufficient_source_material',
+        detail: diagnostics.reason ?? null,
+        words: diagnostics.words ?? 0,
+        material_chars: diagnostics.materialChars ?? 0,
+        page_chars: diagnostics.pageChars ?? 0,
+        fetch_error: diagnostics.fetchError ?? null,
+      });
+      continue;
+    }
+    const ok = await saveEditorialDraft(itemId, draft);
+    writer.remaining -= 1;
+    if (ok) written += 1;
+    results.push({
+      item_id: itemId,
+      ok,
+      words: countWords(draft.body),
+      post_id: row.post_id ?? null,
+    });
+  }
+
+  return { ok: true, processed: results.length, written, results };
+}
+
+// ---------------------------------------------------------------------------
 // Görsel indirme (lisans varsa)
 // ---------------------------------------------------------------------------
 function extensionFor(contentType: string): string {
@@ -1317,6 +1785,9 @@ async function runConnection(config: ConnectionConfig, trigger: string): Promise
 
   const permissions = permissionRows[0] ?? {};
   const profile = profileRows[0] ?? {};
+
+  // AI yazım durumu çekim başına bir kez okunur (günlük bütçe + çalışma sınırı).
+  const editorialWriter = await loadEditorialWriter();
 
   const secretResult = await svc<string | null>('news_worker_connection_secret', { p_id: config.id });
   const secret = typeof secretResult.data === 'string' ? secretResult.data : null;
@@ -1482,6 +1953,47 @@ async function runConnection(config: ConnectionConfig, trigger: string): Promise
               p_image_url: normalized.image_url,
             });
           }
+        }
+      }
+
+      // Kaynak akışı yalnızca özet taşıyorsa yayından önce özgün, çok
+      // paragraflı bir gövde yazılır. Kaynak tam metni lisansla gösterilebilir
+      // ve yeterince uzunsa mevcut metin korunur.
+      const sourceBodyLength = (normalized.body ?? '').length;
+      const canShowSourceBody =
+        permissions.can_republish_text === true && sourceBodyLength >= 1200;
+      if (
+        editorialWriter.enabled &&
+        editorialWriter.remaining > 0 &&
+        config.publish_mode !== 'discovery' &&
+        !canShowSourceBody
+      ) {
+        const diagnostics: { reason?: string } = {};
+        const draft = await writeEditorialDraft(
+          normalized,
+          {
+            district: district ?? null,
+            categorySlug: categorySlug ?? null,
+          },
+          diagnostics,
+        );
+        if (draft && (await saveEditorialDraft(itemId, draft))) {
+          stats.ai_calls += 1;
+          editorialWriter.remaining -= 1;
+        } else if (diagnostics.reason?.startsWith('page_chrome')) {
+          // Kaynak sayfa haber değil, arayüz metni taşıyor (menü, çerez,
+          // künye, ilan sayfası düğmeleri). Böyle kayıtlar yayımlanmaz.
+          await svc('news_worker_item_classify', {
+            p_id: itemId,
+            p_payload: {
+              keep: false,
+              reason: 'page_chrome_source',
+              district,
+              category_slug: categorySlug,
+            },
+          });
+          stats.blocked += 1;
+          continue;
         }
       }
 
@@ -1836,6 +2348,16 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  if (action === 'enrich') {
+    if (!adminAuthorized && !workerAuthorized) return json(403, { error: 'admin_required' });
+    const limit = Math.min(Math.max(asNumber(body.limit, 8), 1), 25);
+    try {
+      return json(200, await enrichEditorialBacklog(limit));
+    } catch (error) {
+      return json(500, { ok: false, error: preview(String(error), 400) });
+    }
+  }
+
   if (action === 'dispatch') {
     const due = await svc<Json[]>('news_worker_connections_due', { p_limit: 4 });
     const outcomes: RunOutcome[] = [];
@@ -1848,8 +2370,10 @@ Deno.serve(async (req: Request) => {
     const drained = await drainPublishQueue(10);
     const deletion = await svc<Json>('news_worker_deletion_tick', { p_max_jobs: 2, p_batch: 25 });
     const media = await processMediaCleanup(20);
+    // Özet kalmış eski haberler her turda azar azar doyurucu metne çevrilir.
+    const enriched = await enrichEditorialBacklog(3);
 
-    return json(200, { ok: true, outcomes, drained, deletion, media });
+    return json(200, { ok: true, outcomes, drained, deletion, media, enriched });
   }
 
   if (action === 'drain') {
@@ -1875,9 +2399,50 @@ Deno.serve(async (req: Request) => {
 async function drainPublishQueue(limit: number): Promise<Json> {
   const queue = await svc<Json[]>('news_worker_publish_queue', { p_limit: limit });
   const results: Json[] = [];
+  const writer = await loadEditorialWriter();
   for (const row of (queue.data ?? []) as Json[]) {
     const itemId = asString(row.item_id);
     if (!itemId) continue;
+
+    // Kuyruğa eski akıştan düşmüş, gövdesi özetten ibaret haberler de
+    // yayından önce doyurucu metne çevrilir.
+    if (writer.enabled && writer.remaining > 0) {
+      const rows = await selectRows<Json>(
+        'news_source_items',
+        `id=eq.${itemId}&select=title,summary,body,canonical_url,source_name,source_category,district,category_slug,body_source&limit=1`,
+      );
+      const item = rows[0];
+      const itemBody = asString(item?.body);
+      const hasEditorialBody =
+        asString(item?.body_source) === 'ai' && itemBody.length >= 1200;
+      if (item && !hasEditorialBody && itemBody.length < 1200) {
+        const draft = await writeEditorialDraft(
+          {
+            external_id: null,
+            title: asString(item.title),
+            summary: asString(item.summary) || null,
+            body: itemBody || null,
+            url: asString(item.canonical_url),
+            published_at: null,
+            updated_at: null,
+            image_url: null,
+            video_url: null,
+            author: null,
+            source_name: asString(item.source_name) || null,
+            source_category: asString(item.source_category) || null,
+            city: 'Trabzon',
+            district: asString(item.district) || null,
+            tags: [],
+            raw: {},
+          },
+          { district: asString(item.district) || null, categorySlug: asString(item.category_slug) || null },
+        );
+        if (draft && (await saveEditorialDraft(itemId, draft))) {
+          writer.remaining -= 1;
+        }
+      }
+    }
+
     const publish = await svc<Json>('news_publish_item', { p_item_id: itemId, p_actor: null });
     results.push({
       item_id: itemId,

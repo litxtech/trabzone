@@ -169,11 +169,15 @@ async function getTemplate() {
   if (templateCache) {
     return templateCache;
   }
+  let html;
   try {
-    templateCache = readTemplateFromFs();
+    html = readTemplateFromFs();
   } catch {
-    templateCache = await readTemplateFromDeployment();
+    html = await readTemplateFromDeployment();
   }
+  // Ana sayfanın statik hero'su (bkz. scripts/generate-seo.mjs) diğer
+  // sayfalarda gereksiz bir görsel indirmesine yol açar.
+  templateCache = html.replace(/<!-- tz-home:start -->[\s\S]*?<!-- tz-home:end -->/g, '');
   return templateCache;
 }
 
@@ -1878,14 +1882,24 @@ function newsSourcesHtml(post) {
   </section>`;
 }
 
+function newsNeutralDisclosure(value, fallback) {
+  const cleaned = String(value || '')
+    .replace(/Metin yapay zek[aâ][^.]*\./gi, '')
+    .replace(/\bAI Haber Merkezi\b/gi, 'Trabzone Haber')
+    .replace(/yapay zek[aâ][^.]*\./gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return cleaned || fallback;
+}
+
 function newsTransparencyHtml(post, model) {
   if (post.kind === 'source') {
     const sourceLink = post.canonical_source_url
       ? `<li><strong>Orijinal haber:</strong> <a href="${escapeHtml(post.canonical_source_url)}" rel="nofollow noopener" target="_blank">${escapeHtml(post.canonical_source_url)}</a></li>`
       : '';
     return `<section class="tz-news__block tz-news__transparency" aria-labelledby="kaynak-bilgi">
-    <h2 id="kaynak-bilgi">Kaynak ve yayın bilgisi</h2>
-    <p>${escapeHtml(post.disclosure || 'Bu haber, kaynağın izin verdiği kapsamda aktarılmıştır.')}</p>
+    <h2 id="kaynak-bilgi">Künye</h2>
+    <p>${escapeHtml(newsNeutralDisclosure(post.disclosure, 'Bu haber, kaynağın izin verdiği kapsamda aktarılmıştır.'))}</p>
     <ul>
       <li><strong>Yayıncı:</strong> ${escapeHtml(post.published_by || 'Haber kaynağı')}</li>
       <li><strong>Lisans durumu:</strong> ${escapeHtml(post.license_status || 'unverified')}</li>
@@ -1898,8 +1912,8 @@ function newsTransparencyHtml(post, model) {
   }
 
   return `<section class="tz-news__block tz-news__transparency" aria-labelledby="haber-bilgi">
-    <h2 id="haber-bilgi">Kaynak ve yayın bilgisi</h2>
-    <p>${escapeHtml(post.disclosure || 'Bu haber, Trabzone Haber tarafından kamuya açık kaynaklardan yayıma hazırlanmıştır.')}</p>
+    <h2 id="haber-bilgi">Künye</h2>
+    <p>${escapeHtml(newsNeutralDisclosure(post.disclosure, 'Bu haber, Trabzone Haber tarafından kamuya açık kaynaklardan yayıma hazırlanmıştır.'))}</p>
     <ul>
       <li><strong>Yayıncı:</strong> ${escapeHtml(post.published_by || 'Trabzone Haber')} (Trabzone'un resmî haber hesabı)</li>
       <li><strong>Son kontrol:</strong> ${escapeHtml(newsStamp(model.checked) || 'Belirtilmemiş')}</li>
@@ -1972,7 +1986,6 @@ function newsPostBodyHtml(post, model) {
         ${updated && updated !== published ? `<span>· Güncelleme: ${escapeHtml(updated)}</span>` : ''}
       </p>
       ${newsMediaFigure(post)}
-      ${post.body_notice ? `<p class="tz-news__notice">${escapeHtml(post.body_notice)}</p>` : ''}
       <article class="tz-news__body">${newsBodyHtml(post.body)}</article>
       ${newsSourcesHtml(post)}
       ${newsTransparencyHtml(post, model)}
@@ -2100,6 +2113,8 @@ module.exports = {
   SITE,
   BRAND,
   DEFAULT_IMAGE,
+  applyBody,
+  applyHead,
   getTemplate,
   escapeHtml,
   escapeXml,

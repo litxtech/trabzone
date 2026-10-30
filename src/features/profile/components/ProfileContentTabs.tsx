@@ -2,7 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from '@/utils/router';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 
 import { AppImage, AppText } from '@/components/ui';
 import { useProfilePosts, useSavedPosts } from '@/features/feed/hooks/use-feed';
@@ -18,6 +25,8 @@ import type { RideReservation } from '@/features/ride/types';
 import { formatDateTime, formatMoney } from '@/features/ride/utils/format';
 import { reelUrl } from '@/features/reels/services/reels-service';
 import { formatCount } from '@/features/reels/utils/format';
+import { useMeasuredWidth } from '@/hooks/use-measured-width';
+import { AdPlacementSlot, interleaveRows, useAdPlacement } from '@/features/ads';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 
@@ -36,6 +45,19 @@ export type ProfileContentTabsProps = {
 export function ProfileContentTabs({ username, userId, isOwner }: ProfileContentTabsProps) {
   const { theme } = useTheme();
   const router = useRouter();
+  const { width: windowWidth } = useWindowDimensions();
+
+  /**
+   * Vitrin hücreleri yüzde genişlikle üç sütuna bölünür. Yüzde genişlik ile
+   * `aspectRatio` aynı düğümde verildiğinde Yoga yüksekliği 0'a düşürebiliyor
+   * (nativede görseller hiç görünmüyordu). Bu yüzden yükseklik, ızgaranın
+   * `onLayout` ile ölçülen genişliğinden sayısal olarak hesaplanır.
+   */
+  const grid = useMeasuredWidth(Math.max(1, Math.min(windowWidth - 32, 720)));
+  const gridCellWidth = Math.max(48, Math.round(grid.width * 0.32));
+  const postCellHeight = gridCellWidth;
+  const newsCellHeight = Math.round(gridCellWidth / 0.72);
+  const reelCellHeight = Math.round(gridCellWidth / (9 / 14));
   // Haber hesabında profil, doğrudan tüm yayınlanmış haberleri gösterir.
   const isNewsPublisher = username.trim().toLocaleLowerCase('tr-TR') === 'trabzonehaber';
   const [tab, setTab] = useState<TabKey>(isNewsPublisher ? 'news' : 'posts');
@@ -53,6 +75,10 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
   const reels = useUserReels(username, activeTab === 'reels');
   const favorite = useToggleFavorite();
   const trips = useMyTrips(null);
+  const profileAds = useAdPlacement('profile_posts', posts.data?.length ?? 0, {
+    columns: 3,
+    enabled: activeTab === 'posts',
+  });
 
   const tabs: {
     key: TabKey;
@@ -60,7 +86,7 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
     icon: React.ComponentProps<typeof Ionicons>['name'];
   }[] = [
     { key: 'posts', label: 'Gönderiler', icon: 'grid-outline' },
-    ...((isNewsPublisher || (news.data?.length ?? 0) > 0)
+    ...(isNewsPublisher || (news.data?.length ?? 0) > 0
       ? ([{ key: 'news', label: 'Haberler', icon: 'newspaper-outline' }] as const)
       : []),
     { key: 'media', label: 'Medya', icon: 'images-outline' },
@@ -81,6 +107,7 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
     emptyTitle: string,
     emptyBody: string,
     onRetry: () => void,
+    withAds = false,
   ) => {
     if (loading) {
       return (
@@ -121,8 +148,20 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
     }
 
     return (
-      <View style={styles.grid}>
-        {data.map((post) => {
+      <View style={styles.grid} onLayout={grid.onLayout}>
+        {interleaveRows(data, withAds ? profileAds.positions : [], (post) => post.id).map((row) => {
+          if (row.type === 'ad') {
+            return (
+              <AdPlacementSlot
+                key={row.key}
+                slot={profileAds.slotAt(row.after)}
+                placement="profile_posts"
+                onHide={profileAds.hide}
+                style={styles.gridAd}
+              />
+            );
+          }
+          const post = row.item;
           const first = post.media[0];
           const isVideo = first?.media_type === 'video';
           const poster = first
@@ -141,6 +180,7 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
               style={({ pressed }) => [
                 styles.cell,
                 {
+                  height: postCellHeight,
                   backgroundColor: theme.colors.surfaceMuted,
                   borderColor: theme.colors.border,
                   opacity: pressed ? 0.8 : 1,
@@ -223,7 +263,7 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
     }
 
     return (
-      <View style={styles.newsGrid}>
+      <View style={styles.newsGrid} onLayout={grid.onLayout}>
         {news.data.map((post) => {
           const meta = post.news ?? null;
           const title = (meta?.title ?? post.body ?? 'Haber').split('\n')[0] ?? 'Haber';
@@ -244,6 +284,7 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
               style={({ pressed }) => [
                 styles.newsCell,
                 {
+                  height: newsCellHeight,
                   borderColor: theme.colors.border,
                   backgroundColor: palette.soft,
                   opacity: pressed ? 0.86 : 1,
@@ -296,7 +337,12 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
                   <AppText variant="caption" color="rgba(255,255,255,0.8)" numberOfLines={1}>
                     {category}
                   </AppText>
-                  <AppText variant="caption" color="#FFFFFF" numberOfLines={3} style={styles.newsCellTitle}>
+                  <AppText
+                    variant="caption"
+                    color="#FFFFFF"
+                    numberOfLines={3}
+                    style={styles.newsCellTitle}
+                  >
                     {title}
                   </AppText>
                 </LinearGradient>
@@ -360,9 +406,9 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
     }
 
     return (
-      <View style={styles.reelsGrid}>
+      <View style={styles.reelsGrid} onLayout={grid.onLayout}>
         {reels.data.map((reel) => {
-          const cover = reelUrl(reel.cover_path);
+          const cover = reelUrl(reel.cover_path, reel.storage_bucket ?? 'reels');
           return (
             <Pressable
               key={reel.id}
@@ -372,7 +418,10 @@ export function ProfileContentTabs({ username, userId, isOwner }: ProfileContent
                 haptics.tap();
                 router.push(`/reel/${reel.id}` as never);
               }}
-              style={({ pressed }) => [styles.reelCell, { opacity: pressed ? 0.82 : 1 }]}
+              style={({ pressed }) => [
+                styles.reelCell,
+                { height: reelCellHeight, opacity: pressed ? 0.82 : 1 },
+              ]}
             >
               {cover ? (
                 <AppImage
@@ -631,10 +680,10 @@ const styles = StyleSheet.create({
     minHeight: 34,
   },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
+  gridAd: { width: '100%', paddingVertical: 4 },
   newsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
   newsCell: {
     width: '32%',
-    aspectRatio: 0.72,
     borderRadius: 12,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
@@ -666,7 +715,6 @@ const styles = StyleSheet.create({
   },
   cell: {
     width: '32%',
-    aspectRatio: 1,
     borderRadius: 12,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
@@ -699,7 +747,6 @@ const styles = StyleSheet.create({
   reelsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
   reelCell: {
     width: '32%',
-    aspectRatio: 9 / 14,
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: '#0B1020',

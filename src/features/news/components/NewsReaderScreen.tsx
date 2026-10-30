@@ -5,7 +5,6 @@ import { VideoView, useVideoPlayer } from 'expo-video';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,11 +13,25 @@ import {
 } from 'react-native';
 import { useRouter } from '@/utils/router';
 
-import { ActionSheet, AppImage, AppText, Avatar, IconButton, Screen, ScreenHeader } from '@/components/ui';
+import {
+  ActionSheet,
+  AppImage,
+  AppText,
+  Avatar,
+  IconButton,
+  Screen,
+  ScreenHeader,
+} from '@/components/ui';
 import { MarkdownView } from '@/features/blog/components/MarkdownView';
 import { CommentsSheet } from '@/features/comments/components/CommentsSheet';
 import { MediaViewer, type ViewerMedia } from '@/features/feed/components/MediaViewer';
-import { usePost, useSharePost, useTogglePostLike, useTogglePostSave } from '@/features/feed/hooks/use-feed';
+import {
+  usePost,
+  useSharePost,
+  useTogglePostLike,
+  useTogglePostSave,
+} from '@/features/feed/hooks/use-feed';
+import { openUrl } from '@/features/in-app-browser';
 import { publicMediaUrl } from '@/features/media/media-service';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { postShareLink, shareSnippet } from '@/features/share/links';
@@ -28,10 +41,13 @@ import { ViewCount } from '@/features/views/components/ViewCount';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatDateTr, formatDateTimeTr, formatRelativeTr } from '@/utils/date';
 import { haptics } from '@/utils/haptics';
+import { afterSheetDismiss } from '@/utils/sheet';
 
 import { newsCategoryPalette, newsFormatLabel } from '../category-theme';
 import { useNewsRelated } from '../hooks/use-news-reader';
+import { polishNewsText } from '../news-text';
 import type { NewsDetail, NewsRelatedItem } from '../types';
+import { NewsImageFrame } from './NewsImageFrame';
 
 const FONT_SCALE_KEY = 'trabzone.news.reader.fontScale';
 const READER_MODE_KEY = 'trabzone.news.reader.compact';
@@ -94,7 +110,8 @@ export function NewsReaderScreen({
   const publisherAvatar = mediaPublicUrl('avatar', detail.publisher.avatar_path);
   const isUpdated =
     Boolean(detail.updated_at && detail.published_at) &&
-    new Date(detail.updated_at as string).getTime() - new Date(detail.published_at as string).getTime() >
+    new Date(detail.updated_at as string).getTime() -
+      new Date(detail.published_at as string).getTime() >
       60_000;
 
   useEffect(() => {
@@ -190,9 +207,11 @@ export function NewsReaderScreen({
   const openSource = useCallback((url: string | null | undefined) => {
     if (!isUsableUrl(url)) return;
     haptics.tap();
-    void Linking.openURL(url).catch(() =>
-      Alert.alert('Bağlantı açılamadı', 'Kaynak adresi bu cihazda açılamıyor.'),
-    );
+    void openUrl(url).then((opened) => {
+      if (!opened) {
+        Alert.alert('Bağlantı açılamadı', 'Kaynak adresi bu cihazda açılamıyor.');
+      }
+    });
   }, []);
 
   const groupAvatar = useCallback(() => {
@@ -217,15 +236,37 @@ export function NewsReaderScreen({
   );
 
   const hero = detail.media[0] ?? null;
-  const heroUri = hero ? publicMediaUrl('posts', hero.storage_path) : null;
-  const heroRatio =
-    hero?.width && hero?.height ? hero.width / hero.height : hero?.media_type === 'video' ? 16 / 9 : 1.6;
+  const heroUri = hero ? publicMediaUrl('posts', hero.storage_path) : null;  const heroRatio =
+    hero?.width && hero?.height
+      ? hero.width / hero.height
+      : hero?.media_type === 'video'
+        ? 16 / 9
+        : 1.6;
   const heroClamped = Math.min(Math.max(heroRatio, 0.66), 1.9);
   const heroMaxHeight = Math.round(Math.min(viewportHeight * 0.68, 640));
 
+  // Özet kalmış haberlerde gövde, giriş + özetin aynısıdır. Aynı metni üç kez
+  // göstermek yerine gövde atlanır; kaynak bağlantısı sayfanın altında kalır.
+  const bodyText = useMemo(() => polishNewsText(detail.body), [detail.body]);
+  const leadText = useMemo(() => polishNewsText(detail.lead), [detail.lead]);
+  const summaryText = useMemo(() => polishNewsText(detail.summary), [detail.summary]);
+  const bodyIsRepeated = useMemo(() => {
+    if (!bodyText) return true;
+    const norm = (value: string) => value.replace(/\s+/g, ' ').trim().toLocaleLowerCase('tr-TR');
+    const parts = [leadText, summaryText].filter(Boolean).map(norm);
+    if (parts.length === 0) return false;
+    const bodyNorm = norm(bodyText);
+    const combined = parts.join(' ');
+    return bodyNorm.length <= combined.length + 80 && parts.every((part) => bodyNorm.includes(part));
+  }, [bodyText, leadText, summaryText]);
+
   const menuItems = [
     { key: 'share', label: 'Haberi paylaş', icon: 'share-social-outline' as const },
-    { key: 'save', label: saved ? 'Kaydı kaldır' : 'Haberi kaydet', icon: 'bookmark-outline' as const },
+    {
+      key: 'save',
+      label: saved ? 'Kaydı kaldır' : 'Haberi kaydet',
+      icon: 'bookmark-outline' as const,
+    },
     { key: 'copy', label: 'Bağlantıyı kopyala', icon: 'link-outline' as const },
     ...(detail.sources[0]?.url
       ? [{ key: 'source', label: 'Kaynağı görüntüle', icon: 'open-outline' as const }]
@@ -316,9 +357,9 @@ export function NewsReaderScreen({
         </AppText>
       ) : null}
 
-      {detail.summary ? (
+      {summaryText ? (
         <AppText variant="body" color="textSecondary" style={styles.summary}>
-          {detail.summary}
+          {summaryText}
         </AppText>
       ) : null}
 
@@ -329,7 +370,12 @@ export function NewsReaderScreen({
           onPress={groupAvatar}
           style={styles.bylinePerson}
         >
-          <Avatar uri={publisherAvatar} name={publisherName} size={34} recycleKey={detail.publisher.username} />
+          <Avatar
+            uri={publisherAvatar}
+            name={publisherName}
+            size={34}
+            recycleKey={detail.publisher.username}
+          />
           <View style={styles.bylineText}>
             <View style={styles.nameRow}>
               <AppText variant="label" numberOfLines={1}>
@@ -341,7 +387,9 @@ export function NewsReaderScreen({
             </View>
             <AppText variant="caption" color="textTertiary">
               @{detail.publisher.username} ·{' '}
-              {detail.published_at ? formatDateTimeTr(detail.published_at) : formatDateTr(new Date())}
+              {detail.published_at
+                ? formatDateTimeTr(detail.published_at)
+                : formatDateTr(new Date())}
             </AppText>
           </View>
         </Pressable>
@@ -384,37 +432,8 @@ export function NewsReaderScreen({
       </View>
 
       <View style={styles.readerMeta}>
-        <ViewCount
-          type="post"
-          id={detail.post_id}
-          initial={postState?.view_count}
-          showLabel
-        />
+        <ViewCount type="post" id={detail.post_id} initial={postState?.view_count} showLabel />
       </View>
-
-      {detail.ai_generated ? (
-        <View style={[styles.aiNotice, { backgroundColor: theme.colors.primarySoft }]}>
-          <Ionicons name="sparkles-outline" size={15} color={theme.colors.primaryDeep} />
-          <View style={styles.aiNoticeText}>
-            <AppText variant="label" color="primaryDeep">
-              Yapay zekâ desteğiyle hazırlandı
-            </AppText>
-            <AppText variant="caption" color="textSecondary">
-              {detail.disclosure ??
-                `Metin yalnızca doğrulanmış kaynaklardan üretildi; ${detail.source_count} kaynak referansı korunuyor.`}
-            </AppText>
-          </View>
-        </View>
-      ) : null}
-
-      {detail.body_notice ? (
-        <View style={[styles.notice, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }]}>
-          <Ionicons name="information-circle-outline" size={15} color={theme.colors.textSecondary} />
-          <AppText variant="caption" color="textSecondary" style={styles.flex}>
-            {detail.body_notice}
-          </AppText>
-        </View>
-      ) : null}
 
       {!compact && hero && heroUri ? (
         hero.media_type === 'video' ? (
@@ -447,116 +466,97 @@ export function NewsReaderScreen({
               setViewerIndex(0);
               setViewerOpen(true);
             }}
-            style={[
-              styles.hero,
-              {
-                aspectRatio: heroClamped,
-                maxHeight: heroMaxHeight,
-                backgroundColor: theme.colors.surfaceMuted,
-                borderRadius: theme.radius.lg,
-              },
-            ]}
+            style={({ pressed }) => [styles.heroWrap, { opacity: pressed ? 0.94 : 1 }]}
           >
-            <AppImage
-              source={{ uri: heroUri }}
-              style={StyleSheet.absoluteFill}
-              contentFit={hero?.display_fit && hero.display_fit !== 'auto' ? hero.display_fit : 'contain'}
+            {/* X'teki gibi kutusuz: görsel kendi oranında, yuvarlatılmış
+                köşelerle ve saydam kenarlarla durur. */}
+            <NewsImageFrame
+              uri={heroUri}
+              width={hero?.width ?? null}
+              height={hero?.height ?? null}
+              fit={hero?.display_fit && hero.display_fit !== 'auto' ? hero.display_fit : 'contain'}
+              maxHeight={heroMaxHeight}
+              radius={theme.radius.lg}
+              maxWidth={720}
               recycleKey={`reader-${detail.post_id}`}
-            />
-            {detail.media.length > 1 ? (
-              <View style={styles.heroCount}>
-                <Ionicons name="images-outline" size={12} color="#FFFFFF" />
-                <AppText variant="caption" color="#FFFFFF">
-                  {detail.media.length}
-                </AppText>
-              </View>
-            ) : null}
+            >
+              {detail.media.length > 1 ? (
+                <View style={styles.heroCount}>
+                  <Ionicons name="images-outline" size={12} color="#FFFFFF" />
+                  <AppText variant="caption" color="#FFFFFF">
+                    {detail.media.length}
+                  </AppText>
+                </View>
+              ) : null}
+            </NewsImageFrame>
           </Pressable>
         )
       ) : null}
 
-      {hero?.credit || hero?.attribution ? (
-        <AppText variant="caption" color="textTertiary" style={styles.credit}>
-          {hero.attribution ?? hero.credit}
-        </AppText>
-      ) : null}
-
-      {detail.lead ? (
+      {leadText ? (
         <View style={[styles.lead, { borderLeftColor: palette.accent }]}>
           <AppText variant="title" style={styles.leadText}>
-            {detail.lead}
+            {leadText}
           </AppText>
         </View>
       ) : null}
 
-      <View style={styles.body}>
-        <MarkdownView markdown={detail.body} textScale={fontScale} />
-      </View>
-
-      {detail.sources.length > 0 ? (
-        <View style={styles.section}>
-          <View style={styles.sectionHead}>
-            <AppText variant="h3">Kaynaklar</AppText>
-            <AppText variant="caption" color="textTertiary">
-              {detail.sources.length} doğrulanmış referans
-            </AppText>
-          </View>
-          <View style={styles.sources}>
-            {detail.sources.map((source, index) => (
-              <Pressable
-                key={`${source.url}-${index}`}
-                accessibilityRole="link"
-                accessibilityLabel={`${source.title ?? source.domain} kaynağını aç`}
-                onPress={() => openSource(source.url)}
-                style={({ pressed }) => [
-                  styles.sourceCard,
-                  {
-                    borderColor: theme.colors.border,
-                    backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
-                  },
-                ]}
-              >
-                <View style={[styles.sourceIcon, { backgroundColor: theme.colors.surfaceMuted }]}>
-                  <Ionicons
-                    name={source.kind === 'official' ? 'shield-checkmark-outline' : 'newspaper-outline'}
-                    size={16}
-                    color={theme.colors.primaryDeep}
-                  />
-                </View>
-                <View style={styles.sourceText}>
-                  <View style={styles.sourceTitleRow}>
-                    <AppText variant="label" numberOfLines={1} style={styles.flex}>
-                      {source.title ?? source.domain}
-                    </AppText>
-                    <AppText variant="caption" color={palette.accent}>
-                      {sourceKindLabel(source.kind)}
-                    </AppText>
-                  </View>
-                  <AppText variant="caption" color="textTertiary" numberOfLines={1}>
-                    {source.domain}
-                    {source.retrieved_at ? ` · ${formatRelativeTr(source.retrieved_at)}` : ''}
-                  </AppText>
-                </View>
-                <Ionicons name="open-outline" size={15} color={theme.colors.textTertiary} />
-              </Pressable>
-            ))}
-          </View>
+      {bodyText && !bodyIsRepeated ? (
+        <View style={styles.body}>
+          <MarkdownView markdown={bodyText} textScale={fontScale} />
         </View>
       ) : null}
 
-      <View style={styles.footerMeta}>
-        {isUpdated ? (
-          <AppText variant="caption" color="textTertiary">
-            Güncellendi: {formatDateTimeTr(detail.updated_at)}
-          </AppText>
-        ) : detail.published_at ? (
-          <AppText variant="caption" color="textTertiary">
-            Yayınlandı: {formatDateTimeTr(detail.published_at)}
-          </AppText>
-        ) : null}
-        <AppText variant="caption" color="textTertiary">
-          {detail.word_count} kelime · {detail.reading_minutes} dk okuma
+      <View
+        style={[
+          styles.imprint,
+          { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted },
+        ]}
+      >
+        <AppText variant="label" color="textSecondary">
+          Künye
         </AppText>
+        <ImprintRow label="Yayıncı" value={publisherName} />
+        <ImprintRow
+          label="Konum"
+          value={detail.district ? `${detail.district}, Trabzon` : 'Trabzon'}
+        />
+        {detail.category_name ? (
+          <ImprintRow label="Kategori" value={detail.category_name} />
+        ) : null}
+        {detail.published_at ? (
+          <ImprintRow label="Yayın" value={formatDateTimeTr(detail.published_at)} />
+        ) : null}
+        {isUpdated ? (
+          <ImprintRow label="Güncelleme" value={formatDateTimeTr(detail.updated_at)} />
+        ) : null}
+        {hero?.attribution || hero?.credit ? (
+          <ImprintRow label="Fotoğraf" value={hero.attribution ?? hero.credit ?? ''} />
+        ) : null}
+        {detail.sources.length > 0 ? (
+          <View style={styles.imprintRow}>
+            <AppText variant="caption" color="textTertiary" style={styles.imprintLabel}>
+              {detail.sources.length > 1 ? 'Kaynaklar' : 'Kaynak'}
+            </AppText>
+            <View style={styles.imprintSources}>
+              {detail.sources.map((source, index) => (
+                <Pressable
+                  key={`${source.url}-${index}`}
+                  accessibilityRole="link"
+                  accessibilityLabel={`${source.name ?? source.domain} kaynağını aç`}
+                  onPress={() => openSource(source.url)}
+                  style={({ pressed }) => [styles.imprintSource, { opacity: pressed ? 0.6 : 1 }]}
+                >
+                  <AppText variant="caption" color="primary" numberOfLines={1} style={styles.flex}>
+                    {source.name ?? source.domain}
+                    {source.kind === 'official' ? ` · ${sourceKindLabel(source.kind)}` : ''}
+                  </AppText>
+                  <Ionicons name="open-outline" size={12} color={theme.colors.textTertiary} />
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
       </View>
 
       <View style={[styles.actionBar, { borderColor: theme.colors.border }]}>
@@ -620,9 +620,17 @@ export function NewsReaderScreen({
               Aynı gündem ve bölgeden
             </AppText>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.relatedRow}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.relatedRow}
+          >
             {related.data.map((item) => (
-              <RelatedCard key={item.post_id} item={item} onPress={() => router.push(`/post/${item.post_id}` as never)} />
+              <RelatedCard
+                key={item.post_id}
+                item={item}
+                onPress={() => router.push(`/post/${item.post_id}` as never)}
+              />
             ))}
           </ScrollView>
         </View>
@@ -653,16 +661,19 @@ export function NewsReaderScreen({
           if (key === 'share') void onShare();
           else if (key === 'save') onSave();
           else if (key === 'copy') void onCopy();
-          else if (key === 'source') openSource(detail.sources[0]?.url);
-          else if (key === 'compact') toggleCompact();
+          else if (key === 'source') {
+            // Menü kapanırken aynı karede uygulama içi tarayıcı kartını açmak
+            // kartın açılıp anında kapanmasına yol açıyordu.
+            afterSheetDismiss(() => openSource(detail.sources[0]?.url));
+          } else if (key === 'compact') toggleCompact();
           else if (key === 'report') {
-            setTimeout(() => {
+            afterSheetDismiss(() => {
               openReport({
                 targetType: 'post',
                 targetId: detail.post_id,
                 targetLabel: detail.title.slice(0, 60),
               });
-            }, 260);
+            });
           }
         }}
       />
@@ -683,6 +694,19 @@ function HeroVideo({ uri }: { uri: string }) {
       nativeControls
       surfaceType="textureView"
     />
+  );
+}
+
+function ImprintRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.imprintRow}>
+      <AppText variant="caption" color="textTertiary" style={styles.imprintLabel}>
+        {label}
+      </AppText>
+      <AppText variant="caption" color="textSecondary" style={styles.flex}>
+        {value}
+      </AppText>
+    </View>
   );
 }
 
@@ -768,17 +792,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  aiNotice: { flexDirection: 'row', gap: 8, padding: 12, borderRadius: 12, alignItems: 'flex-start' },
-  aiNoticeText: { flex: 1, gap: 2 },
-  notice: {
-    flexDirection: 'row',
-    gap: 8,
-    padding: 11,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'flex-start',
-  },
   hero: { width: '100%', overflow: 'hidden' },
+  heroWrap: { width: '100%' },
   heroCount: {
     position: 'absolute',
     right: 10,
@@ -791,25 +806,27 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: 'rgba(9,14,28,0.55)',
   },
-  credit: { marginTop: -4 },
   lead: { borderLeftWidth: 3, paddingLeft: 12, paddingVertical: 2 },
   leadText: { lineHeight: 25 },
   body: { paddingTop: 4 },
   section: { gap: 10, paddingTop: 8 },
-  sectionHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
-  sources: { gap: 8 },
-  sourceCard: {
+  sectionHead: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 10,
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  imprint: {
+    gap: 6,
+    marginTop: 8,
+    padding: 12,
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  sourceIcon: { width: 32, height: 32, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
-  sourceText: { flex: 1, gap: 2 },
-  sourceTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  footerMeta: { gap: 2, paddingTop: 6 },
+  imprintRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  imprintLabel: { width: 82 },
+  imprintSources: { flex: 1, gap: 4 },
+  imprintSource: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   actionBar: {
     flexDirection: 'row',
     alignItems: 'center',

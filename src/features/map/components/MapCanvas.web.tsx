@@ -22,6 +22,7 @@ import type { MapCanvasProps } from './map-canvas-types';
 export function MapCanvas({
   initialCamera,
   markers,
+  route,
   polygon,
   userLocation,
   dark,
@@ -43,8 +44,9 @@ export function MapCanvas({
       width: size.width,
       height: Math.max(size.height, 240),
       dark,
+      route: route ?? undefined,
     });
-  }, [camera.lat, camera.lng, camera.zoom, dark, size.height, size.width]);
+  }, [camera.lat, camera.lng, camera.zoom, dark, route, size.height, size.width]);
 
   if (!hasMapboxToken()) {
     return (
@@ -139,14 +141,17 @@ export function MapCanvas({
                 styles.pinBody,
                 point.label ? styles.pinBodyWide : null,
                 {
-                  backgroundColor: theme.colors.surface,
-                  borderColor: toneColor(theme, markerTone(point.kind)),
+                  backgroundColor: point.color ?? theme.colors.surface,
+                  borderColor: point.color ?? toneColor(theme, markerTone(point.kind)),
                 },
               ]}
             >
               <AppText
                 variant="caption"
-                style={{ color: toneColor(theme, markerTone(point.kind)), fontSize: 9 }}
+                style={{
+                  color: point.color ? (point.textColor ?? '#FFFFFF') : toneColor(theme, markerTone(point.kind)),
+                  fontSize: 9,
+                }}
                 numberOfLines={1}
               >
                 {point.kind === 'cluster' ? String(point.count ?? '') : (point.label ?? '•')}

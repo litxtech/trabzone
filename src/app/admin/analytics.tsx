@@ -67,7 +67,7 @@ export default function AdminAnalyticsScreen() {
   const [pdfBusy, setPdfBusy] = useState(false);
 
   const range = dateRangeFor(preset, custom.from, custom.to);
-  const reports = catalog.data?.items ?? [];
+  const reports = useMemo(() => catalog.data?.items ?? [], [catalog.data]);
   const categories = catalog.data?.categories ?? [];
   const filteredReports = useMemo(
     () => (category === 'all' ? reports : reports.filter((item) => item.category === category)),

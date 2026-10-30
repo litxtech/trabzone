@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+
+import { Ionicons } from '@expo/vector-icons';
 
 import { AppText, Button, TextField } from '@/components/ui';
 import { MapSheet } from '@/features/map/components/MapSheet';
@@ -53,12 +55,6 @@ const OWNER_TYPES: { key: RealEstateFilters['ownerType']; label: string }[] = [
   { key: 'agent', label: 'Danışman' },
   { key: 'business', label: 'İşletme' },
 ];
-const SORTS: { key: RealEstateFilters['sort']; label: string }[] = [
-  { key: 'new', label: 'En yeni' },
-  { key: 'price_asc', label: 'Fiyat artan' },
-  { key: 'price_desc', label: 'Fiyat azalan' },
-  { key: 'popular', label: 'Popüler' },
-];
 
 type Props = {
   visible: boolean;
@@ -69,6 +65,12 @@ type Props = {
   onClose: () => void;
 };
 
+/**
+ * Emlak filtreleri.
+ *
+ * Uzun filtre listesi tek ekrana sığmadığı için yalnızca sık kullanılan alanlar
+ * açık başlar; bina yaşı ve ilan sahibi "Daha fazla filtre" altında toplanır.
+ */
 export function RealEstateFilterSheet({
   visible,
   filters,
@@ -79,6 +81,7 @@ export function RealEstateFilterSheet({
 }: Props) {
   const { theme } = useTheme();
   const [draft, setDraft] = useState(filters);
+  const [advanced, setAdvanced] = useState(false);
   const [minPrice, setMinPrice] = useState(filters.minPrice ? String(filters.minPrice) : '');
   const [maxPrice, setMaxPrice] = useState(filters.maxPrice ? String(filters.maxPrice) : '');
   const [minM2, setMinM2] = useState(filters.minM2 ? String(filters.minM2) : '');
@@ -138,9 +141,9 @@ export function RealEstateFilterSheet({
     <MapSheet
       visible={visible}
       onClose={onClose}
-      title="Emlak filtreleri"
-      subtitle="İlanlar yalnızca yayınlanmış ve doğrulanmış kayıtlardan gelir."
-      maxHeightRatio={0.94}
+      title="Filtreler"
+      subtitle="Yalnızca yayında olan ilanlar listelenir."
+      maxHeightRatio={0.92}
       footer={
         <View style={styles.footer}>
           <Button label="Temizle" variant="outline" onPress={reset} style={styles.footerButton} />
@@ -148,93 +151,92 @@ export function RealEstateFilterSheet({
         </View>
       }
     >
-      <AppText variant="label" color="textSecondary">
-        İlan türü
-      </AppText>
-      <View style={styles.wrap}>
-        {KIND_OPTIONS.map((item) => (
-          <Chip
-            key={item.label}
-            label={item.label}
-            active={draft.listingKind === item.key}
-            onPress={() =>
-              setDraft((current) => ({ ...current, listingKind: item.key, category: null }))
-            }
-          />
-        ))}
-      </View>
+      <Group label="İlan türü">
+        <View style={styles.wrap}>
+          {KIND_OPTIONS.map((item) => (
+            <Chip
+              key={item.label}
+              label={item.label}
+              active={draft.listingKind === item.key}
+              onPress={() =>
+                setDraft((current) => ({ ...current, listingKind: item.key, category: null }))
+              }
+            />
+          ))}
+        </View>
+      </Group>
 
-      <AppText variant="label" color="textSecondary">
-        Gayrimenkul türü
-      </AppText>
-      <ScrollView
-        keyboardShouldPersistTaps="handled"
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chips}
-      >
-        <Chip
-          label="Tümü"
-          active={draft.category == null}
-          onPress={() => setDraft((current) => ({ ...current, category: null }))}
-        />
-        {categoryOptions.map((category) => (
-          <Chip
-            key={category.slug}
-            label={category.name}
-            active={draft.category === category.slug}
-            onPress={() =>
-              setDraft((current) => ({
-                ...current,
-                category: current.category === category.slug ? null : category.slug,
-              }))
-            }
-          />
-        ))}
-      </ScrollView>
-
-      <AppText variant="label" color="textSecondary">
-        İlçe
-      </AppText>
-      <ScrollView
-        keyboardShouldPersistTaps="handled"
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chips}
-      >
-        <Chip
-          label="Tüm Trabzon"
-          active={draft.districtId == null}
-          onPress={() =>
-            setDraft((current) => ({ ...current, districtId: null, neighborhoodId: null }))
-          }
-        />
-        {districts.map((item) => (
-          <Chip
-            key={item.id}
-            label={item.name}
-            active={draft.districtId === item.id}
-            onPress={() => {
-              haptics.tap();
-              setDraft((current) => ({
-                ...current,
-                districtId: current.districtId === item.id ? null : item.id,
-                neighborhoodId: null,
-              }));
-            }}
-          />
-        ))}
-      </ScrollView>
-
-      {district && district.neighborhoods.length > 0 ? (
-        <>
-          <AppText variant="label" color="textSecondary">
-            Mahalle
-          </AppText>
+      {draft.listingKind ? (
+        <Group label="Gayrimenkul türü">
           <ScrollView
             keyboardShouldPersistTaps="handled"
             horizontal
             showsHorizontalScrollIndicator={false}
+            style={styles.hScroll}
+            contentContainerStyle={styles.chips}
+          >
+            <Chip
+              label="Tümü"
+              active={draft.category == null}
+              onPress={() => setDraft((current) => ({ ...current, category: null }))}
+            />
+            {categoryOptions.map((category) => (
+              <Chip
+                key={category.slug}
+                label={category.name.replace(/^(Kiralık|Satılık|Devren)\s+/i, '')}
+                active={draft.category === category.slug}
+                onPress={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    category: current.category === category.slug ? null : category.slug,
+                  }))
+                }
+              />
+            ))}
+          </ScrollView>
+        </Group>
+      ) : null}
+
+      <Group label="İlçe">
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.hScroll}
+          contentContainerStyle={styles.chips}
+        >
+          <Chip
+            label="Tüm Trabzon"
+            active={draft.districtId == null}
+            onPress={() =>
+              setDraft((current) => ({ ...current, districtId: null, neighborhoodId: null }))
+            }
+          />
+          {districts.map((item) => (
+            <Chip
+              key={item.id}
+              label={item.name}
+              active={draft.districtId === item.id}
+              onPress={() => {
+                haptics.tap();
+                setDraft((current) => ({
+                  ...current,
+                  districtId: current.districtId === item.id ? null : item.id,
+                  neighborhoodId: null,
+                }));
+              }}
+            />
+          ))}
+        </ScrollView>
+      </Group>
+
+      {district && district.neighborhoods.length > 0 ? (
+        <Group label="Mahalle">
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.hScroll}
             contentContainerStyle={styles.chips}
           >
             <Chip
@@ -251,113 +253,132 @@ export function RealEstateFilterSheet({
               />
             ))}
           </ScrollView>
+        </Group>
+      ) : null}
+
+      <Group label="Fiyat aralığı (₺)">
+        <View style={styles.twoCols}>
+          <TextField
+            value={minPrice}
+            onChangeText={setMinPrice}
+            keyboardType="numeric"
+            placeholder="En az"
+            containerStyle={styles.flex}
+          />
+          <TextField
+            value={maxPrice}
+            onChangeText={setMaxPrice}
+            keyboardType="numeric"
+            placeholder="En çok"
+            containerStyle={styles.flex}
+          />
+        </View>
+      </Group>
+
+      <Group label="Alan (m²)">
+        <View style={styles.twoCols}>
+          <TextField
+            value={minM2}
+            onChangeText={setMinM2}
+            keyboardType="numeric"
+            placeholder="En az"
+            containerStyle={styles.flex}
+          />
+          <TextField
+            value={maxM2}
+            onChangeText={setMaxM2}
+            keyboardType="numeric"
+            placeholder="En çok"
+            containerStyle={styles.flex}
+          />
+        </View>
+      </Group>
+
+      <Group label="Oda sayısı">
+        <View style={styles.wrap}>
+          <Chip
+            label="Tümü"
+            active={draft.rooms == null}
+            onPress={() => setDraft((current) => ({ ...current, rooms: null }))}
+          />
+          {ROOMS.map((count) => (
+            <Chip
+              key={count}
+              label={`${count}+1`}
+              active={draft.rooms === count}
+              onPress={() => setDraft((current) => ({ ...current, rooms: count }))}
+            />
+          ))}
+        </View>
+      </Group>
+
+      {/* İkincil alanlar: varsayılan olarak kapalı, tek dokunuşla açılır. */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: advanced }}
+        onPress={() => {
+          haptics.tap();
+          setAdvanced((current) => !current);
+        }}
+        style={[
+          styles.advancedToggle,
+          { backgroundColor: theme.colors.surfaceMuted, borderColor: theme.colors.border },
+        ]}
+      >
+        <Ionicons name="options-outline" size={16} color={theme.colors.textSecondary} />
+        <AppText variant="bodyStrong" color="textSecondary" style={styles.flex}>
+          Daha fazla filtre
+        </AppText>
+        <Ionicons
+          name={advanced ? 'chevron-up' : 'chevron-down'}
+          size={16}
+          color={theme.colors.textTertiary}
+        />
+      </Pressable>
+
+      {advanced ? (
+        <>
+          <Group label="Maksimum bina yaşı">
+            <TextField
+              value={age}
+              onChangeText={setAge}
+              keyboardType="numeric"
+              placeholder="Örn. 10"
+            />
+          </Group>
+
+          <Group label="İlan sahibi">
+            <View style={styles.wrap}>
+              {OWNER_TYPES.map((item) => (
+                <Chip
+                  key={item.label}
+                  label={item.label}
+                  active={draft.ownerType === item.key}
+                  onPress={() => setDraft((current) => ({ ...current, ownerType: item.key }))}
+                />
+              ))}
+            </View>
+          </Group>
         </>
       ) : null}
 
-      <View style={styles.twoCols}>
-        <TextField
-          label="Min. fiyat (₺)"
-          value={minPrice}
-          onChangeText={setMinPrice}
-          keyboardType="numeric"
-          placeholder="10.000"
-          containerStyle={styles.flex}
-        />
-        <TextField
-          label="Maks. fiyat (₺)"
-          value={maxPrice}
-          onChangeText={setMaxPrice}
-          keyboardType="numeric"
-          placeholder="40.000"
-          containerStyle={styles.flex}
-        />
-      </View>
-
-      <View style={styles.twoCols}>
-        <TextField
-          label="Min. m²"
-          value={minM2}
-          onChangeText={setMinM2}
-          keyboardType="numeric"
-          placeholder="60"
-          containerStyle={styles.flex}
-        />
-        <TextField
-          label="Maks. m²"
-          value={maxM2}
-          onChangeText={setMaxM2}
-          keyboardType="numeric"
-          placeholder="200"
-          containerStyle={styles.flex}
-        />
-      </View>
-
-      <AppText variant="label" color="textSecondary">
-        Oda sayısı
-      </AppText>
-      <View style={styles.wrap}>
-        <Chip
-          label="Tümü"
-          active={draft.rooms == null}
-          onPress={() => setDraft((current) => ({ ...current, rooms: null }))}
-        />
-        {ROOMS.map((count) => (
-          <Chip
-            key={count}
-            label={`${count}+1`}
-            active={draft.rooms === count}
-            onPress={() => setDraft((current) => ({ ...current, rooms: count }))}
-          />
-        ))}
-      </View>
-
-      <View style={styles.twoCols}>
-        <TextField
-          label="Maks. bina yaşı"
-          value={age}
-          onChangeText={setAge}
-          keyboardType="numeric"
-          placeholder="10"
-          containerStyle={styles.flex}
-        />
-        <View style={styles.flex}>
-          <AppText variant="label" color="textSecondary">
-            İlan sahibi
-          </AppText>
-          <View style={styles.wrap}>
-            {OWNER_TYPES.map((item) => (
-              <Chip
-                key={item.label}
-                label={item.label}
-                active={draft.ownerType === item.key}
-                onPress={() => setDraft((current) => ({ ...current, ownerType: item.key }))}
-              />
-            ))}
-          </View>
-        </View>
-      </View>
-
-      <AppText variant="label" color="textSecondary">
-        Sıralama
-      </AppText>
-      <View style={styles.wrap}>
-        {SORTS.map((item) => (
-          <Chip
-            key={item.key}
-            label={item.label}
-            active={draft.sort === item.key}
-            onPress={() => setDraft((current) => ({ ...current, sort: item.key }))}
-          />
-        ))}
-      </View>
-
       <View style={[styles.note, { backgroundColor: theme.colors.surfaceMuted }]}>
         <AppText variant="caption" color="textTertiary">
-          Konut ilanlarının kapı numarası ve kesin koordinatı gizlenir; haritada yaklaşık konum
-          gösterilir. Doğrulanmamış ilanlar listelenmez.
+          Konutlarda kapı numarası ve kesin koordinat gizlenir; haritada yaklaşık konum görünür.
         </AppText>
       </View>
     </MapSheet>
+  );
+}
+
+function Group({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <View style={styles.group}>
+      <AppText variant="label" color="textSecondary">
+        {label}
+      </AppText>
+      {children}
+    </View>
   );
 }
 
@@ -387,10 +408,12 @@ function Chip({ label, active, onPress }: { label: string; active: boolean; onPr
 }
 
 const styles = StyleSheet.create({
+  group: { gap: 7 },
   chips: { gap: 7, paddingRight: 12, alignItems: 'center' },
-  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, paddingTop: 2 },
+  hScroll: { flexGrow: 0, flexShrink: 0 },
+  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   chip: {
-    paddingHorizontal: 11,
+    paddingHorizontal: 12,
     height: 32,
     borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
@@ -399,6 +422,15 @@ const styles = StyleSheet.create({
   },
   twoCols: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
   flex: { flex: 1 },
+  advancedToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    height: 44,
+    borderRadius: 13,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
   note: { padding: 10, borderRadius: 12 },
   footer: { flexDirection: 'row', gap: 10 },
   footerButton: { flex: 1 },

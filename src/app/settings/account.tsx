@@ -19,8 +19,11 @@ import {
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 import { unwrap } from '@/utils/result';
+import { socialAvailability } from '@/features/auth/social-availability';
 
-const SOCIAL_ROWS: { provider: LinkedProvider; icon: React.ComponentProps<typeof Ionicons>['name'] }[] = [
+type SocialRowProvider = Extract<LinkedProvider, 'apple' | 'google'>;
+
+const SOCIAL_ROWS: { provider: SocialRowProvider; icon: React.ComponentProps<typeof Ionicons>['name'] }[] = [
   { provider: 'apple', icon: 'logo-apple' },
   { provider: 'google', icon: 'logo-google' },
 ];
@@ -153,6 +156,12 @@ export default function AccountScreen() {
   };
 
   const providers = account.data?.providers ?? [];
+  // Bu platformda açılamayan sağlayıcı satırı gizlenir; ancak hesaba zaten
+  // bağlıysa bağlantıyı kesebilmek için görünür kalır.
+  const socialAvailabilityByProvider = socialAvailability();
+  const socialRows = SOCIAL_ROWS.filter(
+    (row) => socialAvailabilityByProvider[row.provider] || providers.includes(row.provider),
+  );
 
   return (
     <Screen edges={['top', 'left', 'right']} scroll>
@@ -246,7 +255,7 @@ export default function AccountScreen() {
                 connected={providers.includes('email')}
                 locked
               />
-              {SOCIAL_ROWS.map((row) => {
+              {socialRows.map((row) => {
                 const connected = providers.includes(row.provider);
                 const busy = busyProvider === row.provider;
                 return (

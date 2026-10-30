@@ -12,6 +12,7 @@ import {
   StyleSheet,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as Crypto from 'expo-crypto';
@@ -19,18 +20,28 @@ import * as DocumentPicker from 'expo-document-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 
-import { ActionSheet, AppImage, AppText, Avatar, IconButton, Screen, ScreenHeader } from '@/components/ui';
+import {
+  ActionSheet,
+  AppImage,
+  AppText,
+  Avatar,
+  IconButton,
+  Screen,
+  ScreenHeader,
+} from '@/components/ui';
 import { MediaViewer, type ViewerMedia } from '@/features/feed/components/MediaViewer';
 import { VideoThumbnail } from '@/features/media/components/VideoThumbnail';
 import { useReportSheet } from '@/features/safety/components/ReportSheetProvider';
 import { shareContent } from '@/features/share/share-action';
 import { useBlockUser } from '@/features/profile/hooks/use-profile-mutations';
 import { pickMedia } from '@/features/media/media-picker';
+import { signedMessageUrls } from '@/features/media/media-service';
 import {
-  signedMessageUrls,
-  uploadMedia,
-  uploadVideoWithPoster,
-} from '@/features/media/media-service';
+  cachedVideoPoster,
+  formatVideoDuration,
+  generateVideoPoster,
+  prepareVideoForUpload,
+} from '@/features/media/video-service';
 import {
   flattenMessages,
   useChatMembers,
@@ -43,11 +54,12 @@ import {
   useSendMessage,
   useStartCall,
   useTypingIndicator,
+  type PendingMediaUpload,
 } from '@/features/messaging/hooks/use-chat';
-import type {
-  ChatMessage,
-  MessageKind,
-  MessageMediaInput,
+import {
+  isLocalMediaPath,
+  type ChatMessage,
+  type MessageKind,
 } from '@/features/messaging/services/messaging-service';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { useKeyboard } from '@/providers/keyboard';
@@ -69,6 +81,8 @@ type PendingAttachment = {
   height?: number | null;
   durationMs?: number | null;
   size?: number | null;
+  /** Video seçildiği anda üretilen yerel kapak. */
+  posterUri?: string | null;
 };
 
 type ViewerState = { items: ViewerMedia[]; index: number } | null;
@@ -100,7 +114,6 @@ export default function ChatScreen() {
   const [editing, setEditing] = useState<ChatMessage | null>(null);
   const [menuMessage, setMenuMessage] = useState<ChatMessage | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const [viewer, setViewer] = useState<ViewerState>(null);
@@ -110,6 +123,8 @@ export default function ChatScreen() {
   const inputRef = useRef<ComponentRef<typeof TextInput>>(null);
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Aynı anda birden çok medya gönderimi olabilir; ilerleme çubuğu sayaçla yönetilir. */
+  const uploadCountRef = useRef(0);
 
   const typing = useTypingIndicator(conversationId, myId, draft.length > 0);
 
@@ -120,11 +135,13 @@ export default function ChatScreen() {
     () =>
       messages.flatMap((message) => {
         const paths: string[] = [];
-        if (message.media_path) {
+        if (message.media_path && !isLocalMediaPath(message.media_path)) {
           paths.push(message.media_path);
         }
         for (const item of message.media) {
-          paths.push(item.storage_path);
+          if (!isLocalMediaPath(item.storage_path)) {
+            paths.push(item.storage_path);
+          }
           if (item.thumbnail_path) {
             paths.push(item.thumbnail_path);
           }
@@ -172,15 +189,18 @@ export default function ChatScreen() {
     };
   }, [members.data, myId]);
 
-  // Okunmamış mesajları sunucuda işaretle.
+  // Okunmamış mesajları sunucuda işaretle. Eskiden her mesaj sayısı
+  // değişiminde iki RPC çalışıyordu; artık yalnızca en yeni sunucu mesajı
+  // değiştiğinde bir kez çalışır (iyimser "temp-" satırlar beklenir).
+  const newestMessageId = messages[messages.length - 1]?.id ?? null;
   useEffect(() => {
-    if (!conversationId || messages.length === 0) {
+    if (!conversationId || !newestMessageId || newestMessageId.startsWith('temp-')) {
       return;
     }
     markDelivered.mutate();
     markRead.mutate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId, messages.length]);
+  }, [conversationId, newestMessageId]);
 
   useEffect(
     () => () => {
@@ -217,137 +237,126 @@ export default function ChatScreen() {
     [clearHighlightSoon, reversed],
   );
 
-  const beginReply = useCallback(
-    (message: ChatMessage) => {
-      setEditing(null);
-      setReply({
-        id: message.id,
-        name: message.is_mine
-          ? 'Kendine'
-          : (message.sender_first_name ?? message.sender_username),
-        body:
-          message.deleted_at
-            ? 'Bu mesaj silindi'
-            : (message.body ?? (message.media.length > 0 ? 'Medya' : 'Mesaj')),
-        hasMedia: message.media.length > 0 || Boolean(message.media_path),
-      });
-      inputRef.current?.focus();
-    },
-    [],
-  );
+  const beginReply = useCallback((message: ChatMessage) => {
+    setEditing(null);
+    setReply({
+      id: message.id,
+      name: message.is_mine ? 'Kendine' : (message.sender_first_name ?? message.sender_username),
+      body: message.deleted_at
+        ? 'Bu mesaj silindi'
+        : (message.body ?? (message.media.length > 0 ? 'Medya' : 'Mesaj')),
+      hasMedia: message.media.length > 0 || Boolean(message.media_path),
+    });
+    inputRef.current?.focus();
+  }, []);
 
+  /**
+   * Eklentileri gönderir.
+   *
+   * Yükleme artık `useSendMessage` içinde yapılır: iyimser balon, kullanıcı
+   * gönder'e bastığı anda (dosya yüklenmeden) listeye girer ve yükleme arka
+   * planda sürer. Önceden balon, tüm dosyalar sıkıştırılıp yüklenene kadar
+   * görünmüyordu.
+   */
   const uploadPending = useCallback(
-    async (captionOverride?: string) => {
-      if (!myId || pending.length === 0 || uploading) {
+    (captionOverride?: string) => {
+      if (!myId || pending.length === 0) {
         return;
       }
       const caption = (captionOverride ?? draft).trim();
       const replyId = reply?.id ?? null;
-      setUploading(true);
-      setUploadProgress(0);
+      const uploads: PendingMediaUpload[] = pending.map((item) => ({
+        media_type: item.kind,
+        uri: item.uri,
+        mime: item.mime ?? null,
+        fileName: item.fileName ?? null,
+        width: item.width ?? null,
+        height: item.height ?? null,
+        durationMs: item.durationMs ?? null,
+        size: item.size ?? null,
+      }));
 
-      const media: MessageMediaInput[] = [];
-      const total = Math.max(pending.length, 1);
-      for (let index = 0; index < pending.length; index += 1) {
-        const item = pending[index];
-        if (!item) {
-          continue;
-        }
-        const report = (stageRatio: number) =>
-          setUploadProgress(Math.min(1, (index + stageRatio) / total));
-        if (item.kind === 'video') {
-          const uploaded = await uploadVideoWithPoster({
-            bucket: 'message-media',
-            folder: conversationId,
-            uploaderId: myId,
-            uri: item.uri,
-            mime: item.mime ?? 'video/mp4',
-            fileName: item.fileName ?? null,
-            durationMs: item.durationMs ?? null,
-            width: item.width ?? null,
-            height: item.height ?? null,
-            onProgress: (stage, ratio) =>
-              report(stage === 'uploading' ? 0.15 + ratio * 0.85 : ratio * 0.15),
-          });
-          if (!uploaded.ok) {
-            setUploading(false);
-            setUploadProgress(null);
-            Alert.alert(
-              'Video yüklenemedi',
-              `${uploaded.error.message}\n\nEklentiler korundu. Göndermek için tekrar dokun.`,
-            );
-            return;
-          }
-          const video = uploaded.data.video;
-          media.push({
-            media_type: 'video',
-            storage_path: video.path,
-            thumbnail_path: video.thumbnailPath ?? null,
-            width: video.width ?? item.width ?? null,
-            height: video.height ?? item.height ?? null,
-            duration_ms: video.durationMs ?? item.durationMs ?? null,
-            mime: video.mime,
-            name: item.fileName ?? null,
-            size: video.size,
-          });
-          report(1);
-          continue;
-        }
-
-        const uploaded = await uploadMedia({
-          bucket: 'message-media',
-          folder: conversationId,
-          uploaderId: myId,
-          uri: item.uri,
-          mime: item.mime ?? null,
-          fileName: item.fileName ?? null,
-          onProgress: (stage, ratio) =>
-            report(stage === 'uploading' ? 0.15 + ratio * 0.85 : ratio * 0.15),
-        });
-        if (!uploaded.ok) {
-          setUploading(false);
-          setUploadProgress(null);
-          Alert.alert(
-            'Medya yüklenemedi',
-            `${uploaded.error.message}\n\nEklentiler korundu. Göndermek için tekrar dokun.`,
-          );
-          return;
-        }
-        media.push({
-          media_type: item.kind === 'file' ? 'file' : 'image',
-          storage_path: uploaded.data.path,
-          mime: uploaded.data.mime,
-          name: item.fileName ?? null,
-          size: uploaded.data.size,
-          width: item.width ?? null,
-          height: item.height ?? null,
-        });
-        report(1);
-      }
-
-      setUploading(false);
-      setUploadProgress(null);
-      if (media.length === 0) {
-        return;
-      }
       haptics.tap();
-      sendMessage.mutate({
-        kind: media[0]?.media_type ?? 'file',
-        body: caption || null,
-        media,
-        replyToId: replyId,
-      });
+      uploadCountRef.current += 1;
+      setUploadProgress(0);
+      // Besteci hemen temizlenir: balon zaten listede.
       setPending([]);
       setDraft('');
       setReply(null);
+
+      sendMessage.mutate(
+        {
+          kind: uploads[0]?.media_type ?? 'file',
+          body: caption || null,
+          uploads,
+          replyToId: replyId,
+          onUploadProgress: (ratio) => setUploadProgress(ratio),
+        },
+        {
+          onSettled: () => {
+            uploadCountRef.current = Math.max(0, uploadCountRef.current - 1);
+            if (uploadCountRef.current === 0) {
+              setUploadProgress(null);
+            }
+          },
+          onError: (error) => {
+            Alert.alert(
+              'Medya gönderilemedi',
+              `${toMessage(error)}\n\nMesajın üzerine dokunarak tekrar deneyebilirsin.`,
+            );
+          },
+        },
+      );
     },
-    [conversationId, draft, myId, pending, reply?.id, sendMessage, uploading],
+    [draft, myId, pending, reply?.id, sendMessage],
   );
+
+  // Video seçildiği anda sıkıştırma ve kapak üretimi başlar: "gönder"e
+  // basıldığında iş çoğunlukla bitmiş olur ve yükleme beklemeden başlar.
+  const pendingSignature = useMemo(
+    () => pending.map((item) => `${item.id}:${item.kind}`).join('|'),
+    [pending],
+  );
+  useEffect(() => {
+    if (!pendingSignature) {
+      return;
+    }
+    let active = true;
+    for (const item of pending) {
+      if (item.kind !== 'video') {
+        continue;
+      }
+      void prepareVideoForUpload({
+        uri: item.uri,
+        durationMs: item.durationMs ?? null,
+        width: item.width ?? null,
+        height: item.height ?? null,
+        size: item.size ?? null,
+      }).catch(() => undefined);
+      void generateVideoPoster(item.uri).then((poster) => {
+        if (!active || !poster) {
+          return;
+        }
+        setPending((current) =>
+          current.map((entry) =>
+            entry.id === item.id && entry.posterUri !== poster.uri
+              ? { ...entry, posterUri: poster.uri }
+              : entry,
+          ),
+        );
+      });
+    }
+    return () => {
+      active = false;
+    };
+    // `pending` kapak eklendiğinde değişir; işi yalnızca seçim değişince başlat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSignature]);
 
   const submit = useCallback(() => {
     const body = draft.trim();
     if (pending.length > 0) {
-      void uploadPending(body);
+      uploadPending(body);
       return;
     }
     if (!body && !editing) {
@@ -428,18 +437,21 @@ export default function ChatScreen() {
   const openMessageMedia = useCallback(
     (message: ChatMessage, startIndex: number) => {
       const items = message.media.flatMap<ViewerMedia>((item) => {
-        const uri = signedMedia.data?.[item.storage_path];
+        // Yükleme sürerken sunucu adresi yoktur; iyimser satır kendi yerel
+        // dosyasını gösterir.
+        const uri = signedMedia.data?.[item.storage_path] ?? item.local_uri ?? null;
         if (!uri) {
           return [];
         }
+        const thumb = item.thumbnail_path
+          ? (signedMedia.data?.[item.thumbnail_path] ?? null)
+          : null;
         return [
           {
             id: item.id,
             uri,
             media_type: item.media_type === 'video' ? ('video' as const) : ('image' as const),
-            thumbnailUri: item.thumbnail_path
-              ? (signedMedia.data?.[item.thumbnail_path] ?? null)
-              : null,
+            thumbnailUri: thumb ?? (item.local_uri ? cachedVideoPoster(item.local_uri) : null),
             width: item.width,
             height: item.height,
           },
@@ -499,6 +511,87 @@ export default function ChatScreen() {
         conversation.isGroup &&
         !item.is_mine &&
         (!older || older.sender_id !== item.sender_id || showDay);
+      const visual = hasVisualMedia(item);
+      const bubbleTint = item.is_mine
+        ? { backgroundColor: theme.colors.primary, borderBottomRightRadius: 6 }
+        : {
+            backgroundColor: theme.colors.surface,
+            borderColor: theme.colors.border,
+            borderBottomLeftRadius: 6,
+            borderWidth: StyleSheet.hairlineWidth,
+          };
+
+      const renderFoot = (light: boolean) => (
+        <View style={styles.bubbleFoot}>
+          {item.edited_at && !item.deleted_at ? (
+            <AppText variant="caption" color={light ? 'rgba(255,255,255,0.7)' : 'textTertiary'}>
+              düzenlendi
+            </AppText>
+          ) : null}
+          <AppText
+            variant="caption"
+            color={
+              item.delivery_status === 'failed'
+                ? light
+                  ? '#FCA5A5'
+                  : 'danger'
+                : light
+                  ? 'rgba(255,255,255,0.7)'
+                  : 'textTertiary'
+            }
+          >
+            {formatTimeTr(item.created_at)}
+          </AppText>
+          {item.is_mine && !item.deleted_at ? (
+            <DeliveryBadge status={item.delivery_status} onDark={light} />
+          ) : null}
+        </View>
+      );
+
+      const renderReplyQuote = (light: boolean) =>
+        item.reply_preview ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Yanıtlanan mesaja git"
+            onPress={() => (item.reply_preview ? jumpToMessage(item.reply_preview.id) : undefined)}
+            style={[
+              styles.replyQuote,
+              { backgroundColor: light ? 'rgba(255,255,255,0.16)' : theme.colors.surfaceMuted },
+            ]}
+          >
+            <AppText
+              variant="caption"
+              color={light ? 'rgba(255,255,255,0.9)' : 'primaryDeep'}
+              numberOfLines={1}
+            >
+              @{item.reply_preview.sender_username}
+            </AppText>
+            <AppText
+              variant="caption"
+              color={light ? 'rgba(255,255,255,0.75)' : 'textSecondary'}
+              numberOfLines={2}
+            >
+              {item.reply_preview.deleted_at
+                ? 'Bu mesaj silindi'
+                : (item.reply_preview.body ?? (item.reply_preview.has_media ? 'Medya' : 'Mesaj'))}
+            </AppText>
+          </Pressable>
+        ) : null;
+
+      const retryRow =
+        item.is_mine && item.delivery_status === 'failed' ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Mesajı tekrar gönder"
+            onPress={() => sendMessage.retryMessage(item)}
+            style={styles.retryRow}
+          >
+            <Ionicons name="refresh" size={13} color="#FCA5A5" />
+            <AppText variant="caption" color="danger">
+              Gönderilemedi · Tekrar dene
+            </AppText>
+          </Pressable>
+        ) : null;
 
       return (
         <View>
@@ -545,71 +638,29 @@ export default function ChatScreen() {
               />
             ) : null}
 
-            <View
-              style={[
-                styles.bubble,
-                item.is_mine
-                  ? { backgroundColor: theme.colors.primary, borderBottomRightRadius: 6 }
-                  : {
-                      backgroundColor: theme.colors.surface,
-                      borderColor: theme.colors.border,
-                      borderBottomLeftRadius: 6,
-                      borderWidth: StyleSheet.hairlineWidth,
-                    },
-              ]}
-            >
-              {item.deleted_at ? (
-                <AppText
-                  variant="body"
-                  color={item.is_mine ? 'rgba(255,255,255,0.75)' : 'textTertiary'}
-                >
-                  Bu mesaj silindi
-                </AppText>
-              ) : (
-                <>
-                  {item.reply_preview ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Yanıtlanan mesaja git"
-                      onPress={() =>
-                        item.reply_preview ? jumpToMessage(item.reply_preview.id) : undefined
-                      }
-                      style={[
-                        styles.replyQuote,
-                        {
-                          backgroundColor: item.is_mine
-                            ? 'rgba(255,255,255,0.16)'
-                            : theme.colors.surfaceMuted,
-                        },
-                      ]}
-                    >
-                      <AppText
-                        variant="caption"
-                        color={item.is_mine ? 'rgba(255,255,255,0.9)' : 'primaryDeep'}
-                        numberOfLines={1}
-                      >
-                        @{item.reply_preview.sender_username}
-                      </AppText>
-                      <AppText
-                        variant="caption"
-                        color={item.is_mine ? 'rgba(255,255,255,0.75)' : 'textSecondary'}
-                        numberOfLines={2}
-                      >
-                        {item.reply_preview.deleted_at
-                          ? 'Bu mesaj silindi'
-                          : (item.reply_preview.body ??
-                            (item.reply_preview.has_media ? 'Medya' : 'Mesaj'))}
-                      </AppText>
-                    </Pressable>
-                  ) : null}
-
+            {visual ? (
+              <View
+                style={[
+                  styles.mediaBubble,
+                  item.is_mine ? styles.mediaBubbleMine : styles.mediaBubbleOther,
+                ]}
+              >
+                {renderReplyQuote(false)}
+                <View>
                   <MessageMedia
                     message={item}
                     signed={signedMedia.data}
-                    onOpen={(index) => openMessageMedia(item, index)}
+                    onOpen={(mediaIndex) => openMessageMedia(item, mediaIndex)}
+                    onLongPress={() => openMessageMenu(item)}
                   />
-
-                  {item.body ? (
+                  {!item.body ? (
+                    <View pointerEvents="none" style={styles.mediaStamp}>
+                      {renderFoot(true)}
+                    </View>
+                  ) : null}
+                </View>
+                {item.body ? (
+                  <View style={[styles.bubble, styles.captionBubble, bubbleTint]}>
                     <AppText
                       variant="body"
                       color={item.is_mine ? '#FFFFFF' : 'text'}
@@ -617,55 +668,47 @@ export default function ChatScreen() {
                     >
                       {item.body}
                     </AppText>
-                  ) : null}
-                </>
-              )}
-
-              <View style={styles.bubbleFoot}>
-                {item.edited_at && !item.deleted_at ? (
-                  <AppText
-                    variant="caption"
-                    color={item.is_mine ? 'rgba(255,255,255,0.7)' : 'textTertiary'}
-                  >
-                    düzenlendi
-                  </AppText>
+                    {renderFoot(item.is_mine)}
+                  </View>
                 ) : null}
-                <AppText
-                  variant="caption"
-                  color={
-                    item.delivery_status === 'failed'
-                      ? item.is_mine
-                        ? '#FCA5A5'
-                        : 'danger'
-                      : item.is_mine
-                        ? 'rgba(255,255,255,0.7)'
-                        : 'textTertiary'
-                  }
-                >
-                  {formatTimeTr(item.created_at)}
-                </AppText>
-                {item.is_mine && !item.deleted_at ? (
-                  <DeliveryBadge
-                    status={item.delivery_status}
-                    onDark={item.is_mine}
-                  />
-                ) : null}
+                {retryRow}
               </View>
-
-              {item.is_mine && item.delivery_status === 'failed' ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Mesajı tekrar gönder"
-                  onPress={() => sendMessage.retryMessage(item)}
-                  style={styles.retryRow}
-                >
-                  <Ionicons name="refresh" size={13} color="#FCA5A5" />
-                  <AppText variant="caption" color="danger">
-                    Gönderilemedi · Tekrar dene
+            ) : (
+              <View style={[styles.bubble, bubbleTint]}>
+                {item.deleted_at ? (
+                  <AppText
+                    variant="body"
+                    color={item.is_mine ? 'rgba(255,255,255,0.75)' : 'textTertiary'}
+                  >
+                    Bu mesaj silindi
                   </AppText>
-                </Pressable>
-              ) : null}
-            </View>
+                ) : (
+                  <>
+                    {renderReplyQuote(item.is_mine)}
+
+                    <MessageMedia
+                      message={item}
+                      signed={signedMedia.data}
+                      onOpen={(mediaIndex) => openMessageMedia(item, mediaIndex)}
+                      onLongPress={() => openMessageMenu(item)}
+                    />
+
+                    {item.body ? (
+                      <AppText
+                        variant="body"
+                        color={item.is_mine ? '#FFFFFF' : 'text'}
+                        style={styles.bubbleText}
+                      >
+                        {item.body}
+                      </AppText>
+                    ) : null}
+                  </>
+                )}
+
+                {renderFoot(item.is_mine)}
+                {retryRow}
+              </View>
+            )}
           </Pressable>
         </View>
       );
@@ -726,6 +769,8 @@ export default function ChatScreen() {
                 >
                   {item.kind === 'image' ? (
                     <AppImage source={{ uri: item.uri }} style={styles.pendingImage} />
+                  ) : item.kind === 'video' && item.posterUri ? (
+                    <AppImage source={{ uri: item.posterUri }} style={styles.pendingImage} />
                   ) : (
                     <View style={styles.pendingIcon}>
                       <Ionicons
@@ -748,14 +793,6 @@ export default function ChatScreen() {
                   </Pressable>
                 </View>
               ))}
-              {uploading ? (
-                <View style={styles.pendingUploading}>
-                  <ActivityIndicator size="small" color={theme.colors.primary} />
-                  <AppText variant="caption" color="textSecondary">
-                    Yükleniyor…
-                  </AppText>
-                </View>
-              ) : null}
             </ScrollView>
           ) : null}
 
@@ -810,8 +847,7 @@ export default function ChatScreen() {
               accessibilityRole="button"
               accessibilityLabel="Medya ekle"
               onPress={() => void attachImage()}
-              disabled={uploading}
-              style={({ pressed }) => [styles.attach, { opacity: pressed || uploading ? 0.5 : 1 }]}
+              style={({ pressed }) => [styles.attach, { opacity: pressed ? 0.5 : 1 }]}
             >
               <Ionicons name="add" size={22} color={theme.colors.textSecondary} />
             </Pressable>
@@ -819,8 +855,7 @@ export default function ChatScreen() {
               accessibilityRole="button"
               accessibilityLabel="Dosya ekle"
               onPress={() => void attachFile()}
-              disabled={uploading}
-              style={({ pressed }) => [styles.attach, { opacity: pressed || uploading ? 0.5 : 1 }]}
+              style={({ pressed }) => [styles.attach, { opacity: pressed ? 0.5 : 1 }]}
             >
               <Ionicons name="document-outline" size={20} color={theme.colors.textSecondary} />
             </Pressable>
@@ -860,22 +895,18 @@ export default function ChatScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={editing ? 'Düzenlemeyi kaydet' : 'Mesajı gönder'}
-              disabled={(!draft.trim() && !editing && pending.length === 0) || uploading}
+              disabled={!draft.trim() && !editing && pending.length === 0}
               onPress={submit}
               style={({ pressed }) => [
                 styles.send,
                 {
                   backgroundColor: theme.colors.primary,
                   opacity:
-                    (!draft.trim() && !editing && pending.length === 0) || uploading
-                      ? 0.4
-                      : pressed
-                        ? 0.7
-                        : 1,
+                    !draft.trim() && !editing && pending.length === 0 ? 0.4 : pressed ? 0.7 : 1,
                 },
               ]}
             >
-              {uploading || editMessage.isPending ? (
+              {editMessage.isPending ? (
                 <ActivityIndicator size="small" color={theme.colors.onPrimary} />
               ) : (
                 <Ionicons name="arrow-up" size={19} color={theme.colors.onPrimary} />
@@ -913,8 +944,7 @@ export default function ChatScreen() {
             <IconButton
               name="chevron-back"
               accessibilityLabel="Geri"
-              variant="surface"
-              size={20}
+              size={22}
               onPress={() => router.back()}
             />
             <Pressable
@@ -1074,6 +1104,7 @@ export default function ChatScreen() {
         media={viewer?.items ?? []}
         startIndex={viewer?.index ?? 0}
         onClose={() => setViewer(null)}
+        closeOnBackdropPress
       />
 
       <ActionSheet
@@ -1193,7 +1224,13 @@ export default function ChatScreen() {
   );
 }
 
-function DeliveryBadge({ status, onDark }: { status: ChatMessage['delivery_status']; onDark: boolean }) {
+function DeliveryBadge({
+  status,
+  onDark,
+}: {
+  status: ChatMessage['delivery_status'];
+  onDark: boolean;
+}) {
   const color =
     status === 'read'
       ? '#7DD3FC'
@@ -1204,7 +1241,9 @@ function DeliveryBadge({ status, onDark }: { status: ChatMessage['delivery_statu
           : 'rgba(0,0,0,0.45)';
 
   if (status === 'sending') {
-    return <Ionicons name="time-outline" size={13} color={color} accessibilityLabel="Gönderiliyor" />;
+    return (
+      <Ionicons name="time-outline" size={13} color={color} accessibilityLabel="Gönderiliyor" />
+    );
   }
   if (status === 'failed') {
     return (
@@ -1224,16 +1263,40 @@ function DeliveryBadge({ status, onDark }: { status: ChatMessage['delivery_statu
   );
 }
 
+/** Tek medyalı sohbet balonunda kutunun en büyük kenarı. */
+const SINGLE_MEDIA_MAX_SIDE = 220;
+
+/** Çoklu medya ızgarasının en büyük genişliği. */
+const MEDIA_GRID_MAX_WIDTH = 280;
+const MEDIA_GRID_GAP = 4;
+
+/** Medya kutusunun genişliği (balon en fazla ~%72). */
+function bubbleMediaEstimate(single: boolean, windowWidth: number): number {
+  const bubble = Math.max(120, windowWidth * 0.72 - 24);
+  return single ? Math.min(SINGLE_MEDIA_MAX_SIDE, bubble) : Math.min(MEDIA_GRID_MAX_WIDTH, bubble);
+}
+
+/** Fotoğraf/video içeren, silinmemiş mesajlar balonsuz (şeffaf kenarlı) çizilir. */
+function hasVisualMedia(message: ChatMessage): boolean {
+  if (message.deleted_at || message.kind === 'file' || message.kind === 'audio') {
+    return false;
+  }
+  return message.media.length > 0 || Boolean(message.media_path);
+}
+
 function MessageMedia({
   message,
   signed,
   onOpen,
+  onLongPress,
 }: {
   message: ChatMessage;
   signed: Record<string, string> | undefined;
   onOpen: (index: number) => void;
+  onLongPress?: () => void;
 }) {
   const { theme } = useTheme();
+  const { width: windowWidth } = useWindowDimensions();
   const meta = (message.media_meta ?? {}) as {
     name?: string;
     width?: number;
@@ -1254,10 +1317,23 @@ function MessageMedia({
             height: meta.height ?? null,
             duration_ms: typeof meta.duration === 'number' ? meta.duration : null,
             sort_order: 0,
+            local_uri: null,
           },
         ]
       : [];
   const items = message.media.length > 0 ? message.media : legacy;
+  const single = items.length === 1;
+
+  /**
+   * Hücre boyutları pencere genişliğinden sayısal olarak hesaplanır.
+   * Yüzde genişlik + `aspectRatio` kombinasyonu Yoga'da yüksekliği 0'a
+   * düşürebiliyor; balonsuz düzende ölçüme bağlı genişlik de her ölçümde
+   * küçülerek daralıyordu.
+   */
+  const gridWidth = Math.round(bubbleMediaEstimate(false, windowWidth));
+  const cellWidth = Math.floor((gridWidth - MEDIA_GRID_GAP) / 2);
+  const cellHeight = Math.round(cellWidth / 1.08);
+  const singleWidth = Math.round(bubbleMediaEstimate(true, windowWidth));
 
   if (items.length === 0) {
     return null;
@@ -1279,12 +1355,16 @@ function MessageMedia({
   }
 
   const visible = items.slice(0, 4);
-  const single = items.length === 1;
+
   return (
-    <View style={[styles.mediaGrid, single ? styles.mediaGridSingle : null]}>
+    <View style={[styles.mediaGrid, { width: single ? singleWidth : gridWidth }]}>
       {visible.map((item, index) => {
-        const uri = signed?.[item.storage_path] ?? null;
-        const thumb = item.thumbnail_path ? (signed?.[item.thumbnail_path] ?? null) : null;
+        const remote = signed?.[item.storage_path] ?? null;
+        const local = item.local_uri ?? null;
+        // Yükleme bitmeden yerel dosya gösterilir; sunucu adresi gelince yerini alır.
+        const uri = remote ?? local;
+        const remoteThumb = item.thumbnail_path ? (signed?.[item.thumbnail_path] ?? null) : null;
+        const thumb = remoteThumb ?? (local ? cachedVideoPoster(local) : null);
         const ratio =
           item.width && item.height
             ? Math.min(Math.max(item.width / item.height, 0.72), 1.7)
@@ -1299,22 +1379,20 @@ function MessageMedia({
               item.media_type === 'video' ? 'Videoyu tam ekran aç' : 'Fotoğrafı tam ekran aç'
             }
             onPress={() => onOpen(index)}
+            onLongPress={onLongPress}
+            delayLongPress={260}
             style={[
               styles.mediaTile,
               single
-                ? { width: 220, maxWidth: '100%', aspectRatio: ratio }
-                : styles.mediaCell,
-              { backgroundColor: theme.colors.surfaceMuted },
+                ? { width: singleWidth, height: Math.round(singleWidth / ratio) }
+                : { width: cellWidth, height: cellHeight },
+              !uri ? { backgroundColor: theme.colors.surfaceMuted } : null,
             ]}
           >
             {!uri ? (
               <ActivityIndicator size="small" color={theme.colors.textSecondary} />
             ) : item.media_type === 'video' ? (
-              <VideoThumbnail
-                posterUri={thumb ?? uri}
-                durationMs={item.duration_ms}
-                style={StyleSheet.absoluteFill}
-              />
+              <VideoThumbnail posterUri={thumb} hideDuration style={StyleSheet.absoluteFill} />
             ) : (
               <AppImage
                 source={{ uri }}
@@ -1323,9 +1401,19 @@ function MessageMedia({
                 contentFit="cover"
               />
             )}
+            {!remote && local && item.media_type !== 'video' ? (
+              <View style={styles.mediaSending}>
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              </View>
+            ) : null}
             {item.media_type === 'video' ? (
               <View style={styles.videoBadge}>
-                <Ionicons name="play" size={13} color="#FFFFFF" />
+                <Ionicons name="videocam" size={12} color="#FFFFFF" />
+                {formatVideoDuration(item.duration_ms) ? (
+                  <AppText variant="caption" color="#FFFFFF">
+                    {formatVideoDuration(item.duration_ms)}
+                  </AppText>
+                ) : null}
               </View>
             ) : null}
             {index === 3 && items.length > 4 ? (
@@ -1370,28 +1458,52 @@ const styles = StyleSheet.create({
   retryRow: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-end' },
   replyPreviewRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   replyQuote: { borderRadius: 10, paddingHorizontal: 9, paddingVertical: 6, gap: 1 },
+  mediaBubble: { maxWidth: '78%', gap: 4 },
+  mediaBubbleMine: { alignItems: 'flex-end' },
+  mediaBubbleOther: { alignItems: 'flex-start' },
+  captionBubble: { maxWidth: '100%' },
+  mediaStamp: {
+    position: 'absolute',
+    right: 6,
+    bottom: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
   mediaGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 4,
-    alignSelf: 'stretch',
-    overflow: 'hidden',
+    gap: MEDIA_GRID_GAP,
   },
-  mediaGridSingle: { alignSelf: 'flex-start' },
   mediaTile: {
-    borderRadius: 12,
+    borderRadius: 16,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  mediaCell: { width: '48.6%', aspectRatio: 1.08 },
+  mediaCell: { width: '48.6%' },
   videoBadge: {
     position: 'absolute',
-    left: 7,
-    bottom: 7,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    left: 6,
+    bottom: 6,
+    minWidth: 24,
+    height: 22,
+    paddingHorizontal: 6,
+    borderRadius: 11,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  mediaSending: {
+    position: 'absolute',
+    right: 7,
+    top: 7,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1399,7 +1511,7 @@ const styles = StyleSheet.create({
   moreBadge: {
     position: 'absolute',
     right: 7,
-    bottom: 7,
+    top: 7,
     paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 999,
@@ -1446,7 +1558,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pendingUploading: { alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: 6 },
   composerWrap: {
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 12,

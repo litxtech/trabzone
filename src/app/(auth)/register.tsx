@@ -1,15 +1,15 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from '@/utils/router';
 import { useState } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
-import { Pressable, StyleSheet, View, Platform } from 'react-native';
+import { StyleSheet, View, Platform } from 'react-native';
 
 import { AppText, Button, TextField } from '@/components/ui';
 import { AuthScreen, InlineLink } from '@/features/auth/components/AuthScreen';
+import { RegistrationConsentBox } from '@/features/legal/components/RegistrationPolicies';
 import { WebRegisterPage } from '@/features/web/components/WebRegisterPage';
 import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons';
-import { env } from '@/config/env';
+import { socialAvailability } from '@/features/auth/social-availability';
 import { FormError } from '@/features/auth/components/FormError';
 import {
   USERNAME_HINT,
@@ -28,6 +28,7 @@ import { UsernameStatusIcon } from '@/features/auth/components/UsernameStatusIco
 import { signUpWithPassword } from '@/services/supabase/auth';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
+import { inputToBirthDate } from '@/utils/date';
 
 export default function RegisterRoute() {
   return Platform.OS === 'web' ? <WebRegisterPage /> : <RegisterScreen />;
@@ -44,6 +45,7 @@ function RegisterScreen() {
       firstName: '',
       lastName: '',
       username: '',
+      birthDate: '',
       email: '',
       password: '',
       passwordConfirm: '',
@@ -84,6 +86,8 @@ function RegisterScreen() {
       firstName: values.firstName,
       lastName: values.lastName,
       username: values.username,
+      birthDate: inputToBirthDate(values.birthDate) ?? undefined,
+      acceptedTerms: values.acceptedTerms,
     });
 
     if (!result.ok) {
@@ -168,6 +172,27 @@ function RegisterScreen() {
               hint={usernameHint}
               hintTone={USERNAME_HINT_TONE[usernameState]}
               rightSlot={<UsernameStatusIcon state={usernameState} />}
+            />
+          )}
+        />
+
+        <Controller
+          control={control}
+          name="birthDate"
+          render={({ field, fieldState }) => (
+            <TextField
+              label="Doğum tarihi"
+              placeholder="GG.AA.YYYY"
+              leftIcon="calendar-outline"
+              value={field.value}
+              onChangeText={field.onChange}
+              onBlur={field.onBlur}
+              error={fieldState.error?.message}
+              hint="13 yaşından küçük hesaplar oluşturulamaz."
+              keyboardType="numbers-and-punctuation"
+              maxLength={10}
+              textContentType="birthdate"
+              returnKeyType="next"
             />
           )}
         />
@@ -260,65 +285,18 @@ function RegisterScreen() {
           control={control}
           name="acceptedTerms"
           render={({ field, fieldState }) => (
-            <View style={{ gap: 4 }}>
-              <Pressable
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: field.value }}
-                onPress={() => field.onChange(!field.value)}
-                style={styles.termsRow}
-              >
-                <View
-                  style={[
-                    styles.checkbox,
-                    {
-                      borderColor: fieldState.error ? theme.colors.danger : theme.colors.borderStrong,
-                      backgroundColor: field.value ? theme.colors.primary : 'transparent',
-                      borderRadius: theme.radius.xs,
-                    },
-                  ]}
-                >
-                  {field.value ? <Ionicons name="checkmark" size={14} color="#FFFFFF" /> : null}
-                </View>
-                <AppText variant="caption" color="textSecondary" style={styles.termsText}>
-                  Kullanım koşullarını ve gizlilik politikasını okudum, kabul ediyorum.
-                </AppText>
-              </Pressable>
-              <View style={styles.legalRow}>
-                <Pressable
-                  accessibilityRole="link"
-                  hitSlop={6}
-                  onPress={() => router.push({ pathname: '/policy/[slug]', params: { slug: 'terms' } })}
-                >
-                  <AppText variant="caption" color="primary">
-                    Kullanım Koşulları
-                  </AppText>
-                </Pressable>
-                <AppText variant="caption" color="textTertiary">
-                  ·
-                </AppText>
-                <Pressable
-                  accessibilityRole="link"
-                  hitSlop={6}
-                  onPress={() => router.push({ pathname: '/policy/[slug]', params: { slug: 'privacy' } })}
-                >
-                  <AppText variant="caption" color="primary">
-                    Gizlilik Politikası
-                  </AppText>
-                </Pressable>
-              </View>
-              {fieldState.error ? (
-                <AppText variant="caption" color="danger">
-                  {fieldState.error.message}
-                </AppText>
-              ) : null}
-            </View>
+            <RegistrationConsentBox
+              checked={field.value}
+              onChange={field.onChange}
+              error={fieldState.error?.message}
+            />
           )}
         />
       </View>
 
       <Button label="Devam et" loading={formState.isSubmitting} onPress={() => void onSubmit()} />
 
-      {env.enableSocialAuth ? (
+      {socialAvailability().any ? (
         <>
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
@@ -348,16 +326,6 @@ const styles = StyleSheet.create({
   half: { flex: 1 },
   strengthRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: -4 },
   strengthBar: { flex: 1, height: 4, borderRadius: 2 },
-  termsRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  termsText: { flex: 1 },
-  legalRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 32 },
   divider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: -2 },
   dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.1)' },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },

@@ -151,6 +151,16 @@ export function useMyOffers(enabled = true) {
   });
 }
 
+export function useMyRequests(enabled = true) {
+  return useQuery({
+    queryKey: ride.rideQueryKeys.requests,
+    queryFn: () => unwrap(ride.getMyRequests()),
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+
 export function useOfferReservations(offerId: string | null) {
   return useQuery({
     queryKey: ride.rideQueryKeys.offerReservations(offerId ?? 'none'),
@@ -160,10 +170,11 @@ export function useOfferReservations(offerId: string | null) {
   });
 }
 
-export function useMyTrips(status?: string | null) {
+export function useMyTrips(status?: string | null, enabled = true) {
   return useQuery({
     queryKey: ride.rideQueryKeys.trips(status),
     queryFn: () => unwrap(ride.getMyTrips(status)),
+    enabled,
     staleTime: 15_000,
   });
 }

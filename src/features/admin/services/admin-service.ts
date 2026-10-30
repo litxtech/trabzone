@@ -26,8 +26,6 @@ import type {
   ContentComment,
   ContentKind,
   ContentPost,
-  ContentReel,
-  ContentStory,
   FeatureFlagsResponse,
   FinanceOverview,
   FinanceTransaction,

@@ -54,7 +54,7 @@ export default function AdminReportsQueueScreen() {
   const [queue, setQueue] = useState<Queue>('new');
   const reportsQuery = useAdminReports({ queue });
 
-  const reports = reportsQuery.data?.items ?? [];
+  const reports = useMemo(() => reportsQuery.data?.items ?? [], [reportsQuery.data]);
   const stats = useMemo(() => {
     const critical = reports.filter((report) => report.priority === 'critical').length;
     const child = reports.filter((report) => report.is_child_safety).length;

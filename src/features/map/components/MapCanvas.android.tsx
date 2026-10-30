@@ -301,19 +301,25 @@ function Marker({
             style={[
               styles.pricePin,
               {
-                backgroundColor: theme.colors.surface,
-                borderColor: point.tone ? toneColor(theme, tone) : theme.colors.primary,
+                backgroundColor: point.color ?? theme.colors.surface,
+                borderColor: point.color ?? (point.tone ? toneColor(theme, tone) : theme.colors.primary),
               },
             ]}
           >
-            <AppText variant="label" style={{ color: theme.colors.primaryDeep, fontSize: 11 }}>
+            <AppText
+              variant="label"
+              style={{ color: point.color ? (point.textColor ?? '#FFFFFF') : theme.colors.primaryDeep, fontSize: 11 }}
+            >
               {point.label}
             </AppText>
           </View>
           <View
             style={[
               styles.priceTip,
-              { backgroundColor: theme.colors.surface, borderColor: theme.colors.primary },
+              {
+                backgroundColor: point.color ?? theme.colors.surface,
+                borderColor: point.color ?? theme.colors.primary,
+              },
             ]}
           />
         </Pressable>

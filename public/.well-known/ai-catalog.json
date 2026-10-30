@@ -1,0 +1,39 @@
+{
+  "specVersion": "1.0",
+  "host": {
+    "displayName": "Trabzone",
+    "documentationUrl": "https://www.trabzoneapp.com/llms.txt",
+    "logoUrl": "https://www.trabzoneapp.com/icon-512.png"
+  },
+  "entries": [
+    {
+      "@context": "https://agenticresourcediscovery.org/context/v1",
+      "identifier": "urn:air:trabzoneapp.com:docs:llms-txt",
+      "displayName": "Trabzone site rehberi (llms.txt)",
+      "type": "application/vnd.trabzone.llms+markdown",
+      "url": "https://www.trabzoneapp.com/llms.txt",
+      "description": "Trabzone'un herkese açık bölümlerini (emlak ve ilanlar, yerel işletmeler, haberler, nöbetçi eczaneler, şehir rehberleri) özetleyen Markdown rehberi.",
+      "representativeQueries": [
+        "Trabzon'da kiralık daire ilanları",
+        "Trabzon nöbetçi eczaneler bugün",
+        "Trabzon yerel haberleri",
+        "Trabzon'da ikinci el ürün ilanları"
+      ],
+      "tags": ["trabzon", "emlak", "ilan", "haber", "eczane"]
+    },
+    {
+      "@context": "https://agenticresourcediscovery.org/context/v1",
+      "identifier": "urn:air:trabzoneapp.com:docs:sitemap",
+      "displayName": "Trabzone site haritası",
+      "type": "application/vnd.trabzone.sitemap+xml",
+      "url": "https://www.trabzoneapp.com/sitemap.xml",
+      "description": "Trabzone'daki tüm herkese açık sayfaların, ilanların, haberlerin ve eczane sayfalarının site haritası dizini.",
+      "representativeQueries": [
+        "Trabzone'daki tüm ilan sayfaları",
+        "Trabzone haber ve blog yazıları listesi",
+        "Trabzon eczane sayfaları"
+      ],
+      "tags": ["sitemap", "trabzon"]
+    }
+  ]
+}

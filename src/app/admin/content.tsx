@@ -24,7 +24,6 @@ import { formatDateTimeTr } from '@/utils/date';
 type Tab = 'pages' | 'announcements';
 
 export default function AdminContentScreen() {
-  const { theme } = useTheme();
   const me = useAdminMe();
   const canManage = (me.data?.permissions ?? []).includes('cms.manage');
   const [tab, setTab] = useState<Tab>('pages');

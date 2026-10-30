@@ -7,6 +7,7 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 
 import { ShareSheet } from '@/components/navigation/ShareSheet';
 import { AppText } from '@/components/ui';
+import { requestTabScrollTop } from '@/features/navigation/tab-scroll';
 import { useReduceMotion } from '@/perf/use-reduce-motion';
 import { useKeyboard } from '@/providers/keyboard';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -91,6 +92,13 @@ export function AppTabBar({ state, emitter, navigateToTab, insets }: BottomTabBa
           if (!focused && !event.defaultPrevented) {
             haptics.selection();
             navigateToTab(route.key);
+            return;
+          }
+          // Zaten açık olan sekmeye yeniden basmak, ekranı en başa sarar
+          // (akıştaki "en aşağıdayken ana sayfa butonu" davranışı). Ekran bir
+          // dinleyici kaydetmemişse hiçbir şey olmaz; boşuna geri bildirim yok.
+          if (focused && !event.defaultPrevented && requestTabScrollTop(config.name)) {
+            haptics.selection();
           }
         }}
         onLongPress={() => emitter.emit({ type: 'tabLongPress', target: route.key })}

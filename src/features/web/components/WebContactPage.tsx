@@ -15,9 +15,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 
 import { useWebMeta } from '../use-web-meta';
 import { flatStyle } from '../link-style';
-import { WebFooter } from './WebFooter';
-import { WebHeader } from './WebHeader';
-import { webPageRoot } from '../page-root';
+import { PublicShell } from './PublicShell';
 
 type Channel = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -169,14 +167,12 @@ export function WebContactPage() {
   };
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-      <WebHeader />
-
+    <PublicShell title="İletişim" fallbackHref="/">
       <LinearGradient
         colors={['#04070E', '#081228', '#0C1730']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={styles.hero}
+        style={[styles.hero, Platform.OS !== 'web' && styles.heroNative]}
       >
         <View style={styles.heroInner}>
           <AppText variant="overline" color="#9DB6FF" style={styles.eyebrow}>
@@ -221,9 +217,9 @@ export function WebContactPage() {
         <View style={styles.section}>
           <AppText variant="h1">E-posta kanalları</AppText>
           <AppText variant="body" color="textSecondary" style={styles.paragraph}>
-            Aşağıdaki adresler admin panelinden doğrulanmış ve etkin kanallardır. Tıklayarak
-            e-posta uygulamanızda yeni bir ileti hazırlayabilirsiniz. KVKK ve veri talepleri için
-            ayrıca veri talepleri merkezini kullanmanız önerilir.
+            Aşağıdaki adresler admin panelinden doğrulanmış ve etkin kanallardır. Tıklayarak e-posta
+            uygulamanızda yeni bir ileti hazırlayabilirsiniz. KVKK ve veri talepleri için ayrıca
+            veri talepleri merkezini kullanmanız önerilir.
           </AppText>
           <View style={styles.emailList}>
             {emailChannels.map((channel) => (
@@ -267,8 +263,7 @@ export function WebContactPage() {
         <View style={styles.section}>
           <AppText variant="h1">İşletme bilgileri</AppText>
           <AppText variant="body" color="textSecondary" style={styles.paragraph}>
-            Trabzone, Litxtech tarafından işletilmektedir. Resmî yazışmalar ve destek talepleri
-            {' '}
+            Trabzone, Litxtech tarafından işletilmektedir. Resmî yazışmalar ve destek talepleri{' '}
             <AppText variant="bodyStrong" color="primaryDeep">
               {SUPPORT_EMAIL}
             </AppText>{' '}
@@ -301,16 +296,14 @@ export function WebContactPage() {
           </Link>
         </View>
       </View>
-
-      <WebFooter />
-    </View>
+    </PublicShell>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { ...webPageRoot },
   flex: { flex: 1 },
   hero: { paddingVertical: 64 },
+  heroNative: { paddingVertical: 26 },
   heroInner: {
     width: '100%',
     maxWidth: 1080,

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { ageFromBirthDate, inputToBirthDate } from '@/utils/date';
+
 export const USERNAME_PATTERN = /^[a-z0-9_.]{3,24}$/;
 
 export const emailSchema = z
@@ -36,16 +38,36 @@ export const loginSchema = z.object({
 
 export type LoginValues = z.infer<typeof loginSchema>;
 
+/**
+ * Doğum tarihi beyanı (GG.AA.YYYY).
+ *
+ * Yaş kapısı: 13 yaşından küçük hesaplar açılamaz. 13-17 yaş arası hesaplar
+ * sunucuda "çocuk hesabı" olarak işaretlenir ve kısıtlanır.
+ */
+export const birthDateSchema = z
+  .string()
+  .trim()
+  .refine((value) => inputToBirthDate(value) !== null, 'Geçerli bir tarih gir (GG.AA.YYYY)')
+  .refine((value) => {
+    const iso = inputToBirthDate(value);
+    if (!iso) {
+      return true;
+    }
+    const age = ageFromBirthDate(iso);
+    return age !== null && age >= 13 && age <= 120;
+  }, 'Trabzone için en az 13 yaşında olmalısın');
+
 export const registerSchema = z
   .object({
     firstName: nameSchema,
     lastName: nameSchema,
     username: usernameSchema,
+    birthDate: birthDateSchema,
     email: emailSchema,
     password: passwordSchema,
     passwordConfirm: z.string().min(1, 'Şifreyi tekrar gir'),
     acceptedTerms: z.boolean().refine((value) => value, {
-      message: 'Devam etmek için koşulları kabul et',
+      message: 'Devam etmek için kullanım koşullarını ve tüm politikaları kabul et',
     }),
   })
   .refine((values) => values.password === values.passwordConfirm, {

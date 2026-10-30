@@ -16,7 +16,7 @@ import { AppText, Button, Logo, Wordmark } from '@/components/ui';
 import { AuthBackdrop } from '@/features/auth/components/AuthBackdrop';
 import { LobbyShowcase } from '@/features/auth/components/LobbyShowcase';
 import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons';
-import { env } from '@/config/env';
+import { socialAvailability } from '@/features/auth/social-availability';
 import { ThemeScope } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 
@@ -146,7 +146,7 @@ function LobbyContent() {
             </AppText>
           </Pressable>
 
-          {env.enableSocialAuth ? (
+          {socialAvailability().any ? (
             <>
               <View style={styles.divider}>
                 <View style={styles.dividerLine} />

@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState, type ReactNode } from 'react';
 import {
-  Linking,
   Modal,
   Platform,
   Pressable,
@@ -15,6 +14,7 @@ import {
 import { AppText, Badge, Button } from '@/components/ui';
 import { AdminPage, AdminSection, FilterChips } from '@/features/admin/components/AdminPage';
 import { useAdminToast } from '@/features/admin/components/AdminToast';
+import { openUrl } from '@/features/in-app-browser';
 import {
   useAdminDeleteLegalDocument,
   useAdminDeleteLegalVersion,
@@ -51,12 +51,7 @@ function publicHref(slug: string) {
 }
 
 function openPublicPage(slug: string) {
-  const url = publicHref(slug);
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    window.open(url, '_blank', 'noopener,noreferrer');
-    return;
-  }
-  void Linking.openURL(url).catch(() => undefined);
+  void openUrl(publicHref(slug));
 }
 
 type Group = {

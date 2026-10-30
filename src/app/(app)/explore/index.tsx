@@ -3,8 +3,6 @@ import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Linking,
-  Platform,
   Pressable,
   StyleSheet,
   View,
@@ -48,6 +46,7 @@ import type {
 } from '@/features/explore/types';
 import { bboxForCamera, polygonClosedGeoJson } from '@/features/explore/utils/geo';
 import { markerFromPoint, toMapPoints } from '@/features/explore/utils/markers';
+import { openUrl } from '@/features/in-app-browser';
 import { MapCanvas } from '@/features/map/components/MapCanvas';
 import type { MapFocus } from '@/features/map/components/map-canvas-types';
 import { MAP_DEFAULT_CAMERA } from '@/features/map/constants';
@@ -483,21 +482,23 @@ export default function ExploreMapScreen() {
     }
   };
 
+  const devicePoint = location.point;
+  const requestDevicePoint = location.request;
+
   const handleDirections = useCallback(
     async (target: LatLng) => {
-      const origin = location.point ?? { lat: camera.lat, lng: camera.lng };
       if (!hasMapboxToken()) {
-        const label = encodeURIComponent('Trabzone');
-        const url =
-          Platform.OS === 'ios'
-            ? `http://maps.apple.com/?saddr=${origin.lat},${origin.lng}&daddr=${target.lat},${target.lng}&q=${label}`
-            : `geo:${target.lat},${target.lng}?q=${target.lat},${target.lng}`;
-        const supported = await Linking.canOpenURL(url);
-        if (!supported) {
-          Alert.alert('Yol tarifi açılamadı', mapApiMessage('no_token'));
-          return;
-        }
-        await Linking.openURL(url);
+        Alert.alert('Yol tarifi açılamadı', mapApiMessage('no_token'));
+        return;
+      }
+      // Güzergâh cihaz konumundan hesaplanır; harita merkezinden uydurma bir
+      // başlangıç kullanılmaz ve dış harita uygulamasına yönlendirilmez.
+      const origin = devicePoint ?? (await requestDevicePoint());
+      if (!origin) {
+        Alert.alert(
+          'Konum gerekli',
+          'Yol tarifi uygulama içi haritada bulunduğun konumdan hesaplanır. Konum izni vermeden güzergâh çizilemez.',
+        );
         return;
       }
 
@@ -522,7 +523,7 @@ export default function ExploreMapScreen() {
         `${(response.data.distanceMeters / 1000).toFixed(1)} km · yaklaşık ${response.data.durationMinutes} dk`,
       );
     },
-    [camera.lat, camera.lng, height, location.point, moveCamera, width],
+    [devicePoint, height, moveCamera, requestDevicePoint, width],
   );
 
   const focusSearchItem = (item: ExploreSearchItem) => {
@@ -847,7 +848,7 @@ export default function ExploreMapScreen() {
         <Pressable
           accessibilityRole="link"
           accessibilityLabel="OpenStreetMap veri lisansı"
-          onPress={() => void Linking.openURL('https://www.openstreetmap.org/copyright')}
+          onPress={() => void openUrl('https://www.openstreetmap.org/copyright')}
           style={[
             styles.attribution,
             {

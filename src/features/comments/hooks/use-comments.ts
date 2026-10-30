@@ -7,7 +7,9 @@ import {
 } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 
+import { subscribeSportsLive } from '@/features/sports/realtime';
 import { supabase } from '@/services/supabase/client';
+import { postgresChannel } from '@/services/supabase/realtime';
 import { useSession } from '@/stores/auth-store';
 import { unwrap } from '@/utils/result';
 
@@ -155,6 +157,10 @@ function patchContentCommentCount(
     item.id === contentId
       ? { ...item, comment_count: Math.max(0, item.comment_count + delta) }
       : item;
+
+  if (contentType === 'match') {
+    return;
+  }
 
   if (contentType === 'post') {
     queryClient.setQueriesData<{ pages: { items: { id: string; comment_count: number }[] }[] }>(
@@ -528,10 +534,6 @@ export function useCommentsRealtime(
       return;
     }
 
-    const table = contentType === 'post' ? 'post_comments' : 'reel_comments';
-    const filter =
-      contentType === 'post' ? `post_id=eq.${contentId}` : `reel_id=eq.${contentId}`;
-
     const scheduleInvalidate = () => {
       if (timer.current) {
         clearTimeout(timer.current);
@@ -548,8 +550,24 @@ export function useCommentsRealtime(
       }, 320);
     };
 
-    const channel = supabase
-      .channel(`comments:${contentType}:${contentId}`)
+    if (contentType === 'match') {
+      // Maç yorum tabloları istemciye kapalıdır; sunucu `sports-live` kanalına sinyal yollar.
+      const unsubscribe = subscribeSportsLive((signal) => {
+        if (signal.kind === 'comments') scheduleInvalidate();
+      });
+      return () => {
+        if (timer.current) {
+          clearTimeout(timer.current);
+        }
+        unsubscribe();
+      };
+    }
+
+    const table = contentType === 'post' ? 'post_comments' : 'reel_comments';
+    const filter =
+      contentType === 'post' ? `post_id=eq.${contentId}` : `reel_id=eq.${contentId}`;
+
+    const channel = postgresChannel(`comments:${contentType}:${contentId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table, filter },

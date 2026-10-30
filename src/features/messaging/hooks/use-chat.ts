@@ -43,6 +43,7 @@ import {
 import { removeMedia, uploadMedia, uploadVideoWithPoster } from '@/features/media/media-service';
 import { appError } from '@/services/errors';
 import { supabase } from '@/services/supabase/client';
+import { postgresChannel } from '@/services/supabase/realtime';
 import { useSession } from '@/stores/auth-store';
 import { unwrap } from '@/utils/result';
 
@@ -831,8 +832,7 @@ export function useConversationListRealtime() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const channel = supabase
-      .channel('chat-list')
+    const channel = postgresChannel('chat-list')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
         void queryClient.invalidateQueries({ queryKey: chatQueryKeys.list });
       })
@@ -915,8 +915,7 @@ export function useConversationRealtime(conversationId: string | null) {
       }
     };
 
-    const channel = supabase
-      .channel(`chat:${conversationId}`)
+    const channel = postgresChannel(`chat:${conversationId}`)
       .on(
         'postgres_changes',
         {
@@ -1083,8 +1082,7 @@ export function useCallRealtime(callId: string | null) {
       return;
     }
 
-    const channel = supabase
-      .channel(`call:${callId}`)
+    const channel = postgresChannel(`call:${callId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'call_sessions', filter: `id=eq.${callId}` },

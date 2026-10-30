@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/immutability -- Reanimated shared values gesture işleyicilerinde zorunlu olarak mutasyona uğrar. */
 import { Ionicons } from '@expo/vector-icons';
+import { useEvent } from 'expo';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -42,6 +43,10 @@ export type MarketMediaViewerProps = {
   initialIndex?: number;
   onClose: () => void;
   footer?: React.ReactNode;
+  /** Medyanın dışındaki boş alana dokunulduğunda görüntüleyiciyi kapatır. */
+  closeOnBackdropPress?: boolean;
+  /** Geçerli sayfa değiştiğinde çağrılır (galeri konumunu hatırlamak için). */
+  onIndexChange?: (index: number) => void;
 };
 
 const MAX_SCALE = 4;
@@ -69,6 +74,8 @@ export function MarketMediaViewer({
   initialIndex = 0,
   onClose,
   footer,
+  closeOnBackdropPress,
+  onIndexChange,
 }: MarketMediaViewerProps) {
   if (!items.length) {
     return null;
@@ -89,6 +96,8 @@ export function MarketMediaViewer({
           initialIndex={initialIndex}
           onClose={onClose}
           footer={footer}
+          closeOnBackdropPress={closeOnBackdropPress}
+          onIndexChange={onIndexChange}
         />
       </GestureHandlerRootView>
     </Modal>
@@ -104,11 +113,15 @@ export function MarketMediaViewerContent({
   initialIndex = 0,
   onClose,
   footer,
+  closeOnBackdropPress = false,
+  onIndexChange,
 }: {
   items: MarketMediaViewerItem[];
   initialIndex?: number;
   onClose: () => void;
   footer?: React.ReactNode;
+  closeOnBackdropPress?: boolean;
+  onIndexChange?: (index: number) => void;
 }) {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -121,6 +134,10 @@ export function MarketMediaViewerContent({
   const [scrollEnabled, setScrollEnabled] = useState(true);
 
   const active = items[index];
+
+  useEffect(() => {
+    onIndexChange?.(index);
+  }, [index, onIndexChange]);
 
   // Komşu görselleri önceden yükle: geçişte boş/ siyah kare oluşmaz.
   useEffect(() => {
@@ -172,7 +189,11 @@ export function MarketMediaViewerContent({
     ({ item, index: pageIndex }: { item: MarketMediaViewerItem; index: number }) => (
       <View style={{ width, height }}>
         {item.kind === 'video' ? (
-          <MarketFullscreenVideo item={item} active={pageIndex === index} />
+          <MarketFullscreenVideo
+            item={item}
+            active={pageIndex === index}
+            onBackdropPress={closeOnBackdropPress ? onClose : undefined}
+          />
         ) : (
           <ZoomableMarketImage
             item={item}
@@ -186,6 +207,7 @@ export function MarketMediaViewerContent({
               }
             }}
             onToggleControls={() => setControlsVisible((current) => !current)}
+            onBackdropPress={closeOnBackdropPress ? onClose : undefined}
             onEdgeSwipe={(direction) => {
               goToIndex(direction === 'next' ? index + 1 : index - 1);
             }}
@@ -193,7 +215,7 @@ export function MarketMediaViewerContent({
         )}
       </View>
     ),
-    [goToIndex, height, index, width],
+    [closeOnBackdropPress, goToIndex, height, index, onClose, width],
   );
 
   const keyExtractor = useCallback((item: MarketMediaViewerItem) => item.id, []);
@@ -374,6 +396,7 @@ function ZoomableMarketImage({
   active,
   onZoomChange,
   onToggleControls,
+  onBackdropPress,
   onEdgeSwipe,
 }: {
   item: MarketMediaViewerItem;
@@ -382,6 +405,7 @@ function ZoomableMarketImage({
   active: boolean;
   onZoomChange: (zoomed: boolean) => void;
   onToggleControls: () => void;
+  onBackdropPress?: () => void;
   onEdgeSwipe: (direction: 'prev' | 'next') => void;
 }) {
   const scale = useSharedValue(1);
@@ -396,6 +420,7 @@ function ZoomableMarketImage({
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [panEnabled, setPanEnabled] = useState(false);
+  const [naturalRatio, setNaturalRatio] = useState<number | null>(null);
 
   const notifyZoom = useCallback(
     (value: boolean) => {
@@ -406,9 +431,12 @@ function ZoomableMarketImage({
   );
 
   const ratio = useMemo(() => {
+    if (naturalRatio) {
+      return naturalRatio;
+    }
     const candidate = (item.width ?? 0) / (item.height ?? 0);
     return Number.isFinite(candidate) && candidate > 0 ? candidate : 4 / 3;
-  }, [item.height, item.width]);
+  }, [item.height, item.width, naturalRatio]);
 
   // Görselin ekrana sığan (contain) taban ölçüsü.
   const base = useMemo(() => {
@@ -638,15 +666,41 @@ function ZoomableMarketImage({
     ],
   );
 
+  const closable = Boolean(onBackdropPress);
+  const handleBackdropPress = useCallback(() => onBackdropPress?.(), [onBackdropPress]);
+
   const singleTap = useMemo(
     () =>
       Gesture.Tap()
         .numberOfTaps(1)
         .maxDuration(250)
-        .onEnd(() => {
+        .onEnd((event) => {
+          if (closable) {
+            const halfWidth = (base.width * scale.value) / 2;
+            const halfHeight = (base.height * scale.value) / 2;
+            const centerX = width / 2 + translateX.value;
+            const centerY = height / 2 + translateY.value;
+            const outside =
+              Math.abs(event.x - centerX) > halfWidth || Math.abs(event.y - centerY) > halfHeight;
+            if (outside) {
+              runOnJS(handleBackdropPress)();
+              return;
+            }
+          }
           runOnJS(onToggleControls)();
         }),
-    [onToggleControls],
+    [
+      base.height,
+      base.width,
+      closable,
+      handleBackdropPress,
+      height,
+      onToggleControls,
+      scale,
+      translateX,
+      translateY,
+      width,
+    ],
   );
 
   const composed = useMemo(
@@ -665,6 +719,17 @@ function ZoomableMarketImage({
   return (
     <GestureDetector gesture={composed}>
       <View style={styles.imageStage}>
+        {/* Görselin dışındaki boş alan gerçek bir dokunma katmanıdır: mobilde
+            jest koordinat hesabına, web'de ise olay hedefine güvenmek yerine
+            boşluğa dokunmak her platformda görüntüleyiciyi kapatır. */}
+        {onBackdropPress ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Kapat"
+            onPress={onBackdropPress}
+            style={StyleSheet.absoluteFill}
+          />
+        ) : null}
         <Animated.View style={[{ width: base.width, height: base.height }, animatedStyle]}>
           {item.thumbUri ? (
             <Image
@@ -685,9 +750,13 @@ function ZoomableMarketImage({
               cachePolicy="memory-disk"
               recyclingKey={item.id}
               onLoadStart={() => setLoading(true)}
-              onLoad={() => {
+              onLoad={(event) => {
                 setLoading(false);
                 setFailed(false);
+                const { width: naturalWidth, height: naturalHeight } = event.source;
+                if (naturalWidth > 0 && naturalHeight > 0) {
+                  setNaturalRatio(naturalWidth / naturalHeight);
+                }
               }}
               onError={() => {
                 setLoading(false);
@@ -736,12 +805,42 @@ function ZoomableMarketImage({
   );
 }
 
-function MarketFullscreenVideo({ item, active }: { item: MarketMediaViewerItem; active: boolean }) {
+function MarketFullscreenVideo({
+  item,
+  active,
+  onBackdropPress,
+}: {
+  item: MarketMediaViewerItem;
+  active: boolean;
+  onBackdropPress?: () => void;
+}) {
+  const { width, height } = useWindowDimensions();
   const player = useVideoPlayer(item.uri, (instance) => {
     instance.loop = false;
     instance.muted = false;
     instance.timeUpdateEventInterval = 0.5;
   });
+  const { videoTrack } = useEvent(player, 'videoTrackChange', {
+    videoTrack: player.videoTrack,
+  });
+
+  const box = useMemo(() => {
+    const trackRatio = videoTrack ? videoTrack.size.width / videoTrack.size.height : 0;
+    const itemRatio = (item.width ?? 0) / (item.height ?? 0);
+    const ratio =
+      Number.isFinite(trackRatio) && trackRatio > 0
+        ? trackRatio
+        : Number.isFinite(itemRatio) && itemRatio > 0
+          ? itemRatio
+          : 16 / 9;
+    let boxWidth = width;
+    let boxHeight = width / ratio;
+    if (boxHeight > height) {
+      boxHeight = height;
+      boxWidth = height * ratio;
+    }
+    return { width: boxWidth, height: boxHeight };
+  }, [height, item.height, item.width, videoTrack, width]);
 
   useEffect(() => {
     if (!active) {
@@ -758,6 +857,39 @@ function MarketFullscreenVideo({ item, active }: { item: MarketMediaViewerItem; 
       // Otomatik oynatma engellenmiş olabilir; kullanıcı kontrolleri kullanır.
     }
   }, [active, player]);
+
+  if (onBackdropPress) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Kapat"
+        onPress={onBackdropPress}
+        style={styles.videoBackdrop}
+      >
+        {/* Video kutusu dokunuşu sahiplenir; oynatıcı kontrolleri görüntüleyiciyi kapatmaz. */}
+        <View
+          onStartShouldSetResponder={() => true}
+          style={[styles.videoBox, { width: box.width, height: box.height }]}
+        >
+          {item.thumbUri ? (
+            <Image
+              source={{ uri: item.thumbUri }}
+              style={StyleSheet.absoluteFill}
+              contentFit="contain"
+              cachePolicy="memory-disk"
+            />
+          ) : null}
+          <VideoView
+            player={player}
+            style={StyleSheet.absoluteFill}
+            contentFit="contain"
+            nativeControls
+            surfaceType="textureView"
+          />
+        </View>
+      </Pressable>
+    );
+  }
 
   return (
     <View style={styles.videoStage}>
@@ -785,6 +917,8 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#04060C' },
   imageStage: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   videoStage: { flex: 1, backgroundColor: '#000000' },
+  videoBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  videoBox: { backgroundColor: '#000000', overflow: 'hidden' },
   loadingIndicator: { position: 'absolute' },
   topBar: {
     position: 'absolute',

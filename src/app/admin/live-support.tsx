@@ -84,7 +84,7 @@ export default function AdminLiveSupportScreen() {
     };
   }, [heartbeatRun]);
 
-  const items = threads.data?.items ?? [];
+  const items = useMemo(() => threads.data?.items ?? [], [threads.data]);
   const selectedSummary = useMemo<AgentThread | null>(
     () => items.find((item) => item.id === selectedId) ?? null,
     [items, selectedId],
@@ -142,7 +142,6 @@ export default function AdminLiveSupportScreen() {
     if (!selectedId) {
       return;
     }
-    const mutation = next === 'closed' ? close : reopen;
     const onSuccess = () => haptics.success();
     const onError = (error: Error) => setNotice(error.message);
     if (next === 'closed') {

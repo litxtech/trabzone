@@ -5,7 +5,6 @@ import {
   Dimensions,
   Linking,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,13 +15,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppText, Avatar, Button, Card, IconButton, Skeleton } from '@/components/ui';
 import type { ViewerMedia } from '@/features/feed/components/MediaViewer';
+import { openUrl } from '@/features/in-app-browser';
 import { MarketMediaViewer } from '@/features/marketplace/components/MarketMediaViewer';
 import { publicMediaUrl } from '@/features/media/media-service';
 import { useStartDirectConversation } from '@/features/messaging/hooks/use-chat';
 import { MapCanvas } from '@/features/map/components/MapCanvas';
+import { inAppDirectionsHref } from '@/features/map/utils/directions';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { placeShareLink } from '@/features/share/links';
 import { shareContent } from '@/features/share/share-action';
+import { formatViewCount } from '@/features/views/format';
+import { useContentViewCount, useContentViewRegistration } from '@/features/views/use-content-views';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatDateTr } from '@/utils/date';
 import { haptics } from '@/utils/haptics';
@@ -44,6 +47,7 @@ import { formatDecimal, openingHoursEntries, openNow, priceLevelLabel } from '..
 import { AddPlaceMediaModal } from './AddPlaceMediaModal';
 import { AddReviewModal } from './AddReviewModal';
 import { PlaceClaimModal } from './PlaceClaimModal';
+import { PlaceCoverImage } from './PlaceCoverImage';
 import { StorageImage } from './StorageImage';
 
 type TabKey = 'overview' | 'photos' | 'videos' | 'reviews' | 'location';
@@ -80,6 +84,13 @@ export function PlaceDetailSheet({ visible, placeId, onClose, onManage }: Props)
 
   const detail = usePlaceDetail(placeId);
   const place = detail.data ?? null;
+  const viewCount = useContentViewCount({ type: 'place', id: placeId ?? null });
+  useContentViewRegistration({
+    type: 'place',
+    id: placeId ?? null,
+    surface: 'place_detail',
+    enabled: Boolean(place),
+  });
   const [tab, setTab] = useState<TabKey>('overview');
   const [reviewSort, setReviewSort] = useState<'new' | 'highest' | 'lowest' | 'helpful'>('new');
   const reviews = usePlaceReviews(placeId, reviewSort);
@@ -190,21 +201,24 @@ export function PlaceDetailSheet({ visible, placeId, onClose, onManage }: Props)
     });
   };
 
-  const directions = async () => {
+  const directions = () => {
     if (!place) {
       return;
     }
-    const label = encodeURIComponent(place.name);
-    const url =
-      Platform.OS === 'ios'
-        ? `http://maps.apple.com/?daddr=${place.lat},${place.lng}&q=${label}`
-        : `geo:${place.lat},${place.lng}?q=${place.lat},${place.lng}(${label})`;
-    const supported = await Linking.canOpenURL(url);
-    if (!supported) {
-      Alert.alert('Harita açılamadı', 'Cihazda yüklü bir harita uygulaması bulunamadı.');
+    const href = inAppDirectionsHref({
+      lat: place.lat,
+      lng: place.lng,
+      label: place.name,
+      zoom: 16,
+    });
+    if (!href) {
+      Alert.alert('Konum bilgisi yok', 'Bu işletmenin doğrulanmış koordinatı bulunmuyor.');
       return;
     }
-    await Linking.openURL(url);
+    // Detay modalı açıkken harita ekranına geçilirse modal arkada kalır.
+    haptics.tap();
+    close();
+    router.push(href);
   };
 
   const openMessages = () => {
@@ -255,13 +269,16 @@ export function PlaceDetailSheet({ visible, placeId, onClose, onManage }: Props)
               contentContainerStyle={{ paddingBottom: 150 + insets.bottom }}
             >
               <View style={styles.coverWrap}>
-                <StorageImage
-                  path={place.cover_path ?? mediaImages[0]?.storage_path ?? null}
-                  bucket="place-media"
+                <PlaceCoverImage
+                  coverPath={place.cover_path ?? mediaImages[0]?.storage_path ?? null}
+                  name={place.name}
+                  lat={place.lat}
+                  lng={place.lng}
+                  size="hero"
+                  attribution="full"
                   style={styles.cover}
-                  contentFit="cover"
                 />
-                <View style={styles.coverShade} />
+                <View style={styles.coverShade} pointerEvents="none" />
                 <View style={[styles.coverTop, { paddingTop: insets.top + 6 }]}>
                   <IconButton
                     name="arrow-back"
@@ -408,6 +425,7 @@ export function PlaceDetailSheet({ visible, placeId, onClose, onManage }: Props)
                 {tab === 'overview' ? (
                   <OverviewTab
                     place={place}
+                    viewCount={viewCount}
                     onAddPhoto={() => setMediaOpen(true)}
                     onOpenVideo={(index) => setViewer({ media: gallery, index })}
                     onReportMedia={(media) => reportContent('place_media', media.id, 'Medya')}
@@ -640,6 +658,7 @@ export function PlaceDetailSheet({ visible, placeId, onClose, onManage }: Props)
 
 function OverviewTab({
   place,
+  viewCount,
   onAddPhoto,
   onOpenVideo,
   onReportMedia,
@@ -647,6 +666,8 @@ function OverviewTab({
   onOpenPost,
 }: {
   place: PlaceDetail;
+  /** Tekil görüntüleme sayacı (üst bileşenden gelir). */
+  viewCount: number | null;
   onAddPhoto: () => void;
   onOpenVideo: (index: number) => void;
   onReportMedia: (media: PlaceMedia) => void;
@@ -722,7 +743,7 @@ function OverviewTab({
           <InfoRow
             icon="globe-outline"
             text={place.website.replace(/^https?:\/\//, '')}
-            onPress={() => void Linking.openURL(place.website ?? '')}
+            onPress={() => void openUrl(place.website, { title: place.name })}
           />
         ) : null}
         <InfoRow
@@ -731,7 +752,7 @@ function OverviewTab({
         />
         <InfoRow
           icon="eye-outline"
-          text={`${place.view_count} görüntülenme · ${place.favorite_count} kaydetme`}
+          text={`${formatViewCount(viewCount)} tekil görüntüleme · ${place.favorite_count} kaydetme`}
         />
         {place.external_provider ? (
           <InfoRow
@@ -741,7 +762,7 @@ function OverviewTab({
             }`}
             onPress={
               place.external_provider === 'openstreetmap'
-                ? () => void Linking.openURL('https://www.openstreetmap.org/copyright')
+                ? () => void openUrl('https://www.openstreetmap.org/copyright')
                 : undefined
             }
           />
@@ -1362,8 +1383,8 @@ function LocationTab({
         <InfoRow icon="map-outline" text={`${place.lat.toFixed(5)}, ${place.lng.toFixed(5)}`} />
         <Button label="Yol tarifi al" onPress={onDirections} />
         <AppText variant="caption" color="textTertiary" align="center">
-          Yol tarifi cihazın harita uygulamasında açılır. Mesafe ve süre bilgisi Trabzone tarafından
-          hesaplanmış gibi gösterilmez.
+          Yol tarifi Trabzone haritasında hesaplanır ve çizilir; seni dış harita uygulamasına
+          yönlendirmez.
         </AppText>
       </Card>
     </View>
@@ -1498,7 +1519,7 @@ const styles = StyleSheet.create({
   loadingBody: { padding: 20, gap: 12 },
   errorState: { flex: 1, alignItems: 'center', gap: 12, paddingHorizontal: 28 },
   coverWrap: { height: 260, backgroundColor: '#0B1220' },
-  cover: { width: '100%', height: '100%' },
+  cover: { width: '100%', height: '100%', backgroundColor: 'transparent' },
   coverShade: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(7,11,22,0.25)' },
   coverTop: {
     position: 'absolute',

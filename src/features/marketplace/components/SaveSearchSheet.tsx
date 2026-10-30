@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppText, Button, TextField } from '@/components/ui';
+import { useKeyboardBottomInset } from '@/providers/keyboard';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 
@@ -21,6 +23,7 @@ type Props = {
 export function SaveSearchSheet({ visible, defaultLabel, filters, onClose, onSaved }: Props) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboardInset = useKeyboardBottomInset();
   const [label, setLabel] = useState(defaultLabel);
   const [notify, setNotify] = useState(true);
   const mutation = useSaveSearch();
@@ -58,7 +61,7 @@ export function SaveSearchSheet({ visible, defaultLabel, filters, onClose, onSav
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <View style={styles.root}>
+      <Animated.View style={[styles.root, keyboardInset]}>
         <Pressable accessibilityRole="button" accessibilityLabel="Kapat" onPress={onClose} style={styles.backdrop} />
         <View
           style={[
@@ -121,7 +124,7 @@ export function SaveSearchSheet({ visible, defaultLabel, filters, onClose, onSav
 
           <Button label="Kaydet" loading={mutation.isPending} onPress={submit} />
         </View>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }

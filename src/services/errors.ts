@@ -17,6 +17,7 @@ export type AppErrorCode =
   | 'ticket_closed'
   | 'oauth_cancelled'
   | 'oauth_unavailable'
+  | 'cancelled'
   | 'unknown';
 
 export type AppError = {
@@ -41,6 +42,7 @@ const MESSAGES: Record<AppErrorCode, string> = {
   ticket_closed: 'Bu talep kapatılmış. Yeni bir talep oluşturabilirsin.',
   oauth_cancelled: 'Giriş iptal edildi.',
   oauth_unavailable: 'Sosyal giriş henüz yapılandırılmadı. E-posta ile devam edebilirsin.',
+  cancelled: 'İşlem iptal edildi.',
   unknown: 'Bir şeyler ters gitti. Tekrar dene.',
 };
 

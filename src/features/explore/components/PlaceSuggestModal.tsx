@@ -10,18 +10,22 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppText, Button, IconButton, TextField } from '@/components/ui';
+import { MAP_DEFAULT_CAMERA } from '@/features/map/constants';
 import { pickMedia, type PickedAsset } from '@/features/media/media-picker';
 import { uploadMedia } from '@/features/media/media-service';
 import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
+import { useKeyboardBottomInset } from '@/providers/keyboard';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 
 import { useExploreBootstrap, useSubmitPlaceSuggestion } from '../hooks/use-explore';
-import type { LatLng } from '../types';
-import { MAP_DEFAULT_CAMERA } from '@/features/map/constants';
+import type { ExternalPlaceSuggestion, LatLng } from '../types';
+import { matchAdministrative, matchCategorySlug } from '../utils/place-match';
+import { ExternalPlaceSearch } from './ExternalPlaceSearch';
 import { LocationPickerModal } from './LocationPickerModal';
 
 type Props = {
@@ -37,6 +41,7 @@ type PickerKey = 'category' | 'district' | 'neighborhood' | null;
 export function PlaceSuggestModal({ visible, initial, onClose, onSubmitted }: Props) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboardInset = useKeyboardBottomInset();
   const bootstrap = useExploreBootstrap();
   const profile = useMyProfile();
   const submit = useSubmitPlaceSuggestion();
@@ -57,6 +62,8 @@ export function PlaceSuggestModal({ visible, initial, onClose, onSubmitted }: Pr
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Form sıfırlandığında harici arama bileşenini de sıfırlar (key). */
+  const [searchToken, setSearchToken] = useState(0);
 
   const categories = useMemo(() => {
     const flat: { slug: string; name: string; icon: string | null }[] = [];
@@ -86,6 +93,7 @@ export function PlaceSuggestModal({ visible, initial, onClose, onSubmitted }: Pr
     setMedia([]);
     setError(null);
     setStage(null);
+    setSearchToken((value) => value + 1);
   };
 
   const close = () => {
@@ -109,6 +117,30 @@ export function PlaceSuggestModal({ visible, initial, onClose, onSubmitted }: Pr
   };
 
   const valid = name.trim().length >= 2 && Boolean(categorySlug) && Boolean(districtId) && address.trim().length >= 3;
+
+  /**
+   * Google/Apple haritalarından seçilen işletme formu doldurur. Kategori,
+   * ilçe ve mahalle adresten/sağlayıcı tiplerinden tahmin edilir; kullanıcı
+   * seçimi değiştirebilir.
+   */
+  const pickExternal = (item: ExternalPlaceSuggestion) => {
+    setName(item.name.slice(0, 120));
+    setAddress(item.address.slice(0, 240));
+    setPoint({ lat: item.lat, lng: item.lng });
+    if (item.phone) {
+      setPhone(item.phone.slice(0, 24));
+    }
+    const slug = matchCategorySlug(item, categories);
+    if (slug) {
+      setCategorySlug(slug);
+    }
+    const matched = matchAdministrative(item.address, districts);
+    if (matched.districtId != null) {
+      setDistrictId(matched.districtId);
+      setNeighborhoodId(matched.neighborhoodId);
+    }
+    setError(null);
+  };
 
   const send = async () => {
     if (!valid || !profile.data || !categorySlug || !districtId) {
@@ -198,7 +230,13 @@ export function PlaceSuggestModal({ visible, initial, onClose, onSubmitted }: Pr
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={close} statusBarTranslucent>
-      <View style={[styles.root, { backgroundColor: theme.colors.background, paddingTop: insets.top + 6 }]}>
+      <Animated.View
+        style={[
+          styles.root,
+          keyboardInset,
+          { backgroundColor: theme.colors.background, paddingTop: insets.top + 6 },
+        ]}
+      >
         <View style={styles.header}>
           <IconButton name="close" accessibilityLabel="Öneri formunu kapat" variant="surface" size={18} onPress={close} />
           <View style={styles.flex}>
@@ -214,6 +252,21 @@ export function PlaceSuggestModal({ visible, initial, onClose, onSubmitted }: Pr
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          <ExternalPlaceSearch
+            key={searchToken}
+            around={point}
+            onPick={pickExternal}
+            disabled={busy}
+          />
+
+          <View style={styles.dividerRow}>
+            <View style={[styles.dividerLine, { backgroundColor: theme.colors.divider }]} />
+            <AppText variant="caption" color="textTertiary">
+              veya bilgileri elle gir
+            </AppText>
+            <View style={[styles.dividerLine, { backgroundColor: theme.colors.divider }]} />
+          </View>
+
           <TextField
             label="İşletme adı *"
             value={name}
@@ -464,7 +517,7 @@ export function PlaceSuggestModal({ visible, initial, onClose, onSubmitted }: Pr
             setLocationOpen(false);
           }}
         />
-      </View>
+      </Animated.View>
     </Modal>
   );
 }
@@ -517,6 +570,8 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 8 },
   flex: { flex: 1 },
   content: { paddingHorizontal: 18, paddingTop: 8, gap: 12 },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth },
   picker: {
     height: 54,
     borderRadius: 14,

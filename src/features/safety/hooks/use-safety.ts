@@ -25,6 +25,7 @@ import type {
 
 export const safetyKeys = {
   state: ['safety', 'state'] as const,
+  profileFlags: (userId: string) => ['safety', 'profile-flags', userId] as const,
   faqs: ['safety', 'faqs'] as const,
   policy: (slug: string) => ['safety', 'policy', slug] as const,
   tickets: ['safety', 'tickets'] as const,
@@ -55,6 +56,21 @@ export function useSafetyState() {
     queryKey: safetyKeys.state,
     queryFn: async () => unwrap(await safety.fetchSafetyState()),
     staleTime: 60_000,
+  });
+}
+
+/**
+ * Bir hesabın "Çocuk Hesabı" etiketi görünür mü?
+ *
+ * Sunucu, yabancı hesaplar için boş nesne döner; bu nedenle rozet yalnızca
+ * hesap sahibinde, arkadaşlarda ve yetkililerde görünür.
+ */
+export function useProfileSafetyFlags(userId: string | null | undefined) {
+  return useQuery({
+    queryKey: safetyKeys.profileFlags(userId ?? 'none'),
+    queryFn: async () => unwrap(await safety.fetchProfileFlags(userId as string)),
+    enabled: Boolean(userId),
+    staleTime: 5 * 60_000,
   });
 }
 

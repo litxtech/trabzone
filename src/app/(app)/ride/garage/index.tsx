@@ -14,8 +14,8 @@ import { rideVehiclePhotoUrl } from '@/features/ride/services/ride-service';
 import { formatDate } from '@/features/ride/utils/format';
 
 const STATUS_LABEL: Record<string, string> = {
-  pending: 'İnceleniyor',
-  approved: 'Onaylandı',
+  pending: 'Yayında',
+  approved: 'Onaylı',
   rejected: 'Reddedildi',
   suspended: 'Askıda',
 };
@@ -72,8 +72,9 @@ export default function GarageScreen() {
         <View style={styles.infoRow}>
           <Ionicons name="shield-checkmark-outline" size={17} color={theme.colors.primaryDeep} />
           <AppText variant="caption" color="textSecondary" style={styles.flex}>
-            Sürücü ilanı yalnızca onaylanmış araçla yayınlanır. Ruhsat, sigorta ve muayene
-            belgelerinin geçerlilik tarihi takip edilir; süresi dolan araç ilanlardan kaldırılır.
+            Aracını eklediğin an yolculuk ilanı yayınlayabilirsin; araç onayı beklemezsin.
+            Ruhsat, sigorta ve muayene belgelerini yine de garajdan yükleyip geçerlilik
+            tarihlerini takip edebilirsin.
           </AppText>
         </View>
       </Card>
@@ -112,7 +113,13 @@ export default function GarageScreen() {
                   <View style={styles.photoTop}>
                     <Badge
                       label={STATUS_LABEL[vehicle.status] ?? vehicle.status}
-                      tone={vehicle.status === 'approved' ? 'success' : vehicle.status === 'rejected' ? 'danger' : 'warning'}
+                      tone={
+                        vehicle.status === 'approved' || vehicle.status === 'pending'
+                          ? 'success'
+                          : vehicle.status === 'rejected'
+                            ? 'danger'
+                            : 'warning'
+                      }
                     />
                     {!vehicle.is_active ? <Badge label="Pasif" tone="neutral" /> : null}
                   </View>

@@ -9,6 +9,7 @@ import type { MyListing } from '@/features/explore/types';
 import { formatMoney, formatRelative } from '@/features/explore/utils/format';
 import { listingStatusLabel } from '@/features/real-estate/labels';
 import { useTheme } from '@/theme/ThemeProvider';
+import { ViewCount } from '@/features/views/components/ViewCount';
 import { useRouter } from '@/utils/router';
 
 type FilterKey = 'all' | 'draft' | 'pending' | 'published' | 'rejected';
@@ -20,7 +21,6 @@ const FILTERS: { key: FilterKey; label: string; statuses: string[] | null }[] = 
   { key: 'published', label: 'Yayında', statuses: ['published'] },
   { key: 'rejected', label: 'Reddedilen', statuses: ['rejected'] },
 ];
-
 export default function MyRealEstateListingsScreen() {
   const router = useRouter();
   const { theme } = useTheme();
@@ -51,31 +51,16 @@ export default function MyRealEstateListingsScreen() {
     <Screen edges={['top', 'left', 'right']} scroll>
       <ScreenHeader
         title="İlanlarım"
-        subtitle="Taslak, doğrulama ve yayın durumları"
+        subtitle="Yayın, taslak ve doğrulama durumları"
         onBack={() => router.back()}
       />
 
       <View style={styles.summary}>
         <Summary label="Toplam" value={counts.all} tone={theme.colors.primaryDeep} />
         <Summary label="Yayında" value={counts.published} tone={theme.colors.success} />
-        <Summary label="Bekleyen" value={counts.pending} tone={theme.colors.warning} />
+        <Summary label="Doğrulama" value={counts.pending} tone={theme.colors.warning} />
         <Summary label="Taslak" value={counts.draft} tone={theme.colors.textSecondary} />
       </View>
-
-      {!listings.data?.eids_enabled ? (
-        <View
-          style={[
-            styles.notice,
-            { backgroundColor: theme.colors.warningSoft, borderColor: theme.colors.warning },
-          ]}
-        >
-          <Ionicons name="shield-outline" size={17} color={theme.colors.warning} />
-          <AppText variant="caption" color="textSecondary" style={styles.flex}>
-            EİDS entegrasyonu etkin değil. İlanlar yalnızca taslak veya doğrulama bekleme durumunda
-            tutulur; doğrulanmamış ilan yayınlanmaz.
-          </AppText>
-        </View>
-      ) : null}
 
       <ScrollView
         keyboardShouldPersistTaps="handled"
@@ -153,7 +138,7 @@ function ListingRow({ item }: { item: MyListing }) {
   const router = useRouter();
   const { theme } = useTheme();
   const status = listingStatusLabel(item.status);
-  const editable = ['draft', 'rejected'].includes(item.status);
+  const editable = ['draft', 'rejected', 'published', 'expired', 'archived'].includes(item.status);
 
   return (
     <Pressable
@@ -195,9 +180,18 @@ function ListingRow({ item }: { item: MyListing }) {
           <AppText variant="bodyStrong" color="primaryDeep">
             {formatMoney(item.price_cents, item.currency)}
           </AppText>
-          <AppText variant="caption" color="textTertiary">
-            {item.view_count} görüntülenme · {formatRelative(item.updated_at)}
-          </AppText>
+          <View style={styles.metaRight}>
+            <ViewCount
+              type="real_estate_listing"
+              id={item.id}
+              size={12}
+              showLabel
+              label="görüntüleme"
+            />
+            <AppText variant="caption" color="textTertiary">
+              {formatRelative(item.updated_at)}
+            </AppText>
+          </View>
         </View>
         {item.rejection_reason ? (
           <AppText variant="caption" color="danger" numberOfLines={2}>
@@ -216,7 +210,7 @@ function ListingRow({ item }: { item: MyListing }) {
           >
             <Ionicons name="create-outline" size={14} color={theme.colors.primaryDeep} />
             <AppText variant="caption" color="primaryDeep">
-              Düzenle ve doğrulamaya gönder
+              Düzenle
             </AppText>
           </Pressable>
         ) : null}
@@ -248,15 +242,6 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  notice: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    padding: 11,
-    borderRadius: 13,
-    borderWidth: 1,
-    marginTop: 12,
-  },
   chips: { gap: 7, paddingVertical: 12, alignItems: 'center' },
   chip: {
     paddingHorizontal: 12,
@@ -285,6 +270,7 @@ const styles = StyleSheet.create({
   rowBody: { flex: 1, gap: 5 },
   rowTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   rowMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  metaRight: { alignItems: 'flex-end', gap: 1 },
   editButton: {
     flexDirection: 'row',
     alignItems: 'center',

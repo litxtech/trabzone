@@ -168,6 +168,11 @@ export function useContentAction() {
     }) => unwrap(await admin.contentAction(input.kind, input.id, input.action, input.reason)),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ['admin'] });
+      // Moderasyon uygulanan içerik uygulama akışlarında da anında düşsün;
+      // aksi hâlde kaldırılan hikâye/gönderi önbellekten görünmeye devam eder.
+      void client.invalidateQueries({ queryKey: ['stories'] });
+      void client.invalidateQueries({ queryKey: ['feed'] });
+      void client.invalidateQueries({ queryKey: ['reels'] });
     },
   });
 }

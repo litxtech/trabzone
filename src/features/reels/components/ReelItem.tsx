@@ -11,10 +11,11 @@ import { useToggleFollow } from '@/features/profile/hooks/use-follow';
 import { useBlockUser } from '@/features/profile/hooks/use-profile-mutations';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { useReportSheet } from '@/features/safety/components/ReportSheetProvider';
-import { reelShareLink, shareSnippet } from '@/features/share/links';
+import { reelShareLink, liveNewsShareLink, shareSnippet } from '@/features/share/links';
 import { didShare, shareContent } from '@/features/share/share-action';
 import { perf } from '@/perf';
 import { haptics } from '@/utils/haptics';
+import { afterSheetDismiss } from '@/utils/sheet';
 
 import {
   useDeleteReel,
@@ -24,6 +25,9 @@ import {
 } from '../hooks/use-reels';
 import { reelUrl, type Reel } from '../services/reels-service';
 import { formatCount } from '../utils/format';
+import { ViewCount } from '@/features/views/components/ViewCount';
+import { ContentStatsSheet } from '@/features/views/components/ContentStatsSheet';
+import { useContentViewRegistration, useViewSettings } from '@/features/views/use-content-views';
 
 type Props = {
   reel: Reel;
@@ -83,8 +87,8 @@ export const ReelItem = memo(function ReelItem({
   const router = useRouter();
   const { openReport } = useReportSheet();
 
-  const videoUri = reelUrl(reel.video_path);
-  const posterUri = reelUrl(reel.cover_path);
+  const videoUri = reelUrl(reel.video_path, reel.storage_bucket ?? 'reels');
+  const posterUri = reelUrl(reel.cover_path, reel.storage_bucket ?? 'reels');
   const fullName =
     `${reel.author_first_name ?? ''} ${reel.author_last_name ?? ''}`.trim() || reel.author_username;
   const avatarUri = mediaPublicUrl('avatar', reel.author_avatar_path);
@@ -103,7 +107,20 @@ export const ReelItem = memo(function ReelItem({
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [following, setFollowing] = useState(reel.following_author);
+
+  // Tekil görüntüleme yalnızca video gerçekten oynarken ve yönetici eşiği
+  // kadar (varsayılan 2 sn) kesintisiz oynatıldığında kaydedilir. Duraklatma,
+  // sekme değişimi veya arka plan zamanlayıcıyı iptal eder.
+  const viewSettings = useViewSettings();
+  useContentViewRegistration({
+    type: 'reel',
+    id: reel.id,
+    surface: 'reels',
+    enabled: active && isPlaying,
+    delayMs: viewSettings.video_min_play_ms,
+  });
 
   const toggleFollow = useToggleFollow();
   const toggleLike = useToggleReelLike();
@@ -172,7 +189,9 @@ export const ReelItem = memo(function ReelItem({
 
   const onShare = useCallback(async () => {
     haptics.tap();
-    const link = reelShareLink(reel.id);
+    const link = reel.live_news_id
+      ? liveNewsShareLink(reel.live_news_id)
+      : reelShareLink(reel.id);
     const caption = shareSnippet(reel.caption);
     const outcome = await shareContent({
       title: `${fullName} · Trabzone Reels`,
@@ -185,7 +204,7 @@ export const ReelItem = memo(function ReelItem({
     if (didShare(outcome)) {
       share.mutate(reel.id);
     }
-  }, [fullName, reel.author_username, reel.caption, reel.id, share]);
+  }, [fullName, reel.author_username, reel.caption, reel.id, reel.live_news_id, share]);
 
   const confirmDelete = useCallback(() => {
     Alert.alert('Reels videosunu sil', 'Video kalıcı olarak silinecek. Emin misin?', [
@@ -309,6 +328,28 @@ export const ReelItem = memo(function ReelItem({
       ) : null}
 
       <View style={[styles.bottom, { bottom: 22 + bottomInset }]} pointerEvents="box-none">
+        {reel.live_news ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Anlık gelişmeyi aç"
+            onPress={() => {
+              haptics.tap();
+              router.push(`/anlik-haber/${reel.live_news!.post_id}` as never);
+            }}
+            style={({ pressed }) => [styles.liveBadge, { opacity: pressed ? 0.75 : 1 }]}
+          >
+            <Ionicons name="radio-outline" size={11} color="#FFFFFF" />
+            <AppText variant="caption" color="#FFFFFF" numberOfLines={1}>
+              {reel.live_news.verification_status === 'verified'
+                ? 'Doğrulanmış Anlık Gelişme'
+                : reel.live_news.verification_status === 'corrected'
+                  ? 'Düzeltilmiş Anlık Gelişme'
+                  : 'Vatandaş Paylaşımı'}
+              {reel.live_news.district ? ` · ${reel.live_news.district}` : ''}
+            </AppText>
+            <Ionicons name="chevron-forward" size={12} color="#FFFFFF" />
+          </Pressable>
+        ) : null}
         <View style={styles.authorRow}>
           <Pressable
             accessibilityRole="button"
@@ -387,6 +428,17 @@ export const ReelItem = memo(function ReelItem({
             {audioLabel}
           </AppText>
         </View>
+
+        {/* Tekil görüntüleme sayacı mevcut kontrol düzenini bozmadan,
+            etkileşim eklemeyen küçük bir satırda gösterilir. */}
+        <View pointerEvents="none" style={styles.viewMeta}>
+          <ViewCount
+            type="reel"
+            id={reel.id}
+            initial={reel.view_count}
+            color="rgba(255,255,255,0.86)"
+          />
+        </View>
       </View>
 
       <View style={[styles.rail, { bottom: 26 + bottomInset }]} pointerEvents="box-none">
@@ -423,15 +475,36 @@ export const ReelItem = memo(function ReelItem({
         title="Reels"
         items={[
           ...(reel.is_mine
-            ? [
-                { key: 'edit', label: 'Açıklamayı düzenle', icon: 'create-outline' as const },
-                {
-                  key: 'delete',
-                  label: 'Videoyu sil',
-                  icon: 'trash-outline' as const,
-                  destructive: true,
-                },
-              ]
+            ? reel.live_news_id
+              ? [
+                  {
+                    key: 'live-edit',
+                    label: 'Anlık gelişmeyi düzenle',
+                    icon: 'radio-outline' as const,
+                    description: 'Aynı içerik; ayrı video yüklemeden',
+                  },
+                  {
+                    key: 'stats',
+                    label: 'Video istatistikleri',
+                    icon: 'eye-outline' as const,
+                    description: 'Tekil görüntüleme ve etkileşim özeti',
+                  },
+                ]
+              : [
+                  { key: 'edit', label: 'Açıklamayı düzenle', icon: 'create-outline' as const },
+                  {
+                    key: 'stats',
+                    label: 'Video istatistikleri',
+                    icon: 'eye-outline' as const,
+                    description: 'Tekil görüntüleme ve etkileşim özeti',
+                  },
+                  {
+                    key: 'delete',
+                    label: 'Videoyu sil',
+                    icon: 'trash-outline' as const,
+                    destructive: true,
+                  },
+                ]
             : [
                 { key: 'profile', label: 'Profili görüntüle', icon: 'person-outline' as const },
                 {
@@ -452,8 +525,12 @@ export const ReelItem = memo(function ReelItem({
         onClose={() => setMenuOpen(false)}
         onSelect={(key) => {
           setMenuOpen(false);
-          if (key === 'edit') {
+          if (key === 'live-edit' && reel.live_news_id) {
+            router.push(`/compose/live-news?postId=${reel.live_news_id}` as never);
+          } else if (key === 'edit') {
             onEdit(reel);
+          } else if (key === 'stats') {
+            afterSheetDismiss(() => setStatsOpen(true));
           } else if (key === 'delete') {
             confirmDelete();
           } else if (key === 'profile') {
@@ -461,21 +538,29 @@ export const ReelItem = memo(function ReelItem({
           } else if (key === 'block') {
             confirmBlockAuthor();
           } else if (key === 'report') {
-            setTimeout(
-              () =>
-                openReport({
-                  targetType: 'reel',
-                  targetId: reel.id,
-                  targetUserId: reel.author_id,
-                  targetLabel: reel.caption || 'Reels videosu',
-                }),
-              280,
+            afterSheetDismiss(() =>
+              openReport({
+                targetType: 'reel',
+                targetId: reel.id,
+                targetUserId: reel.author_id,
+                targetLabel: reel.caption || 'Reels videosu',
+              }),
             );
           } else if (key === 'share') {
             void onShare();
           }
         }}
       />
+
+      {reel.is_mine ? (
+        <ContentStatsSheet
+          visible={statsOpen}
+          onClose={() => setStatsOpen(false)}
+          type="reel"
+          id={reel.id}
+          title={reel.caption || 'Reels videosu'}
+        />
+      ) : null}
     </View>
   );
 });
@@ -521,6 +606,18 @@ const styles = StyleSheet.create({
     bottom: 22,
     gap: 10,
   },
+  liveBadge: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(47,107,255,0.86)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
   authorRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   authorPress: { flexDirection: 'row', alignItems: 'center', gap: 9, flexShrink: 1 },
   authorText: { flexShrink: 1, gap: 1 },
@@ -537,6 +634,7 @@ const styles = StyleSheet.create({
   followLabel: { fontSize: 12, fontWeight: '700' },
   caption: { lineHeight: 21, textShadowColor: 'rgba(0,0,0,0.35)', textShadowRadius: 6 },
   audioRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  viewMeta: { marginTop: -2 },
   audioIcon: {
     width: 22,
     height: 22,

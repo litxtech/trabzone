@@ -2,12 +2,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 
 import {
+  deleteNotifications,
   notificationQueryKeys,
   fetchNotifications,
   fetchUnreadCount,
   markNotificationsRead,
+  type NotificationPage,
 } from '../services/notifications-service';
 import { supabase } from '@/services/supabase/client';
+import { postgresChannel } from '@/services/supabase/realtime';
 import { useSession } from '@/stores/auth-store';
 import { unwrap } from '@/utils/result';
 
@@ -41,6 +44,40 @@ export function useMarkNotificationsRead() {
   });
 }
 
+/** `ids` verilmezse tümü silinir; liste sunucu yanıtı beklenmeden güncellenir. */
+export function useDeleteNotifications() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (ids?: string[]) => unwrap(deleteNotifications(ids)),
+    onMutate: async (ids?: string[]) => {
+      await queryClient.cancelQueries({ queryKey: notificationQueryKeys.list });
+      const previous = queryClient.getQueryData<NotificationPage>(notificationQueryKeys.list);
+      if (previous) {
+        const removed = ids && ids.length > 0 ? new Set(ids) : null;
+        const items = removed ? previous.items.filter((item) => !removed.has(item.id)) : [];
+        const removedUnread = previous.items.filter(
+          (item) => !item.read_at && (!removed || removed.has(item.id)),
+        ).length;
+        queryClient.setQueryData<NotificationPage>(notificationQueryKeys.list, {
+          items,
+          unread: Math.max(previous.unread - removedUnread, 0),
+        });
+      }
+      return { previous };
+    },
+    onError: (_error, _ids, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(notificationQueryKeys.list, context.previous);
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list });
+      void queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unread });
+    },
+  });
+}
+
 /** Yeni bildirim geldiginde sayaci ve listeyi tazeler. */
 export function useNotificationRealtime() {
   const session = useSession();
@@ -51,8 +88,7 @@ export function useNotificationRealtime() {
       return;
     }
 
-    const channel = supabase
-      .channel(`notifications:${session.user.id}`)
+    const channel = postgresChannel(`notifications:${session.user.id}`)
       .on(
         'postgres_changes',
         {

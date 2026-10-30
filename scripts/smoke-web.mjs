@@ -15,7 +15,7 @@ for (const line of readFileSync(join(root, '.env'), 'utf8').split(/\r?\n/)) {
 process.chdir(root);
 
 const news = require('../api/news.js');
-const sitemapNews = require('../api/sitemap-news.js');
+const sitemapNews = require('../server/sitemaps/sitemap-news.js');
 
 function invoke(handler, { url, method = 'GET' }) {
   return new Promise((resolve, reject) => {

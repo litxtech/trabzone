@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useIsFocused, useRouter } from 'expo-router';
 import { setStatusBarStyle } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -18,7 +18,7 @@ import { AppText } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 
-import { registerViewOnce, useReelsFeed } from '../hooks/use-reels';
+import { useReelsFeed } from '../hooks/use-reels';
 import type { Reel } from '../services/reels-service';
 import { ReelCommentsSheet } from './ReelCommentsSheet';
 import { ReelEditSheet } from './ReelEditSheet';
@@ -35,21 +35,14 @@ export function ReelsFeedScreen() {
   const reels = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data]);
 
   const listRef = useRef<FlatList<Reel>>(null);
-  const viewed = useRef<Set<string>>(new Set());
   const [height, setHeight] = useState(0);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [focused, setFocused] = useState(true);
+  // Sekme odakta degilken (onceden kurulmus olsa bile) hicbir video oynamamali.
+  const focused = useIsFocused();
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const [muted, setMuted] = useState(false);
   const [commentsId, setCommentsId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-
-  useFocusEffect(
-    useCallback(() => {
-      setFocused(true);
-      return () => setFocused(false);
-    }, []),
-  );
 
   // Uygulama arkaya gittiğinde ses devam etmesin (eski derlemelerde de geçerli).
   useEffect(() => {
@@ -66,14 +59,6 @@ export function ReelsFeedScreen() {
     }
     setStatusBarStyle(scheme === 'dark' ? 'light' : 'dark');
   }, [focused, scheme]);
-
-  useEffect(() => {
-    if (!activeId || !focused || viewed.current.has(activeId)) {
-      return;
-    }
-    viewed.current.add(activeId);
-    void registerViewOnce(activeId);
-  }, [activeId, focused]);
 
   const activeIndex = useMemo(
     () => reels.findIndex((reel) => reel.id === activeId),

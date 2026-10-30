@@ -1,21 +1,31 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from '@/utils/router';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 
-import { AppText, Badge, Button, Card } from '@/components/ui';
+import {
+  ActionSheet,
+  AppText,
+  Button,
+  IconButton,
+  type ActionSheetItem,
+} from '@/components/ui';
 import { Screen } from '@/components/ui/Screen';
-import { useAuthStore } from '@/stores/auth-store';
 import { useTheme } from '@/theme/ThemeProvider';
 
 import {
-  LevelBadge,
-  RideActionTile,
   RideEmptyState,
+  RideQuickAction,
+  RideRouteBlock,
   RideSection,
-  RideStat,
+  StatusPill,
 } from '@/features/ride/components/RideBits';
-import { IdentityReadyBanner, VerifiedTick } from '@/features/ride/components/IdentityBadge';
 import { RideOfferCard } from '@/features/ride/components/RideOfferCard';
 import { RideHeader } from '@/features/ride/components/RideHeader';
 import { useMyTrips, useRideProfile, useRideSearch } from '@/features/ride/hooks/use-ride';
@@ -29,273 +39,351 @@ import {
 } from '@/features/ride/utils/format';
 import { isIdentityVerified } from '@/features/ride/utils/identity';
 
+type When = 'any' | 'today' | 'tomorrow';
+
+const WHEN_LABEL: Record<When, string> = {
+  any: 'Esnek',
+  today: 'Bugün',
+  tomorrow: 'Yarın',
+};
+
+const MENU_ITEMS: ActionSheetItem[] = [
+  {
+    key: 'requests',
+    label: 'Yolcu taleplerim',
+    icon: 'hand-left-outline',
+    description: 'Açık taleplerini görüntüle',
+  },
+  { key: 'favorites', label: 'Favori güzergâhlar', icon: 'heart-outline' },
+  { key: 'safety', label: 'Güvenlik merkezi', icon: 'shield-checkmark-outline' },
+  { key: 'messages', label: 'Mesajlar', icon: 'chatbubbles-outline' },
+  { key: 'verification', label: 'Doğrulamalar', icon: 'id-card-outline' },
+  { key: 'archive', label: 'Arşiv ve raporlar', icon: 'archive-outline' },
+  { key: 'policy', label: 'Yolculuk anlaşması', icon: 'document-text-outline' },
+];
+
 export default function RideLobbyScreen() {
   const { theme } = useTheme();
   const router = useRouter();
-  const session = useAuthStore((state) => state.session);
   const profile = useRideProfile();
   const trips = useMyTrips('upcoming');
-  const nearby = useRideSearch({ scope: 'intracity', mode: 'all', limit: 3 });
 
-  const firstName =
-    (session?.user.user_metadata?.first_name as string | undefined) ??
-    (session?.user.user_metadata?.full_name as string | undefined)?.split(' ')[0] ??
-    null;
+  const [scope, setScope] = useState<RideScope>('intracity');
+  const [origin, setOrigin] = useState('');
+  const [dest, setDest] = useState('');
+  const [when, setWhen] = useState<When>('any');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const nearby = useRideSearch({ scope, mode: 'all', limit: 3 });
+
   const upcoming = trips.data?.[0] ?? null;
   // Profildeki alan senkronsuz kalabildiği için onaylı belge kaydı da hesaba katılır.
   const identityApproved = isIdentityVerified(profile.data);
-  const driverApproved = profile.data?.driver_status === 'approved';
 
-  const goSearch = (scope: RideScope) => {
-    router.navigate({ pathname: '/ride/search', params: { scope } } as never);
+  const goSearch = (nextScope: RideScope = scope) =>
+    router.navigate({
+      pathname: '/ride/search',
+      params: {
+        scope: nextScope,
+        origin: origin.trim(),
+        dest: dest.trim(),
+        when,
+      },
+    } as never);
+
+  const handleMenu = (key: string) => {
+    setMenuOpen(false);
+    switch (key) {
+      case 'requests':
+        router.navigate('/ride/requests' as never);
+        break;
+      case 'favorites':
+        router.navigate('/ride/favorites' as never);
+        break;
+      case 'safety':
+        router.navigate('/ride/safety' as never);
+        break;
+      case 'messages':
+        router.navigate('/messages' as never);
+        break;
+      case 'verification':
+        router.navigate('/ride/verification' as never);
+        break;
+      case 'archive':
+        router.navigate('/ride/archive' as never);
+        break;
+      case 'policy':
+        router.navigate('/ride/policy' as never);
+        break;
+      default:
+        break;
+    }
   };
 
   return (
-    <Screen edges={['top', 'left', 'right', 'bottom']} scroll padded>
+    <Screen
+      edges={['top', 'left', 'right', 'bottom']}
+      scroll
+      padded
+      contentContainerStyle={styles.page}
+    >
       <RideHeader
         title="Yolculuk"
-        subtitle="Trabzone Yolculuk Paylaşımı"
+        subtitle="Nereden nereye?"
         right={
           <View style={styles.headerActions}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Haritada gör"
-              onPress={() => router.navigate('/map' as never)}
-              style={[styles.iconBtn, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
-            >
-              <Ionicons name="map-outline" size={19} color={theme.colors.primaryDeep} />
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Bildirimler"
-              onPress={() => router.navigate('/notifications' as never)}
-              style={[styles.iconBtn, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
-            >
-              <Ionicons name="notifications-outline" size={19} color={theme.colors.text} />
-            </Pressable>
+            <IconButton
+              name="car-outline"
+              accessibilityLabel="Garajım"
+              variant="surface"
+              size={19}
+              onPress={() => router.navigate('/ride/garage' as never)}
+            />
+            <IconButton
+              name="receipt-outline"
+              accessibilityLabel="Yolculuklarım"
+              variant="surface"
+              size={19}
+              onPress={() => router.navigate('/ride/trips' as never)}
+            />
+            <IconButton
+              name="ellipsis-horizontal"
+              accessibilityLabel="Diğer işlemler"
+              variant="surface"
+              size={19}
+              onPress={() => setMenuOpen(true)}
+            />
           </View>
         }
       />
 
-      <LinearGradient
-        colors={['#233B86', '#2F55D4', '#8057F4']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.hero}
+      <View
+        style={[
+          styles.searchCard,
+          { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+        ]}
       >
-        <View style={styles.heroTop}>
-          <View style={styles.heroText}>
-            <AppText variant="caption" style={styles.heroEyebrow}>
-              TRABZONE · YOLCULUK PAYLAŞIMI
-            </AppText>
-            <AppText variant="h1" style={styles.heroTitle}>
-              {firstName ? `Merhaba ${firstName},` : 'Yolculuğun burada başlıyor.'}
-            </AppText>
-            <AppText variant="body" style={styles.heroSubtitle}>
-              Şehir içi ve şehirler arası; masraf paylaşımıyla, doğrulanmış yol arkadaşlarıyla.
-            </AppText>
+        <View style={[styles.segment, { backgroundColor: theme.colors.surfaceMuted }]}>
+          {(['intracity', 'intercity'] as RideScope[]).map((item) => {
+            const active = scope === item;
+            return (
+              <Pressable
+                key={item}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                onPress={() => setScope(item)}
+                style={[
+                  styles.segmentItem,
+                  {
+                    backgroundColor: active ? theme.colors.surface : 'transparent',
+                    borderColor: active ? theme.colors.border : 'transparent',
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={item === 'intracity' ? 'business-outline' : 'trail-sign-outline'}
+                  size={14}
+                  color={active ? theme.colors.primaryDeep : theme.colors.textTertiary}
+                />
+                <AppText
+                  variant="label"
+                  color={active ? 'primaryDeep' : 'textTertiary'}
+                  numberOfLines={1}
+                >
+                  {SCOPE_LABEL[item]}
+                </AppText>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <View style={styles.inputs}>
+          <View style={styles.inputRow}>
+            <View style={[styles.inputDot, { backgroundColor: theme.colors.success }]} />
+            <TextInput
+              value={origin}
+              onChangeText={setOrigin}
+              placeholder="Nereden?"
+              placeholderTextColor={theme.colors.textTertiary}
+              style={[styles.input, theme.typography.body, { color: theme.colors.text }]}
+              returnKeyType="next"
+              accessibilityLabel="Kalkış noktası"
+            />
           </View>
-          <View style={styles.heroBadge}>
-            <Ionicons name="car-sport" size={20} color="#DCE6FF" />
+          <View
+            style={[styles.inputConnector, { backgroundColor: theme.colors.borderStrong }]}
+          />
+          <View style={styles.inputRow}>
+            <View style={[styles.inputDot, { backgroundColor: theme.colors.primary }]} />
+            <TextInput
+              value={dest}
+              onChangeText={setDest}
+              placeholder="Nereye?"
+              placeholderTextColor={theme.colors.textTertiary}
+              style={[styles.input, theme.typography.body, { color: theme.colors.text }]}
+              returnKeyType="search"
+              onSubmitEditing={() => goSearch()}
+              accessibilityLabel="Varış noktası"
+            />
           </View>
         </View>
 
-        <View style={styles.heroStats}>
-          <RideStat
-            icon={identityApproved ? 'checkmark-circle' : 'shield-checkmark-outline'}
-            value={
-              profile.data
-                ? identityApproved
-                  ? 'Doğrulandı'
-                  : (VERIFICATION_STATUS_LABEL[profile.data.identity_status] ??
-                    profile.data.identity_status)
-                : '—'
-            }
-            label="Kimlik"
-          />
-          <View style={styles.heroDivider} />
-          <RideStat
-            icon="star-outline"
-            value={profile.data?.rating_avg ? profile.data.rating_avg.toFixed(1) : '—'}
-            label="Puan"
-          />
-          <View style={styles.heroDivider} />
-          <RideStat
-            icon="checkmark-done-outline"
-            value={profile.data?.completed_trips ?? 0}
-            label="Yolculuk"
-          />
-        </View>
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Yolculuk ara"
-          onPress={() => goSearch('intracity')}
-          style={({ pressed }) => [styles.searchPill, { opacity: pressed ? 0.9 : 1 }]}
-        >
-          <Ionicons name="search" size={18} color="#2F55D4" />
-          <AppText variant="body" color="#4C5B7A" style={styles.searchText}>
-            Nereden nereye?
-          </AppText>
-          <View style={styles.searchGo}>
-            <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
-          </View>
-        </Pressable>
-
-        <View style={styles.scopeRow}>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => goSearch('intracity')}
-            style={styles.scopeChip}
-          >
-            <Ionicons name="business-outline" size={13} color="#EAF0FF" />
-            <AppText variant="caption" style={styles.scopeText}>
-              Şehir içi
-            </AppText>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => goSearch('intercity')}
-            style={styles.scopeChip}
-          >
-            <Ionicons name="trail-sign-outline" size={13} color="#EAF0FF" />
-            <AppText variant="caption" style={styles.scopeText}>
-              Şehirler arası
-            </AppText>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => router.navigate('/ride/recurring' as never)}
-            style={styles.scopeChip}
-          >
-            <Ionicons name="repeat-outline" size={13} color="#EAF0FF" />
-            <AppText variant="caption" style={styles.scopeText}>
-              Düzenli
-            </AppText>
-          </Pressable>
-        </View>
-      </LinearGradient>
-
-      {identityApproved ? (
-        <IdentityReadyBanner
-          subtitle="Kimliğin doğrulandı; rezervasyon ve ilanlarda tekrar belge istenmez."
-          onPress={() => router.navigate('/settings/verifications' as never)}
-        />
-      ) : (
-        <Card
-          padding={14}
-          tone="primarySoft"
-          style={[styles.verifyCard, { borderColor: theme.colors.primary }]}
-        >
-          <View style={[styles.verifyIcon, { backgroundColor: theme.colors.primary }]}>
-            <Ionicons name="shield-half-outline" size={18} color="#FFFFFF" />
-          </View>
-          <View style={styles.flex}>
-            <AppText variant="label">Rezervasyon için kimlik doğrulaması gerekli</AppText>
-            <AppText variant="caption" color="textSecondary">
-              Belgeler gizli kovada saklanır. Onay tamamlanmadan rezervasyon oluşturulamaz.
-            </AppText>
+        <View style={styles.searchFoot}>
+          <View style={styles.chips}>
+            {(['today', 'tomorrow', 'any'] as When[]).map((item) => {
+              const active = when === item;
+              return (
+                <Pressable
+                  key={item}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  onPress={() => setWhen(item)}
+                  style={[
+                    styles.chip,
+                    {
+                      backgroundColor: active ? theme.colors.primarySoft : 'transparent',
+                      borderColor: active ? theme.colors.primary : theme.colors.border,
+                    },
+                  ]}
+                >
+                  <AppText variant="caption" color={active ? 'primaryDeep' : 'textSecondary'}>
+                    {WHEN_LABEL[item]}
+                  </AppText>
+                </Pressable>
+              );
+            })}
           </View>
           <Button
-            label="Doğrula"
+            label="Ara"
             size="sm"
             fullWidth={false}
-            onPress={() => router.navigate('/ride/verification' as never)}
+            leftIcon={<Ionicons name="search" size={15} color="#FFFFFF" />}
+            onPress={() => goSearch()}
+            style={styles.searchButton}
           />
-        </Card>
-      )}
-
-      <View style={styles.roleHead}>
-        <AppText variant="label" color="textSecondary">
-          Ne yapmak istiyorsun?
-        </AppText>
-        <AppText variant="caption" color="textTertiary">
-          Sürücü ilanı ve yolcu talebi ayrı akışlardır.
-        </AppText>
+        </View>
       </View>
-      <View style={styles.actions}>
-        <RideActionTile
+
+      <View style={styles.quickRow}>
+        <RideQuickAction
           icon="add-circle-outline"
-          title="Sürücü: Yolculuk Paylaş"
-          subtitle="Aracınla ilan ver, koltuk aç"
+          title="Yolculuk paylaş"
+          subtitle="Araçla ilan ver"
           tone="primary"
           onPress={() => router.navigate('/ride/create' as never)}
         />
-        <RideActionTile
+        <RideQuickAction
           icon="hand-left-outline"
-          title="Yolcu: Talep Oluştur"
-          subtitle="Nereye gideceğini yaz, eşleş"
+          title="Yolcu talebi"
+          subtitle="Nereye gideceğini yaz"
           tone="accent"
           onPress={() => router.navigate('/ride/request' as never)}
         />
       </View>
 
-      {upcoming ? (
-        <RideSection
-          title="Yaklaşan yolculuğun"
-          subtitle={`${dayLabel(upcoming.depart_at)} · ${formatTime(upcoming.depart_at)}`}
-          action={
-            <Button
-              label="Tümü"
-              size="sm"
-              variant="ghost"
-              fullWidth={false}
-              onPress={() => router.navigate('/ride/trips' as never)}
-            />
-          }
+      {!identityApproved ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Kimlik doğrulaması"
+          onPress={() => router.navigate('/ride/verification' as never)}
+          style={[
+            styles.notice,
+            {
+              backgroundColor: theme.colors.warningSoft,
+              borderColor: theme.colors.warning,
+            },
+          ]}
         >
+          <Ionicons name="shield-half-outline" size={17} color={theme.colors.warning} />
+          <View style={styles.flex}>
+            <AppText variant="label">Kimlik doğrulaması</AppText>
+            <AppText variant="caption" color="textSecondary" numberOfLines={1}>
+              {profile.data
+                ? `${VERIFICATION_STATUS_LABEL[profile.data.identity_status] ?? profile.data.identity_status} · Rezervasyon için gerekli`
+                : 'Rezervasyon için gerekli'}
+            </AppText>
+          </View>
+          <AppText variant="label" color="primaryDeep">
+            Doğrula
+          </AppText>
+          <Ionicons name="chevron-forward" size={15} color={theme.colors.textTertiary} />
+        </Pressable>
+      ) : null}
+
+      {upcoming ? (
+        <View style={styles.section}>
+          <View style={styles.sectionHead}>
+            <AppText variant="title" style={styles.flex}>
+              Yaklaşan yolculuğun
+            </AppText>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Tüm yolculuklarım"
+              onPress={() => router.navigate('/ride/trips' as never)}
+              hitSlop={8}
+            >
+              <AppText variant="caption" color="primaryDeep">
+                Tümü
+              </AppText>
+            </Pressable>
+          </View>
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel={`${upcoming.origin_label} - ${upcoming.dest_label} yaklaşan yolculuğu`}
             onPress={() => router.navigate(`/ride/trips/${upcoming.id}` as never)}
-            style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1, gap: 8 }]}
+            style={({ pressed }) => [
+              styles.upcomingCard,
+              {
+                backgroundColor: theme.colors.surface,
+                borderColor: theme.colors.border,
+                opacity: pressed ? 0.86 : 1,
+              },
+            ]}
           >
-            <View style={styles.upcomingRow}>
+            <View style={styles.upcomingTop}>
               <View style={styles.flex}>
-                <AppText variant="label">
-                  {upcoming.origin_label} → {upcoming.dest_label}
-                </AppText>
-                <View style={styles.driverLine}>
-                  {upcoming.driver_identity_verified ? <VerifiedTick size={14} /> : null}
-                  <AppText variant="caption" color="textSecondary" style={styles.flex}>
-                    {upcoming.driver_first_name ?? upcoming.driver_username} ·{' '}
-                    {upcoming.vehicle.make} {upcoming.vehicle.model}
-                  </AppText>
-                </View>
+                <RideRouteBlock
+                  origin={upcoming.origin_label}
+                  dest={upcoming.dest_label}
+                  emphasis
+                />
               </View>
-              <Badge
-                label={
-                  upcoming.status === 'confirmed'
-                    ? 'Onaylandı'
-                    : upcoming.status === 'requested'
-                      ? 'Onay bekliyor'
-                      : upcoming.status
-                }
-                tone={upcoming.status === 'confirmed' ? 'success' : 'warning'}
-              />
+              <StatusPill status={upcoming.status} />
             </View>
-            <View style={styles.upcomingFoot}>
-              <AppText variant="caption" color="textTertiary">
-                {upcoming.seats} koltuk · {formatMoney(upcoming.total_cents, upcoming.currency)}
+            <View style={[styles.upcomingMeta, { borderTopColor: theme.colors.divider }]}>
+              <Ionicons name="calendar-outline" size={13} color={theme.colors.textTertiary} />
+              <AppText variant="caption" color="textSecondary">
+                {dayLabel(upcoming.depart_at)} · {formatTime(upcoming.depart_at)}
               </AppText>
-              <AppText variant="caption" color="primaryDeep">
-                Detay →
+              <AppText variant="caption" color="textTertiary">
+                ·
+              </AppText>
+              <AppText variant="caption" color="textSecondary">
+                {upcoming.seats} koltuk
+              </AppText>
+              <View style={styles.flex} />
+              <AppText variant="label" color="primaryDeep">
+                {formatMoney(upcoming.total_cents, upcoming.currency)}
               </AppText>
             </View>
           </Pressable>
-        </RideSection>
+        </View>
       ) : null}
 
       <RideSection
-        title="Yakındaki şehir içi yolculuklar"
-        subtitle="Gerçek ilanlar, hesaplanmış eşleşme puanıyla"
+        bare
+        title="Yakındaki yolculuklar"
+        subtitle={SCOPE_LABEL[scope]}
         action={
-          <Button
-            label="Haritada ara"
-            size="sm"
-            variant="secondary"
-            fullWidth={false}
-            onPress={() => goSearch('intracity')}
-          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Tüm yolculukları gör"
+            onPress={() => goSearch(scope)}
+            hitSlop={8}
+          >
+            <AppText variant="caption" color="primaryDeep">
+              Tümünü gör
+            </AppText>
+          </Pressable>
         }
       >
         {nearby.isLoading ? (
@@ -307,17 +395,27 @@ export default function RideLobbyScreen() {
             icon="cloud-offline-outline"
             title="Yolculuklar yüklenemedi"
             message={nearby.error.message}
-            action={<Button label="Tekrar dene" variant="secondary" onPress={() => void nearby.refetch()} />}
+            action={
+              <Button
+                label="Tekrar dene"
+                variant="secondary"
+                size="sm"
+                fullWidth={false}
+                onPress={() => void nearby.refetch()}
+              />
+            }
           />
         ) : (nearby.data?.items.length ?? 0) === 0 ? (
           <RideEmptyState
             icon="car-outline"
             title="Yakında ilan yok"
-            message="Şu anda şehir içi yayınlanmış yolculuk bulunmuyor. Yolcu talebi oluşturup uygun sürücü geldiğinde bildirim alabilirsin."
+            message="Şu anda yayınlanmış şehir içi yolculuk bulunmuyor. Yolcu talebi oluşturup sürücülerin sana ulaşmasını sağlayabilirsin."
             action={
               <Button
                 label="Yolcu talebi oluştur"
                 variant="secondary"
+                size="sm"
+                fullWidth={false}
                 onPress={() => router.navigate('/ride/request' as never)}
               />
             }
@@ -331,175 +429,83 @@ export default function RideLobbyScreen() {
         )}
       </RideSection>
 
-      <View style={styles.grid}>
-        <RideActionTile
-          icon="receipt-outline"
-          title="Yolculuklarım"
-          subtitle="Yaklaşan ve geçmiş"
-          onPress={() => router.navigate('/ride/trips' as never)}
-        />
-        <RideActionTile
-          icon="heart-outline"
-          title="Favori Güzergâhlar"
-          subtitle="Tek dokunuşla ara"
-          onPress={() => router.navigate('/ride/favorites' as never)}
-        />
-        <RideActionTile
-          icon="car-outline"
-          title="Garajım"
-          subtitle={profile.data ? `${profile.data.vehicle_count} araç` : 'Araç ve belgeler'}
-          onPress={() => router.navigate('/ride/garage' as never)}
-        />
-        <RideActionTile
-          icon="shield-checkmark-outline"
-          title="Güvenlik Merkezi"
-          subtitle="SOS, konum paylaşımı"
-          onPress={() => router.navigate('/ride/safety' as never)}
-        />
-        <RideActionTile
-          icon="chatbubbles-outline"
-          title="Mesajlar"
-          subtitle="Yolculuk sohbetleri"
-          onPress={() => router.navigate('/messages' as never)}
-        />
-        <RideActionTile
-          icon="id-card-outline"
-          title="Doğrulamalar"
-          subtitle={
-            identityApproved
-              ? driverApproved
-                ? 'Kimlik ve sürücü onaylı'
-                : 'Kimlik onaylı · eksik belge'
-              : profile.data?.identity_status === 'pending'
-                ? 'Kimlik inceleniyor'
-                : 'Kimlik doğrula'
-          }
-          onPress={() => router.navigate('/ride/verification' as never)}
-        />
-        <RideActionTile
-          icon="archive-outline"
-          title="Arşiv ve Raporlar"
-          subtitle="Özetler, PDF, harcama"
-          onPress={() => router.navigate('/ride/archive' as never)}
-        />
-        <RideActionTile
-          icon="document-text-outline"
-          title="Yolculuk Anlaşması"
-          subtitle="Koşullar ve sürüm"
-          onPress={() => router.navigate('/ride/policy' as never)}
-        />
-      </View>
-
-      <Card padding={14} tone="muted" style={styles.trust}>
-        <View style={styles.trustHead}>
-          <Ionicons name="lock-closed-outline" size={15} color={theme.colors.primaryDeep} />
-          <AppText variant="label">Güven ve şeffaflık</AppText>
-          <LevelBadge level={profile.data?.level ?? null} />
-        </View>
-        <AppText variant="caption" color="textSecondary">
-          Tam adresler yalnızca rezervasyon taraflarına gösterilir. Kart verisi saklanmaz;
-          kartlı ödeme, ödeme kuruluşu yetkileri tamamlanana kadar kapalıdır. Yolculuk sırasında
-          acil durumlarda 112 aranmalıdır — Trabzone resmi acil yardım hizmeti değildir.
-        </AppText>
-        {!driverApproved ? (
-          <Button
-            label="Sürücü olarak başvur"
-            size="sm"
-            variant="secondary"
-            onPress={() => router.navigate('/ride/verification' as never)}
-          />
-        ) : (
-          <Button
-            label="İlan ver"
-            size="sm"
-            variant="secondary"
-            onPress={() => router.navigate('/ride/create' as never)}
-          />
-        )}
-      </Card>
-
-      <AppText variant="caption" color="textTertiary" align="center" style={styles.scopeFootnote}>
-        {SCOPE_LABEL.intracity} · {SCOPE_LABEL.intercity} · Masraf paylaşımı, ticari taşımacılık değildir.
+      <AppText variant="caption" color="textTertiary" align="center" style={styles.footnote}>
+        Masraf paylaşımıdır; ticari taşımacılık değildir. Acil durumda 112’yi ara.
       </AppText>
+
+      <ActionSheet
+        visible={menuOpen}
+        title="Yolculuk araçları"
+        items={MENU_ITEMS}
+        onSelect={handleMenu}
+        onClose={() => setMenuOpen(false)}
+      />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 13,
+  page: { width: '100%', maxWidth: 880, alignSelf: 'center', gap: 14 },
+  flex: { flex: 1 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  searchCard: {
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 13,
+    gap: 11,
+  },
+  segment: { flexDirection: 'row', padding: 3, borderRadius: 12, gap: 3 },
+  segmentItem: {
+    flex: 1,
+    minHeight: 36,
+    borderRadius: 9,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 5,
   },
-  headerActions: { flexDirection: 'row', gap: 7 },
-  hero: { borderRadius: 24, padding: 18, gap: 16, overflow: 'hidden' },
-  heroTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  heroText: { flex: 1, gap: 6 },
-  heroEyebrow: { color: 'rgba(235,242,255,0.72)', letterSpacing: 1.1, fontSize: 10 },
-  heroTitle: { color: '#FFFFFF' },
-  heroSubtitle: { color: 'rgba(235,242,255,0.86)' },
-  heroBadge: {
-    width: 46,
-    height: 46,
-    borderRadius: 15,
-    backgroundColor: 'rgba(255,255,255,0.14)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  inputs: { gap: 0 },
+  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 3 },
+  inputDot: { width: 8, height: 8, borderRadius: 4 },
+  inputConnector: { width: 1, height: 10, marginLeft: 3.5, opacity: 0.7 },
+  input: { flex: 1, paddingVertical: 4 },
+  searchFoot: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+  chips: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  chip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  heroStats: {
+  searchButton: { marginLeft: 'auto', minWidth: 96, paddingHorizontal: 18 },
+  quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  notice: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-around',
-    backgroundColor: 'rgba(8,14,32,0.28)',
-    borderRadius: 14,
+    gap: 9,
+    borderRadius: 13,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
     paddingVertical: 9,
   },
-  heroDivider: { width: StyleSheet.hairlineWidth, height: 26, backgroundColor: 'rgba(255,255,255,0.22)' },
-  searchPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 15,
-    paddingLeft: 14,
-    paddingRight: 7,
-    paddingVertical: 7,
+  section: { gap: 8 },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  upcomingCard: {
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 13,
+    gap: 10,
   },
-  searchText: { flex: 1 },
-  searchGo: {
-    width: 34,
-    height: 34,
-    borderRadius: 11,
-    backgroundColor: '#2F55D4',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scopeRow: { flexDirection: 'row', gap: 7, flexWrap: 'wrap' },
-  scopeChip: {
+  upcomingTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  upcomingMeta: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.13)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 9,
   },
-  scopeText: { color: '#EAF0FF' },
-  verifyCard: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  verifyIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  flex: { flex: 1 },
-  roleHead: { gap: 1 },
-  driverLine: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  center: { paddingVertical: 24, alignItems: 'center' },
-  list: { gap: 10 },
-  upcomingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  upcomingFoot: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  trust: { gap: 9 },
-  trustHead: { flexDirection: 'row', alignItems: 'center', gap: 7, flexWrap: 'wrap' },
-  scopeFootnote: { opacity: 0.85 },
+  center: { paddingVertical: 22, alignItems: 'center' },
+  list: { gap: 8 },
+  footnote: { opacity: 0.85, marginTop: 2 },
 });

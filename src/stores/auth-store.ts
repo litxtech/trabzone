@@ -3,6 +3,7 @@ import { create } from 'zustand';
 
 import { rememberAccountFromSession } from '@/features/auth/saved-accounts';
 import { clearAllChatDrafts } from '@/features/messaging/drafts/draft-store';
+import { unregisterPush } from '@/features/notifications/push/push-registration';
 import { getCurrentSession, signOut as signOutRequest } from '@/services/supabase/auth';
 import { supabase } from '@/services/supabase/client';
 
@@ -49,6 +50,9 @@ export const useAuthStore = create<AuthState>()((set) => ({
   },
 
   signOut: async () => {
+    // Cihaz token'ı çıkıştan önce sunucudan silinir; aksi halde kapalı
+    // hesaba ait push'lar bu cihaza gelmeye devam eder.
+    await unregisterPush();
     try {
       await signOutRequest();
     } finally {

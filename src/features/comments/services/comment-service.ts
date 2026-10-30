@@ -1,21 +1,12 @@
-import { appError } from '@/services/errors';
+import { appError, type AppError } from '@/services/errors';
 import { rpcError } from '@/services/rpc';
 import { supabase } from '@/services/supabase/client';
 import { fail, ok, type Result } from '@/utils/result';
 
-import {
-  uploadMedia,
-  uploadVideoWithPoster,
-  removeMedia,
-} from '@/features/media/media-service';
+import { uploadMedia, uploadVideoWithPoster, removeMedia } from '@/features/media/media-service';
 import type { PickedAsset } from '@/features/media/media-picker';
 
-import type {
-  CommentContentType,
-  CommentMediaInput,
-  CommentNode,
-  CommentPage,
-} from '../types';
+import type { CommentContentType, CommentMediaInput, CommentNode, CommentPage } from '../types';
 
 const COMMENT_MEDIA_BUCKET = 'posts' as const;
 
@@ -159,65 +150,29 @@ export async function toggleCommentLike(input: {
 }
 
 /**
- * Yorum eklentilerini gerçek depoya yükler. Fotoğraf 1600px'e, video paylaşım
- * öncesi hızlı yükleme için yeniden kodlanır. İlerleme 0..1 aralığında bildirilir.
+ * Aynı anda yürütülen yükleme sayısı.
+ *
+ * Eklentiler sırayla yüklenirken dört fotoğraflı bir yorum, ilk dosyanın
+ * bitmesini beklemeden diğerlerine hiç başlamıyordu; toplam süre dosya
+ * sürelerinin toplamına eşitti. Üç paralel istek mobil bağlantıda da
+ * tıkanmadan çalışır ve algılanan süreyi belirgin biçimde kısaltır.
  */
-export async function uploadCommentAttachments(input: {
-  uploaderId: string;
-  assets: PickedAsset[];
-  onProgress?: (ratio: number) => void;
-}): Promise<Result<CommentMediaInput[]>> {
-  if (!input.uploaderId) {
-    return fail(appError('session_missing'));
-  }
+const UPLOAD_CONCURRENCY = 3;
 
-  const media: CommentMediaInput[] = [];
-  const total = Math.max(input.assets.length, 1);
-
-  for (let index = 0; index < input.assets.length; index += 1) {
-    const asset = input.assets[index];
-    if (!asset) {
-      continue;
-    }
-    const report = (stageRatio: number) =>
-      input.onProgress?.(Math.min(1, (index + stageRatio) / total));
-
-    if (asset.mediaType === 'video') {
-      const uploaded = await uploadVideoWithPoster({
-        bucket: COMMENT_MEDIA_BUCKET,
-        folder: input.uploaderId,
-        uri: asset.uri,
-        mime: asset.mimeType ?? 'video/mp4',
-        fileName: asset.fileName,
-        durationMs: asset.durationMs,
-        width: asset.width,
-        height: asset.height,
-        fileSize: asset.fileSize,
-        onProgress: (_stage, ratio) => report(ratio),
-      });
-
-      if (!uploaded.ok) {
-        return fail(uploaded.error);
-      }
-
-      media.push({
-        media_type: 'video',
-        storage_path: uploaded.data.video.path,
-        thumbnail_path: uploaded.data.video.thumbnailPath ?? null,
-        width: uploaded.data.video.width ?? asset.width,
-        height: uploaded.data.video.height ?? asset.height,
-        duration_ms: uploaded.data.video.durationMs ?? asset.durationMs,
-      });
-      report(1);
-      continue;
-    }
-
-    const uploaded = await uploadMedia({
+/** Tek bir eklentiyi yükler; ilerleme 0..1 aralığında bildirilir. */
+async function uploadCommentAsset(
+  uploaderId: string,
+  asset: PickedAsset,
+  report: (ratio: number) => void,
+): Promise<Result<CommentMediaInput>> {
+  if (asset.mediaType === 'video') {
+    const uploaded = await uploadVideoWithPoster({
       bucket: COMMENT_MEDIA_BUCKET,
-      folder: input.uploaderId,
+      folder: uploaderId,
       uri: asset.uri,
-      mime: asset.mimeType,
+      mime: asset.mimeType ?? 'video/mp4',
       fileName: asset.fileName,
+      durationMs: asset.durationMs,
       width: asset.width,
       height: asset.height,
       fileSize: asset.fileSize,
@@ -228,16 +183,124 @@ export async function uploadCommentAttachments(input: {
       return fail(uploaded.error);
     }
 
-    media.push({
-      media_type: 'image',
-      storage_path: uploaded.data.path,
-      thumbnail_path: null,
-      width: uploaded.data.width ?? asset.width,
-      height: uploaded.data.height ?? asset.height,
-      duration_ms: null,
-    });
     report(1);
+    return ok({
+      media_type: 'video',
+      storage_path: uploaded.data.video.path,
+      thumbnail_path: uploaded.data.video.thumbnailPath ?? null,
+      width: uploaded.data.video.width ?? asset.width,
+      height: uploaded.data.video.height ?? asset.height,
+      duration_ms: uploaded.data.video.durationMs ?? asset.durationMs,
+    });
   }
 
-  return ok(media);
+  const uploaded = await uploadMedia({
+    bucket: COMMENT_MEDIA_BUCKET,
+    folder: uploaderId,
+    uri: asset.uri,
+    mime: asset.mimeType,
+    fileName: asset.fileName,
+    width: asset.width,
+    height: asset.height,
+    fileSize: asset.fileSize,
+    onProgress: (_stage, ratio) => report(ratio),
+  });
+
+  if (!uploaded.ok) {
+    return fail(uploaded.error);
+  }
+
+  report(1);
+  return ok({
+    media_type: 'image',
+    storage_path: uploaded.data.path,
+    thumbnail_path: null,
+    width: uploaded.data.width ?? asset.width,
+    height: uploaded.data.height ?? asset.height,
+    duration_ms: null,
+  });
+}
+
+/**
+ * Yorum eklentilerini gerçek depoya yükler. Fotoğraf 1600px'e, video paylaşım
+ * öncesi hızlı yükleme için yeniden kodlanır. İlerleme 0..1 aralığında bildirilir.
+ *
+ * Eklentiler paralel yüklenir; sonuç dizisi her zaman seçim sırasını korur.
+ * Video kodlaması native tarafta kendi sırasında çalışmaya devam eder, yalnızca
+ * ağ aktarımı örtüşür.
+ */
+export async function uploadCommentAttachments(input: {
+  uploaderId: string;
+  assets: PickedAsset[];
+  onProgress?: (ratio: number) => void;
+}): Promise<Result<CommentMediaInput[]>> {
+  if (!input.uploaderId) {
+    return fail(appError('session_missing'));
+  }
+
+  const assets = input.assets.filter(Boolean);
+  if (assets.length === 0) {
+    return ok([]);
+  }
+
+  const total = assets.length;
+  const results: (CommentMediaInput | null)[] = new Array(total).fill(null);
+  const ratios: number[] = new Array(total).fill(0);
+  let cursor = 0;
+  let failure: AppError | null = null;
+
+  const reportAll = () => {
+    const sum = ratios.reduce((acc, value) => acc + value, 0);
+    input.onProgress?.(Math.min(1, sum / total));
+  };
+
+  const worker = async (): Promise<void> => {
+    while (!failure) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= total) {
+        return;
+      }
+      const asset = assets[index];
+      if (!asset) {
+        continue;
+      }
+
+      const result = await uploadCommentAsset(input.uploaderId, asset, (ratio) => {
+        const next = Math.min(1, Math.max(ratios[index] ?? 0, ratio));
+        if (next === ratios[index]) {
+          return;
+        }
+        ratios[index] = next;
+        reportAll();
+      });
+
+      if (!result.ok) {
+        failure = failure ?? result.error;
+        return;
+      }
+
+      results[index] = result.data;
+      ratios[index] = 1;
+      reportAll();
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, total) }, () => worker()));
+
+  if (failure) {
+    // Yarıda kalan gönderimde başarıyla yüklenmiş dosyalar depoda kalmasın.
+    const uploadedPaths = results.flatMap((item) => {
+      if (!item) {
+        return [];
+      }
+      return item.thumbnail_path ? [item.storage_path, item.thumbnail_path] : [item.storage_path];
+    });
+    if (uploadedPaths.length > 0) {
+      void removeMedia(COMMENT_MEDIA_BUCKET, uploadedPaths);
+    }
+    return fail(failure);
+  }
+
+  return ok(results.filter((item): item is CommentMediaInput => item !== null));
 }

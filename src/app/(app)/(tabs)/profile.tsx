@@ -8,6 +8,10 @@ import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 
 import { AppText, Avatar, Card, IconButton, Screen, Skeleton } from '@/components/ui';
 import { fetchAccountOverview, providerLabel } from '@/features/account/services/account-service';
+import {
+  MarketMediaViewer,
+  type MarketMediaViewerItem,
+} from '@/features/marketplace/components/MarketMediaViewer';
 import { useDrawer } from '@/features/navigation/drawer-context';
 import { ConnectionsSheet } from '@/features/profile/components/ConnectionsSheet';
 import { ProfileContentTabs } from '@/features/profile/components/ProfileContentTabs';
@@ -18,6 +22,7 @@ import { profileShareLink } from '@/features/share/links';
 import { shareContent } from '@/features/share/share-action';
 import type { ConnectionKind } from '@/features/profile/services/social-service';
 import { useTheme } from '@/theme/ThemeProvider';
+import { haptics } from '@/utils/haptics';
 
 const STAFF_ROLES = ['admin', 'super_admin', 'moderator', 'support_agent'];
 
@@ -30,6 +35,10 @@ export default function ProfileScreen() {
   const { data: roles } = useMyRoles();
   const pendingRequests = useIncomingFriendRequestCount();
   const [connections, setConnections] = useState<ConnectionKind | null>(null);
+  // Kapak ve profil fotoğrafı dokununca tam ekran görüntüleyicide açılır.
+  const [viewer, setViewer] = useState<{ items: MarketMediaViewerItem[]; index: number } | null>(
+    null,
+  );
   const account = useQuery({
     queryKey: ['account-overview'],
     queryFn: async () => {
@@ -46,6 +55,12 @@ export default function ProfileScreen() {
   const fullName = profile ? `${profile.first_name} ${profile.last_name}`.trim() : '';
   const avatarUrl = mediaPublicUrl('avatar', profile?.avatar_path);
   const coverUrl = mediaPublicUrl('cover', profile?.cover_path);
+
+  const openMedia = useCallback((id: string, uri: string) => {
+    haptics.selection();
+    setViewer({ items: [{ id, kind: 'image', uri }], index: 0 });
+  }, []);
+  const closeViewer = useCallback(() => setViewer(null), []);
 
   const shareProfile = useCallback(async () => {
     if (!profile) {
@@ -76,8 +91,7 @@ export default function ProfileScreen() {
         <IconButton
           name="menu"
           accessibilityLabel="Profil menüsünü aç"
-          variant="surface"
-          size={20}
+          size={22}
           onPress={() => openDrawer('profile')}
         />
         <AppText variant="h3">Profilim</AppText>
@@ -85,15 +99,13 @@ export default function ProfileScreen() {
           <IconButton
             name="map-outline"
             accessibilityLabel="Etkileşim haritası"
-            variant="surface"
-            size={19}
+            size={21}
             onPress={() => router.push('/map' as never)}
           />
           <IconButton
             name="settings-outline"
             accessibilityLabel="Ayarlar"
-            variant="surface"
-            size={19}
+            size={21}
             onPress={() => router.push('/settings')}
           />
         </View>
@@ -128,13 +140,20 @@ export default function ProfileScreen() {
         <>
           <View style={styles.cover}>
             {coverUrl ? (
-              <Image
-                source={{ uri: coverUrl }}
+              <Pressable
+                accessibilityRole="imagebutton"
+                accessibilityLabel="Kapak fotoğrafını büyüt"
+                onPress={() => openMedia('cover', coverUrl)}
                 style={StyleSheet.absoluteFill}
-                contentFit="cover"
-                transition={200}
-                cachePolicy="memory-disk"
-              />
+              >
+                <Image
+                  source={{ uri: coverUrl }}
+                  style={StyleSheet.absoluteFill}
+                  contentFit="cover"
+                  transition={200}
+                  cachePolicy="memory-disk"
+                />
+              </Pressable>
             ) : (
               <LinearGradient
                 colors={theme.gradients.aurora}
@@ -143,7 +162,9 @@ export default function ProfileScreen() {
                 style={StyleSheet.absoluteFill}
               />
             )}
-            <View style={styles.coverOverlay} />
+            {/* Karartma yalnızca görsel katmanıdır; dokunuşu yutup kapak
+                fotoğrafının büyütülmesini engellememeli. */}
+            <View style={styles.coverOverlay} pointerEvents="none" />
 
             {/* Paylas butonu kapagin uzerinde, kullanici adinin hemen ustunde. */}
             <View style={styles.coverActions}>
@@ -162,13 +183,26 @@ export default function ProfileScreen() {
           </View>
 
           <View style={styles.avatarRow}>
-            <Avatar uri={avatarUrl} name={fullName} size={92} ring />
+            {avatarUrl ? (
+              <Pressable
+                accessibilityRole="imagebutton"
+                accessibilityLabel="Profil fotoğrafını büyüt"
+                onPress={() => openMedia('avatar', avatarUrl)}
+              >
+                <Avatar uri={avatarUrl} name={fullName} size={92} ring />
+              </Pressable>
+            ) : (
+              <Avatar name={fullName} size={92} ring />
+            )}
             <View style={styles.avatarActions}>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Profili düzenle"
                 onPress={() => router.push('/settings/edit-profile')}
-                style={({ pressed }) => [styles.editAction, { opacity: pressed ? 0.85 : 1 }]}
+                style={({ pressed }) => [
+                  styles.editAction,
+                  { backgroundColor: theme.gradients.primary[0], opacity: pressed ? 0.85 : 1 },
+                ]}
               >
                 <LinearGradient
                   colors={theme.gradients.primary}
@@ -297,6 +331,17 @@ export default function ProfileScreen() {
         kind={connections ?? 'followers'}
         onClose={() => setConnections(null)}
       />
+
+      {viewer ? (
+        <MarketMediaViewer
+          visible
+          items={viewer.items}
+          initialIndex={viewer.index}
+          onClose={closeViewer}
+          // Görselin dışındaki boş alana dokunmak görüntüleyiciyi kapatır.
+          closeOnBackdropPress
+        />
+      ) : null}
     </Screen>
   );
 }

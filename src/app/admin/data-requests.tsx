@@ -90,7 +90,7 @@ export default function AdminDataRequestsScreen() {
   const query = useAdminPrivacyRequests(filter === 'all' ? null : filter);
   const update = useAdminUpdatePrivacyRequest();
 
-  const items = query.data?.items ?? [];
+  const items = useMemo(() => query.data?.items ?? [], [query.data]);
   const counts = useMemo(() => {
     const map = new Map<string, number>();
     for (const item of items) {

@@ -10,11 +10,13 @@ export const newsReaderKeys = {
   notifications: ['news', 'notifications'] as const,
 };
 
-export function useNewsDetail(postId: string) {
+export function useNewsDetail(postId: string, enabled = true) {
   return useQuery({
     queryKey: newsReaderKeys.detail(postId),
     queryFn: () => unwrap(fetchNewsDetail(postId)),
-    enabled: postId.length > 0,
+    // Normal gönderilerde `news_post_detail` ağır bir RPC'dir; detay ekranı
+    // haber olmadığı bilindiğinde bu çağrıyı hiç yapmaz.
+    enabled: enabled && postId.length > 0,
     staleTime: 60_000,
   });
 }

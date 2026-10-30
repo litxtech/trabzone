@@ -51,6 +51,7 @@ import { CommentActionMenu, type CommentMenuAction } from './CommentActionMenu';
 import { CommentComposer, type ReplyTarget } from './CommentComposer';
 import { CommentRow } from './CommentRow';
 import { CommentSkeleton } from './CommentSkeleton';
+import { ThreadShareStudio } from './ThreadShareStudio';
 
 type Row =
   | { kind: 'comment'; key: string; comment: CommentNode; depth: 0 | 1 }
@@ -64,6 +65,8 @@ export type CommentsSheetProps = {
   commentCount: number;
   onClose: () => void;
   title?: string;
+  /** Paylaşım bağlantısındaki anahtar; maçlarda fixture kimliği (contentId ise uid). */
+  deepLinkKey?: string;
 };
 
 /**
@@ -77,7 +80,10 @@ export function CommentsSheet({
   commentCount,
   onClose,
   title = 'Yorumlar',
+  deepLinkKey,
 }: CommentsSheetProps) {
+  const linkKey = deepLinkKey ?? contentId;
+  const [threadShareId, setThreadShareId] = useState<string | null>(null);
   const { theme } = useTheme();
   const router = useRouter();
   const session = useSession();
@@ -403,22 +409,27 @@ export function CommentsSheet({
         case 'copy':
           setMenuComment(null);
           void Clipboard.setStringAsync(
-            commentDeepLink(contentType, contentId, comment.id),
+            commentDeepLink(contentType, linkKey, comment.id),
           ).then(() => showNotice('Bağlantı kopyalandı'));
           return;
         case 'share': {
           setMenuComment(null);
-          const link = commentDeepLink(contentType, contentId, comment.id);
+          const link = commentDeepLink(contentType, linkKey, comment.id);
           void shareContent({
             message: `Trabzone'da bir yorum: "${comment.body.slice(0, 120)}"\n${link}`,
           });
           return;
         }
+        case 'share_thread':
+          setMenuComment(null);
+          Keyboard.dismiss();
+          setThreadShareId(comment.id);
+          return;
         default:
           return;
       }
     },
-    [blockUser, confirmDelete, contentType, contentId, openReport, queryClient, showNotice, startEdit],
+    [blockUser, confirmDelete, contentType, contentId, linkKey, openReport, queryClient, showNotice, startEdit],
   );
 
   const resetOverlays = useCallback(() => {
@@ -715,6 +726,13 @@ export function CommentsSheet({
             />
           </View>
         ) : null}
+
+        <ThreadShareStudio
+          visible={Boolean(threadShareId)}
+          contentType={contentType}
+          commentId={threadShareId}
+          onClose={() => setThreadShareId(null)}
+        />
 
         {viewer ? (
           <View style={styles.viewerLayer}>

@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { AppText, Badge, Button, TextField } from '@/components/ui';
@@ -115,17 +115,18 @@ export default function AdminViewAnalyticsScreen() {
 
   const [rank, setRank] = useState<RankKey>('posts');
   const [range, setRange] = useState<RangeKey>('all');
-  const [draft, setDraft] = useState<ViewSettings | null>(null);
+  const [overrides, setOverrides] = useState<Partial<ViewSettings>>({});
 
   const data = analytics.data;
   const permissions = me.data?.permissions ?? [];
   const canManage = permissions.includes('settings.manage');
 
-  useEffect(() => {
-    if (data?.settings) {
-      setDraft({ ...data.settings });
-    }
-  }, [data?.settings]);
+  // Sunucudan gelen ayarların üzerine yalnızca kullanıcının yerel düzenlemeleri
+  // bindirilir; efekt içinde setState çağrısı yapılmaz.
+  const draft = useMemo<ViewSettings | null>(
+    () => (data?.settings ? { ...data.settings, ...overrides } : null),
+    [data, overrides],
+  );
 
   const series = useMemo(() => {
     const list = data?.daily_series ?? [];
@@ -159,11 +160,11 @@ export default function AdminViewAnalyticsScreen() {
   );
 
   const setField = (key: keyof ViewSettings, value: string) => {
-    setDraft((current) => {
-      if (!current) return current;
-      const numeric = Number(value.replace(',', '.'));
-      return { ...current, [key]: Number.isFinite(numeric) ? numeric : current[key] };
-    });
+    const numeric = Number(value.replace(',', '.'));
+    setOverrides((current) => ({
+      ...current,
+      [key]: Number.isFinite(numeric) ? numeric : current[key],
+    }));
   };
 
   const save = async () => {
@@ -179,6 +180,7 @@ export default function AdminViewAnalyticsScreen() {
         enabled: draft.enabled,
       });
       toast.success('Görüntüleme eşikleri güncellendi.');
+      setOverrides({});
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Eşikler kaydedilemedi.');
     }
@@ -329,8 +331,8 @@ export default function AdminViewAnalyticsScreen() {
               <View style={styles.flex}>
                 <AppText variant="bodyStrong">Platforma erişen benzersiz hesap sayısı</AppText>
                 <AppText variant="caption" color="textSecondary">
-                  Aynı hesap kaç içerik açarsa açsın yalnızca bir kez sayılır. Günlük "benzersiz
-                  hesap" değeri o gün en az bir tekil görüntüleme oluşturan hesapların sayısıdır.
+                  Aynı hesap kaç içerik açarsa açsın yalnızca bir kez sayılır. Günlük (benzersiz
+                  hesap) değeri o gün en az bir tekil görüntüleme oluşturan hesapların sayısıdır.
                 </AppText>
               </View>
             </View>
@@ -452,11 +454,7 @@ export default function AdminViewAnalyticsScreen() {
                     size="sm"
                     variant={draft.enabled ? 'outline' : 'secondary'}
                     fullWidth={false}
-                    onPress={() =>
-                      setDraft((current) =>
-                        current ? { ...current, enabled: !current.enabled } : current,
-                      )
-                    }
+                    onPress={() => setOverrides((current) => ({ ...current, enabled: !draft.enabled }))}
                   />
                   <Button
                     label="Eşikleri kaydet"

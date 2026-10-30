@@ -137,6 +137,44 @@ export const fetchAdminBlogAiRuns = (limit = 20) =>
  * DeepSeek çağrısı edge function üzerinden yapılır; API anahtarı istemciye
  * inmez. Function, çağıranın yönetici olduğunu RPC ile doğrular.
  */
+/** Edge function hata kodlarını kullanıcıya gösterilebilir Türkçe mesaja çevirir. */
+function aiErrorMessage(detail: string): string {
+  if (/deepseek_key_missing/i.test(detail)) {
+    return 'DeepSeek API anahtarı sunucuda tanımlı değil. Yöneticiye bildir.';
+  }
+  if (/deepseek_(401|403)/i.test(detail)) {
+    return 'DeepSeek API anahtarı geçersiz veya yetkisiz. Anahtarı kontrol et.';
+  }
+  if (/deepseek_402/i.test(detail)) {
+    return 'DeepSeek bakiyesi yetersiz. Hesaba kredi yükleyip tekrar dene.';
+  }
+  if (/deepseek_429/i.test(detail)) {
+    return 'DeepSeek istek sınırı aşıldı. Birkaç saniye bekleyip tekrar dene.';
+  }
+  if (/deepseek_timeout/i.test(detail)) {
+    return 'DeepSeek zaman aşımına uğradı. Daha kısa bir hedef kelimeyle tekrar dene.';
+  }
+  if (/deepseek_truncated/i.test(detail)) {
+    return 'Model çıktı sınırına takıldı. Hedef kelimeyi düşürüp veya metni kısaltıp tekrar dene.';
+  }
+  if (/model_json_invalid/i.test(detail)) {
+    return 'Model SEO verisini geçerli biçimde döndüremedi. Tekrar dene.';
+  }
+  if (/article_too_short/i.test(detail)) {
+    return 'Üretilen yazı çok kısa kaldı. Tekrar dene veya hedef kelimeyi artır.';
+  }
+  if (/topic_required|body_required/i.test(detail)) {
+    return 'Önce bir konu veya gövde metni gir.';
+  }
+  if (/ai_disabled/i.test(detail)) {
+    return 'AI yazma özelliği kapalı. AI ayarlarından açabilirsin.';
+  }
+  if (/forbidden|not_authenticated/i.test(detail)) {
+    return 'Bu işlem için yönetici yetkisi gerekiyor.';
+  }
+  return detail.slice(0, 240);
+}
+
 export async function invokeBlogAi(request: AiRequest): Promise<Result<Record<string, unknown>>> {
   const { data, error } = await supabase.functions.invoke('deepseek-blog', { body: request });
   if (error) {
@@ -150,13 +188,10 @@ export async function invokeBlogAi(request: AiRequest): Promise<Result<Record<st
         // Yanıt gövdesi okunamadıysa genel mesaj kullanılır.
       }
     }
-    if (/deepseek_key_missing/i.test(detail)) {
-      return fail(appError('unknown', 'DeepSeek API anahtarı sunucuda tanımlı değil.'));
-    }
     if (/forbidden|not_authenticated/i.test(detail)) {
-      return fail(appError('forbidden', 'Bu işlem için yönetici yetkisi gerekiyor.'));
+      return fail(appError('forbidden', aiErrorMessage(detail)));
     }
-    return fail(appError('unknown', detail.slice(0, 240)));
+    return fail(appError('unknown', aiErrorMessage(detail)));
   }
   if (!data || typeof data !== 'object' || (data as { ok?: boolean }).ok !== true) {
     return fail(appError('unknown', 'AI yanıtı işlenemedi.'));

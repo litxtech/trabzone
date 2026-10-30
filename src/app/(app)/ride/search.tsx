@@ -3,9 +3,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Switch, TextInput, View } from 'react-native';
 
-import { AppText, Badge, Button, Card } from '@/components/ui';
+import { AppText, Badge, Button } from '@/components/ui';
 import { Screen } from '@/components/ui/Screen';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { AdPlacementSlot, interleaveRows, useAdPlacement } from '@/features/ads';
 import { useTheme } from '@/theme/ThemeProvider';
 
 import { RideEmptyState } from '@/features/ride/components/RideBits';
@@ -27,13 +28,28 @@ const WHEN_LABEL: Record<When, string> = {
 export default function RideSearchScreen() {
   const { theme } = useTheme();
   const router = useRouter();
-  const params = useLocalSearchParams<{ scope?: string; origin?: string; dest?: string }>();
+  const params = useLocalSearchParams<{
+    scope?: string;
+    origin?: string;
+    dest?: string;
+    when?: string;
+  }>();
 
   const [scope, setScope] = useState<RideScope>(params.scope === 'intercity' ? 'intercity' : 'intracity');
   const [mode, setMode] = useState<RideMode | 'all'>('all');
   const [origin, setOrigin] = useState(params.origin ?? '');
   const [dest, setDest] = useState(params.dest ?? '');
-  const [when, setWhen] = useState<When>(params.origin || params.dest ? 'week' : 'any');
+  const [when, setWhen] = useState<When>(() => {
+    if (
+      params.when === 'any' ||
+      params.when === 'today' ||
+      params.when === 'tomorrow' ||
+      params.when === 'week'
+    ) {
+      return params.when;
+    }
+    return params.origin || params.dest ? 'week' : 'any';
+  });
   const [seats, setSeats] = useState(1);
   const [showFilters, setShowFilters] = useState(false);
   const [mapMode, setMapMode] = useState(false);
@@ -82,16 +98,32 @@ export default function RideSearchScreen() {
   };
 
   const search = useRideSearch(filters);
+  const offers = useMemo(() => search.data?.items ?? [], [search.data?.items]);
+  const ads = useAdPlacement('ride_list', offers.length, { enabled: !mapMode });
+  const rows = useMemo(() => interleaveRows(offers, ads.positions, (offer) => offer.id), [ads.positions, offers]);
   const first = search.data?.items[0] ?? null;
   const topOffer = useRideOffer(mapMode && first ? first.id : null);
 
-  const activeFilterCount = [onlyAc, noSmoking, womenOnly, accessible, minRating != null].filter(Boolean).length;
+  const activeFilterCount = [
+    onlyAc,
+    noSmoking,
+    womenOnly,
+    accessible,
+    minRating != null,
+    mode !== 'all',
+    seats !== 1,
+  ].filter(Boolean).length;
 
   return (
-    <Screen edges={['top', 'left', 'right', 'bottom']} scroll padded>
+    <Screen
+      edges={['top', 'left', 'right', 'bottom']}
+      scroll
+      padded
+      contentContainerStyle={styles.page}
+    >
       <RideHeader
         title="Yolculuk ara"
-        subtitle={`${search.data?.total ?? 0} sonuç · gerçek mesafe ve uygunluk`}
+        subtitle={`${search.data?.total ?? 0} sonuç · mesafe ve uygunluğa göre`}
         right={
           <Pressable
             accessibilityRole="button"
@@ -134,31 +166,39 @@ export default function RideSearchScreen() {
         })}
       </View>
 
-      <Card padding={14} style={styles.form}>
+      <View
+        style={[
+          styles.formCard,
+          { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+        ]}
+      >
         <View style={styles.inputRow}>
           <View style={[styles.inputDot, { backgroundColor: theme.colors.success }]} />
           <TextInput
             value={origin}
             onChangeText={setOrigin}
-            placeholder="Kalkış şehri / ilçe"
+            placeholder="Nereden?"
             placeholderTextColor={theme.colors.textTertiary}
             style={[styles.input, theme.typography.body, { color: theme.colors.text }]}
             returnKeyType="next"
+            accessibilityLabel="Kalkış şehri veya ilçe"
           />
         </View>
-        <View style={[styles.inputDivider, { backgroundColor: theme.colors.divider }]} />
+        <View style={[styles.inputConnector, { backgroundColor: theme.colors.borderStrong }]} />
         <View style={styles.inputRow}>
           <View style={[styles.inputDot, { backgroundColor: theme.colors.primary }]} />
           <TextInput
             value={dest}
             onChangeText={setDest}
-            placeholder="Varış şehri / ilçe"
+            placeholder="Nereye?"
             placeholderTextColor={theme.colors.textTertiary}
             style={[styles.input, theme.typography.body, { color: theme.colors.text }]}
             returnKeyType="search"
+            accessibilityLabel="Varış şehri veya ilçe"
           />
         </View>
-        <View style={styles.quickRow}>
+
+        <View style={styles.formFoot}>
           <View style={styles.chips}>
             {(['any', 'today', 'tomorrow', 'week'] as When[]).map((item) => {
               const active = when === item;
@@ -171,7 +211,7 @@ export default function RideSearchScreen() {
                   style={[
                     styles.chip,
                     {
-                      backgroundColor: active ? theme.colors.primarySoft : theme.colors.surfaceMuted,
+                      backgroundColor: active ? theme.colors.primarySoft : 'transparent',
                       borderColor: active ? theme.colors.primary : theme.colors.border,
                     },
                   ]}
@@ -183,72 +223,80 @@ export default function RideSearchScreen() {
               );
             })}
           </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showFilters }}
+            onPress={() => setShowFilters((value) => !value)}
+            style={styles.filterButton}
+          >
+            <Ionicons name="options-outline" size={15} color={theme.colors.primaryDeep} />
+            <AppText variant="label" color="primaryDeep">
+              Filtreler
+            </AppText>
+            {activeFilterCount ? <Badge label={String(activeFilterCount)} tone="primary" /> : null}
+            <Ionicons
+              name={showFilters ? 'chevron-up' : 'chevron-down'}
+              size={15}
+              color={theme.colors.textTertiary}
+            />
+          </Pressable>
         </View>
-        <View style={styles.modeRow}>
-          {(['all', 'instant', 'scheduled'] as const).map((item) => {
-            const active = mode === item;
-            return (
-              <Pressable
-                key={item}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                onPress={() => setMode(item)}
-                style={[
-                  styles.chip,
-                  {
-                    backgroundColor: active ? theme.colors.accentSoft : theme.colors.surfaceMuted,
-                    borderColor: active ? theme.colors.accent : theme.colors.border,
-                  },
-                ]}
-              >
-                <AppText variant="caption" color={active ? 'accent' : 'textSecondary'}>
-                  {item === 'all' ? 'Tümü' : item === 'instant' ? 'Anlık' : 'Planlı'}
-                </AppText>
-              </Pressable>
-            );
-          })}
-          <View style={styles.seatStepper}>
-            <AppText variant="caption" color="textSecondary">Koltuk</AppText>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Koltuk azalt"
-              onPress={() => setSeats((value) => Math.max(1, value - 1))}
-              style={[styles.stepBtn, { borderColor: theme.colors.border }]}
-            >
-              <Ionicons name="remove" size={14} color={theme.colors.text} />
-            </Pressable>
-            <AppText variant="label">{seats}</AppText>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Koltuk artır"
-              onPress={() => setSeats((value) => Math.min(8, value + 1))}
-              style={[styles.stepBtn, { borderColor: theme.colors.border }]}
-            >
-              <Ionicons name="add" size={14} color={theme.colors.text} />
-            </Pressable>
-          </View>
-        </View>
-
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setShowFilters((value) => !value)}
-          style={styles.filterToggle}
-        >
-          <Ionicons name="options-outline" size={15} color={theme.colors.primaryDeep} />
-          <AppText variant="label" color="primaryDeep">
-            Filtreler
-          </AppText>
-          {activeFilterCount ? <Badge label={String(activeFilterCount)} tone="primary" /> : null}
-          <View style={styles.flex} />
-          <Ionicons
-            name={showFilters ? 'chevron-up' : 'chevron-down'}
-            size={16}
-            color={theme.colors.textTertiary}
-          />
-        </Pressable>
 
         {showFilters ? (
-          <View style={styles.filters}>
+          <View style={[styles.filters, { borderTopColor: theme.colors.divider }]}>
+            <AppText variant="caption" color="textTertiary">
+              Yolculuk türü
+            </AppText>
+            <View style={styles.chips}>
+              {(['all', 'instant', 'scheduled'] as const).map((item) => {
+                const active = mode === item;
+                return (
+                  <Pressable
+                    key={item}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    onPress={() => setMode(item)}
+                    style={[
+                      styles.chip,
+                      {
+                        backgroundColor: active ? theme.colors.accentSoft : 'transparent',
+                        borderColor: active ? theme.colors.accent : theme.colors.border,
+                      },
+                    ]}
+                  >
+                    <AppText variant="caption" color={active ? 'accent' : 'textSecondary'}>
+                      {item === 'all' ? 'Tümü' : item === 'instant' ? 'Anlık' : 'Planlı'}
+                    </AppText>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <View style={styles.switchRow}>
+              <AppText variant="body" color="textSecondary" style={styles.flex}>
+                Koltuk sayısı
+              </AppText>
+              <View style={styles.seatStepper}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Koltuk azalt"
+                  onPress={() => setSeats((value) => Math.max(1, value - 1))}
+                  style={[styles.stepBtn, { borderColor: theme.colors.border }]}
+                >
+                  <Ionicons name="remove" size={14} color={theme.colors.text} />
+                </Pressable>
+                <AppText variant="label">{seats}</AppText>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Koltuk artır"
+                  onPress={() => setSeats((value) => Math.min(8, value + 1))}
+                  style={[styles.stepBtn, { borderColor: theme.colors.border }]}
+                >
+                  <Ionicons name="add" size={14} color={theme.colors.text} />
+                </Pressable>
+              </View>
+            </View>
+
             {[
               { label: 'Klima', value: onlyAc, set: setOnlyAc },
               { label: 'Sigarasız', value: noSmoking, set: setNoSmoking },
@@ -256,7 +304,9 @@ export default function RideSearchScreen() {
               { label: 'Erişilebilir araç', value: accessible, set: setAccessible },
             ].map((filter) => (
               <View key={filter.label} style={styles.switchRow}>
-                <AppText variant="body" color="textSecondary">{filter.label}</AppText>
+                <AppText variant="body" color="textSecondary" style={styles.flex}>
+                  {filter.label}
+                </AppText>
                 <Switch
                   value={filter.value}
                   onValueChange={filter.set}
@@ -265,19 +315,24 @@ export default function RideSearchScreen() {
                 />
               </View>
             ))}
+
             <View style={styles.ratingRow}>
-              <AppText variant="body" color="textSecondary">Minimum puan</AppText>
+              <AppText variant="body" color="textSecondary">
+                Minimum puan
+              </AppText>
               <View style={styles.chips}>
                 {[null, 4, 4.5].map((value) => {
                   const active = minRating === value;
                   return (
                     <Pressable
                       key={String(value)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
                       onPress={() => setMinRating(value)}
                       style={[
                         styles.chip,
                         {
-                          backgroundColor: active ? theme.colors.primarySoft : theme.colors.surfaceMuted,
+                          backgroundColor: active ? theme.colors.primarySoft : 'transparent',
                           borderColor: active ? theme.colors.primary : theme.colors.border,
                         },
                       ]}
@@ -292,7 +347,7 @@ export default function RideSearchScreen() {
             </View>
           </View>
         ) : null}
-      </Card>
+      </View>
 
       {search.isLoading ? (
         <View style={styles.center}>
@@ -367,9 +422,19 @@ export default function RideSearchScreen() {
         />
       ) : (
         <View style={styles.results}>
-          {search.data?.items.map((offer) => (
-            <RideOfferCard key={offer.id} offer={offer} />
-          ))}
+          {rows.map((row) =>
+            row.type === 'ad' ? (
+              <AdPlacementSlot
+                key={row.key}
+                slot={ads.slotAt(row.after)}
+                placement="ride_list"
+                onHide={ads.hide}
+                style={styles.adSlot}
+              />
+            ) : (
+              <RideOfferCard key={row.key} offer={row.item} />
+            ),
+          )}
           <AppText variant="caption" color="textTertiary" align="center">
             {search.data?.total ?? 0} sonuçtan {search.data?.items.length ?? 0} tanesi gösteriliyor.
             {search.data?.map_note ? ` ${search.data.map_note}` : ''}
@@ -381,6 +446,8 @@ export default function RideSearchScreen() {
 }
 
 const styles = StyleSheet.create({
+  page: { width: '100%', maxWidth: 880, alignSelf: 'center', gap: 12 },
+  adSlot: { paddingVertical: 0 },
   iconBtn: {
     width: 40,
     height: 40,
@@ -391,49 +458,53 @@ const styles = StyleSheet.create({
   },
   segment: {
     flexDirection: 'row',
-    padding: 4,
-    borderRadius: 15,
+    padding: 3,
+    borderRadius: 12,
     backgroundColor: 'rgba(128,87,244,0.08)',
-    gap: 4,
+    gap: 3,
   },
   segmentItem: {
     flex: 1,
-    minHeight: 40,
-    borderRadius: 12,
+    minHeight: 38,
+    borderRadius: 9,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 6,
   },
-  form: { gap: 10 },
-  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  formCard: {
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 13,
+    gap: 9,
+  },
+  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 2 },
   inputDot: { width: 8, height: 8, borderRadius: 4 },
-  input: { flex: 1, paddingVertical: 5 },
-  inputDivider: { height: StyleSheet.hairlineWidth, marginLeft: 17 },
-  quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  input: { flex: 1, paddingVertical: 4 },
+  inputConnector: { width: 1, height: 9, marginLeft: 3.5, opacity: 0.7 },
+  formFoot: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: {
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 5,
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  modeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' },
-  seatStepper: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 'auto' },
+  filterButton: { flexDirection: 'row', alignItems: 'center', gap: 5, marginLeft: 'auto' },
+  seatStepper: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   stepBtn: {
-    width: 25,
-    height: 25,
+    width: 26,
+    height: 26,
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  filterToggle: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 4 },
   flex: { flex: 1 },
-  filters: { gap: 6, paddingTop: 4 },
+  filters: { gap: 9, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth },
   switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-  ratingRow: { gap: 6, paddingTop: 4 },
+  ratingRow: { gap: 6, paddingTop: 2 },
   center: { paddingVertical: 40, alignItems: 'center', gap: 8 },
   results: { gap: 10 },
   mapWrap: { gap: 10 },

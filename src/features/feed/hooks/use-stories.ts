@@ -7,9 +7,22 @@ import {
   fetchStoryFeed,
   fetchStoryViewers,
   markStoryViewed,
+  type StoryGroup,
 } from '../services/stories-service';
 import { feedQueryKeys } from '../services/feed-service';
 import { unwrap } from '@/utils/result';
+
+/**
+ * Silinen hikâyeyi önbellekten düşürür. Sunucu tarafı silme başarılı olduğunda
+ * yeniden çekme tamamlanana kadar şeritte/izleyicide eski hikâye görünmesin.
+ */
+function pruneStoryFromGroup(group: StoryGroup, storyId: string): StoryGroup | null {
+  if (!group.items.some((item) => item.id === storyId)) {
+    return group;
+  }
+  const items = group.items.filter((item) => item.id !== storyId);
+  return items.length === 0 ? null : { ...group, items };
+}
 
 export function useStoryFeed() {
   return useQuery({
@@ -55,7 +68,20 @@ export function useDeleteStory() {
 
   return useMutation({
     mutationFn: (storyId: string) => unwrap(deleteStory(storyId)),
-    onSuccess: () => {
+    onSuccess: (_data, storyId) => {
+      // Devam eden yeniden çekmeler eski listeyi geri yazmasın.
+      void queryClient.cancelQueries({ queryKey: ['stories'] });
+      // İyimser temizlik: yanıt yeniden çekilmeden önce hikâye şeritten düşsün.
+      queryClient.setQueriesData<StoryGroup[]>({ queryKey: feedQueryKeys.storyFeed }, (groups) => {
+        if (!groups) return groups;
+        return groups
+          .map((group) => pruneStoryFromGroup(group, storyId))
+          .filter((group): group is StoryGroup => group !== null);
+      });
+      queryClient.setQueriesData<StoryGroup | null>({ queryKey: ['stories', 'user'] }, (group) =>
+        group ? pruneStoryFromGroup(group, storyId) : group,
+      );
+      queryClient.removeQueries({ queryKey: feedQueryKeys.storyViewers(storyId) });
       void queryClient.invalidateQueries({ queryKey: ['stories'] });
     },
   });

@@ -4,8 +4,11 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { InAppBrowserHost } from '@/features/in-app-browser';
+import { PushBridge } from '@/features/notifications/push/PushBridge';
 import { AnimatedSplash } from '@/features/splash/components/AnimatedSplash';
 import { useAppBootstrap } from '@/features/splash/hooks/use-app-bootstrap';
+import { dismissBootShell } from '@/features/web/boot-shell';
 import { useWebScrollFix } from '@/features/web/use-web-scroll-fix';
 import { perf } from '@/perf';
 import { useReduceMotion } from '@/perf/use-reduce-motion';
@@ -24,6 +27,7 @@ function RootNavigator() {
   return (
     <>
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+      <PushBridge />
       <Stack
         screenOptions={{
           headerShown: false,
@@ -45,18 +49,22 @@ function RootNavigator() {
         <Stack.Screen name="policy" />
         <Stack.Screen name="admin" />
       </Stack>
+      <InAppBrowserHost />
     </>
   );
 }
 
 function RootLayoutInner() {
   const { ready } = useAppBootstrap();
-  const [introVisible, setIntroVisible] = useState(true);
+  // Web'de açılışı `index.html` içindeki statik kabuk karşılar; marka intro'su
+  // ikinci bir bekleme ekranı olur ve ana sayfanın görünmesini geciktirir.
+  const [introVisible, setIntroVisible] = useState(Platform.OS !== 'web');
   const handleIntroFinish = useCallback(() => setIntroVisible(false), []);
 
   useEffect(() => {
     if (ready) {
       SplashScreen.hideAsync().catch(() => undefined);
+      dismissBootShell();
     }
   }, [ready]);
 
@@ -85,6 +93,10 @@ function BootFallback() {
  * ekran yerine kullanıcıya yeniden deneme seçeneği gösterilir.
  */
 export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  useEffect(() => {
+    dismissBootShell();
+  }, []);
+
   return (
     <View style={styles.boot}>
       <Text style={styles.bootBrand}>TRABZONE</Text>

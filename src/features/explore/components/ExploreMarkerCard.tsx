@@ -6,6 +6,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 
 import type { PlaceMarker, RealEstateMarker } from '../types';
 import { formatDecimal, formatMoney, formatPrice, metersLabel } from '../utils/format';
+import { PlaceCoverImage } from './PlaceCoverImage';
 import { StorageImage } from './StorageImage';
 
 type Props = {
@@ -61,22 +62,37 @@ export function ExploreMarkerCard({
         onPress={onOpen}
         style={styles.body}
       >
-        <View style={[styles.imageWrap, { backgroundColor: theme.colors.surfaceMuted }]}>
-          <StorageImage
-            path={isPlace ? marker.cover_path : marker.cover_path}
-            bucket={isPlace ? 'place-media' : 'real-estate-media'}
-            style={styles.image}
+        {isPlace ? (
+          <PlaceCoverImage
+            coverPath={marker.cover_path}
+            name={marker.name}
+            lat={marker.lat}
+            lng={marker.lng}
+            size="thumb"
             recycleKey={marker.id}
+            style={styles.imageWrap}
+            fallback={
+              <Ionicons name="storefront-outline" size={26} color={theme.colors.textTertiary} />
+            }
           />
-          {!marker.cover_path ? (
-            <Ionicons
-              name={isPlace ? 'storefront-outline' : 'home-outline'}
-              size={26}
-              color={theme.colors.textTertiary}
-              style={styles.imageFallback}
+        ) : (
+          <View style={[styles.imageWrap, { backgroundColor: theme.colors.surfaceMuted }]}>
+            <StorageImage
+              path={marker.cover_path}
+              bucket="real-estate-media"
+              style={styles.image}
+              recycleKey={marker.id}
             />
-          ) : null}
-        </View>
+            {!marker.cover_path ? (
+              <Ionicons
+                name="home-outline"
+                size={26}
+                color={theme.colors.textTertiary}
+                style={styles.imageFallback}
+              />
+            ) : null}
+          </View>
+        )}
 
         <View style={styles.info}>
           <View style={styles.titleRow}>

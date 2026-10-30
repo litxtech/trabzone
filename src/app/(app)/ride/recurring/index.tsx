@@ -1,39 +1,47 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from '@/utils/router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Switch, TextInput, View } from 'react-native';
+import { Alert, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 
-import { AppText, Badge, Button, Card } from '@/components/ui';
+import { AppText, Button, Skeleton } from '@/components/ui';
 import { Screen } from '@/components/ui/Screen';
 import { errorMessage } from '@/services/errors';
 import { useTheme } from '@/theme/ThemeProvider';
 
 import { RideEmptyState } from '@/features/ride/components/RideBits';
 import { RideHeader } from '@/features/ride/components/RideHeader';
+import { RecurringPauseSheet } from '@/features/ride/components/RecurringPauseSheet';
+import { RecurringPlanCard } from '@/features/ride/components/RecurringPlanCard';
+import { RecurringPlanSheet } from '@/features/ride/components/RecurringPlanSheet';
 import {
   usePauseRecurringDay,
   useRecurring,
   useRemoveRecurring,
+  useRideProfile,
   useRideVehicles,
   useSaveRecurring,
 } from '@/features/ride/hooks/use-ride';
 import { geocodePlace } from '@/features/ride/services/map-service';
-import type { RideRecurring, RideScope } from '@/features/ride/types';
+import type { RecurringInput } from '@/features/ride/services/ride-service';
+import type { RideRecurring } from '@/features/ride/types';
+import { isIdentityVerified } from '@/features/ride/utils/identity';
 import {
-  dateInputValue,
-  formatMoney,
-  SCOPE_LABEL,
-  weekdayLabels,
-} from '@/features/ride/utils/format';
+  draftFromPlan,
+  nextAcross,
+  occurrenceLabel,
+  parsePriceCents,
+  totalWeeklyDepartures,
+  upcomingPausedDates,
+  type RecurringDraft,
+} from '@/features/ride/utils/recurring';
 
-const DAYS = [
-  { value: 1, label: 'Pzt' },
-  { value: 2, label: 'Sal' },
-  { value: 3, label: 'Çar' },
-  { value: 4, label: 'Per' },
-  { value: 5, label: 'Cum' },
-  { value: 6, label: 'Cmt' },
-  { value: 7, label: 'Paz' },
+type RoleFilter = 'all' | 'driver' | 'passenger';
+
+const FILTERS: { key: RoleFilter; label: string }[] = [
+  { key: 'all', label: 'Tümü' },
+  { key: 'driver', label: 'Sürücü' },
+  { key: 'passenger', label: 'Yolcu' },
 ];
 
 export default function RideRecurringScreen() {
@@ -41,603 +49,553 @@ export default function RideRecurringScreen() {
   const router = useRouter();
   const recurring = useRecurring();
   const vehicles = useRideVehicles();
+  const profile = useRideProfile();
   const save = useSaveRecurring();
   const remove = useRemoveRecurring();
   const pause = usePauseRecurringDay();
 
-  const [showForm, setShowForm] = useState(false);
-  const [role, setRole] = useState<'driver' | 'passenger'>('passenger');
-  const [scope, setScope] = useState<RideScope>('intracity');
-  const [originLabel, setOriginLabel] = useState('');
-  const [originCity, setOriginCity] = useState('');
-  const [destLabel, setDestLabel] = useState('');
-  const [destCity, setDestCity] = useState('');
-  const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]);
-  const [departTime, setDepartTime] = useState('08:00');
-  const [returnTime, setReturnTime] = useState('');
-  const [seats, setSeats] = useState(1);
-  const [price, setPrice] = useState('');
-  const [vehicleId, setVehicleId] = useState<string | null>(null);
-  const [womenOnly, setWomenOnly] = useState(false);
-  const [noSmoking, setNoSmoking] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [pausedDate, setPausedDate] = useState(dateInputValue(new Date()));
+  const [sheet, setSheet] = useState<{ plan: RideRecurring | null } | null>(null);
+  const [sheetError, setSheetError] = useState<string | null>(null);
+  const [pauseTarget, setPauseTarget] = useState<RideRecurring | null>(null);
+  const [pauseError, setPauseError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<RoleFilter>('all');
+  const [reactivatingId, setReactivatingId] = useState<string | null>(null);
 
-  const toggleDay = (value: number) => {
-    setWeekdays((current) =>
-      current.includes(value) ? current.filter((day) => day !== value) : [...current, value].sort(),
+  const plans = recurring.data ?? [];
+  const activePlans = plans.filter((plan) => plan.is_active);
+  const inactivePlans = plans.filter((plan) => !plan.is_active);
+  const matchesFilter = (plan: RideRecurring) => filter === 'all' || plan.role === filter;
+  const visibleActive = activePlans.filter(matchesFilter);
+  const visibleInactive = inactivePlans.filter(matchesFilter);
+  const counts: Record<RoleFilter, number> = {
+    all: plans.length,
+    driver: plans.filter((plan) => plan.role === 'driver').length,
+    passenger: plans.filter((plan) => plan.role === 'passenger').length,
+  };
+  const weeklyCount = totalWeeklyDepartures(plans);
+  const next = nextAcross(activePlans);
+  const pausedCount = new Set(activePlans.flatMap((plan) => upcomingPausedDates(plan))).size;
+  // Sürücü planı için tek kapı kimlik doğrulaması.
+  const driverReady = isIdentityVerified(profile.data);
+
+  const openCreate = () => {
+    setSheetError(null);
+    setSheet({ plan: null });
+  };
+
+  const openEdit = (plan: RideRecurring) => {
+    setSheetError(null);
+    setSheet({ plan });
+  };
+
+  async function composeInput(
+    draft: RecurringDraft,
+    plan: RideRecurring | null,
+    isActive?: boolean,
+  ): Promise<RecurringInput> {
+    const [originResult, destResult] = await Promise.all([
+      geocodePlace(`${draft.originLabel}, ${draft.originCity}`),
+      geocodePlace(`${draft.destLabel}, ${draft.destCity}`),
+    ]);
+    return {
+      id: plan?.id,
+      role: draft.role,
+      scope: draft.scope,
+      originLabel: draft.originLabel,
+      originCity: draft.originCity,
+      originLat: originResult.ok ? originResult.data.lat : null,
+      originLng: originResult.ok ? originResult.data.lng : null,
+      destLabel: draft.destLabel,
+      destCity: draft.destCity,
+      destLat: destResult.ok ? destResult.data.lat : null,
+      destLng: destResult.ok ? destResult.data.lng : null,
+      weekdays: draft.weekdays,
+      departTime: draft.departTime,
+      returnTime: draft.returnTime || null,
+      seats: draft.seats,
+      pricePerSeatCents: draft.role === 'driver' ? parsePriceCents(draft.price) : null,
+      preferences: { women_only: draft.womenOnly, smoking: !draft.noSmoking },
+      vehicleId: draft.role === 'driver' ? draft.vehicleId : null,
+      luggage: plan?.luggage ?? 'medium',
+      bookingMode: plan?.booking_mode ?? 'manual',
+      visibility: plan?.visibility ?? 'public',
+      isActive: isActive ?? null,
+    };
+  }
+
+  const handleSubmit = async (draft: RecurringDraft) => {
+    setSheetError(null);
+    try {
+      const input = await composeInput(draft, sheet?.plan ?? null);
+      await save.mutateAsync(input);
+      setSheet(null);
+    } catch (cause) {
+      setSheetError(errorMessage(cause, 'Düzenli yolculuk kaydedilemedi.'));
+    }
+  };
+
+  const handlePause = async (date: string) => {
+    if (!pauseTarget) {
+      return;
+    }
+    setPauseError(null);
+    try {
+      await pause.mutateAsync({ id: pauseTarget.id, date });
+      setPauseTarget(null);
+    } catch (cause) {
+      setPauseError(errorMessage(cause, 'Gün duraklatılamadı.'));
+    }
+  };
+
+  const confirmRemove = (plan: RideRecurring) => {
+    Alert.alert(
+      'Plan kaldırılsın mı?',
+      `${plan.origin_label} → ${plan.dest_label} planı pasife alınacak ve bekleyen ilanları iptal edilecek. Geçmiş yolculuk kayıtların korunur.`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Kaldır',
+          style: 'destructive',
+          onPress: () =>
+            remove.mutate(plan.id, {
+              onError: (cause) =>
+                Alert.alert('Plan kaldırılamadı', errorMessage(cause, 'Bilinmeyen hata')),
+            }),
+        },
+      ],
     );
   };
 
-  const handleSave = async () => {
-    setError(null);
-    if (!originLabel.trim() || !destLabel.trim() || !originCity.trim() || !destCity.trim()) {
-      setError('Güzergâh ve şehir alanlarını doldur.');
-      return;
-    }
-    if (weekdays.length === 0) {
-      setError('En az bir gün seç.');
-      return;
-    }
-    if (!/^\d{2}:\d{2}$/.test(departTime)) {
-      setError('Kalkış saatini SS:DD biçiminde gir.');
-      return;
-    }
-    if (role === 'driver' && !vehicleId) {
-      setError('Sürücü düzenli yolculuğu için onaylı bir araç seç.');
-      return;
-    }
+  const reactivate = async (plan: RideRecurring) => {
+    setReactivatingId(plan.id);
     try {
-      const [originResult, destResult] = await Promise.all([
-        geocodePlace(`${originLabel}, ${originCity}`),
-        geocodePlace(`${destLabel}, ${destCity}`),
-      ]);
-      await save.mutateAsync({
-        role,
-        scope,
-        originLabel: originLabel.trim(),
-        originCity: originCity.trim(),
-        originLat: originResult.ok ? originResult.data.lat : null,
-        originLng: originResult.ok ? originResult.data.lng : null,
-        destLabel: destLabel.trim(),
-        destCity: destCity.trim(),
-        destLat: destResult.ok ? destResult.data.lat : null,
-        destLng: destResult.ok ? destResult.data.lng : null,
-        weekdays,
-        departTime,
-        returnTime: returnTime.trim() || null,
-        seats,
-        pricePerSeatCents: price ? Math.round(Number(price.replace(',', '.')) * 100) : null,
-        preferences: { women_only: womenOnly, smoking: !noSmoking },
-        vehicleId: role === 'driver' ? vehicleId : null,
-        luggage: 'medium',
-        bookingMode: 'manual',
-        visibility: 'public',
-      });
-      setShowForm(false);
-      setOriginLabel('');
-      setDestLabel('');
-      setOriginCity('');
-      setDestCity('');
+      const input = await composeInput(draftFromPlan(plan), plan, true);
+      await save.mutateAsync(input);
     } catch (cause) {
-      setError(errorMessage(cause, 'Düzenli yolculuk kaydedilemedi.'));
+      Alert.alert('Plan başlatılamadı', errorMessage(cause, 'Bilinmeyen hata'));
+    } finally {
+      setReactivatingId(null);
     }
   };
 
-  const handlePause = (plan: RideRecurring) => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(pausedDate)) {
-      setError('Duraklatma tarihi YYYY-AA-GG biçiminde olmalı.');
-      return;
-    }
-    pause.mutate(
-      { id: plan.id, date: pausedDate },
-      { onError: (cause) => setError(cause.message) },
+  const confirmReactivate = (plan: RideRecurring) => {
+    Alert.alert(
+      'Plan yeniden başlatılsın mı?',
+      'Plan aktifleşir ve sonraki günler için otomatik ilan üretimi devam eder. Kapasite ve doğrulama koşulları yeniden kontrol edilir.',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        { text: 'Başlat', onPress: () => void reactivate(plan) },
+      ],
     );
   };
 
   return (
-    <Screen edges={['top', 'left', 'right', 'bottom']} scroll padded>
-      <RideHeader
-        title="Düzenli yolculuklar"
-        subtitle="Haftalık gidiş-dönüş planları ve tek gün duraklatma"
-        right={
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={showForm ? 'Formu kapat' : 'Plan ekle'}
-            onPress={() => setShowForm((value) => !value)}
-            style={[
-              styles.iconBtn,
-              { backgroundColor: theme.colors.primarySoft, borderColor: theme.colors.border },
-            ]}
-          >
-            <Ionicons
-              name={showForm ? 'close' : 'add'}
-              size={20}
-              color={theme.colors.primaryDeep}
-            />
-          </Pressable>
-        }
-      />
-
-      {showForm ? (
-        <Card padding={15} style={styles.form}>
-          <AppText variant="title">Yeni düzenli plan</AppText>
-          <View style={styles.optionRow}>
-            {(['passenger', 'driver'] as const).map((item) => {
-              const active = role === item;
-              return (
-                <Pressable
-                  key={item}
-                  onPress={() => setRole(item)}
-                  style={[
-                    styles.chip,
-                    {
-                      borderColor: active ? theme.colors.primary : theme.colors.border,
-                      backgroundColor: active
-                        ? theme.colors.primarySoft
-                        : theme.colors.surfaceMuted,
-                    },
-                  ]}
-                >
-                  <AppText variant="caption" color={active ? 'primaryDeep' : 'textSecondary'}>
-                    {item === 'driver' ? 'Sürücü planı' : 'Yolcu planı'}
-                  </AppText>
-                </Pressable>
-              );
-            })}
-            {(['intracity', 'intercity'] as RideScope[]).map((item) => {
-              const active = scope === item;
-              return (
-                <Pressable
-                  key={item}
-                  onPress={() => setScope(item)}
-                  style={[
-                    styles.chip,
-                    {
-                      borderColor: active ? theme.colors.accent : theme.colors.border,
-                      backgroundColor: active ? theme.colors.accentSoft : theme.colors.surfaceMuted,
-                    },
-                  ]}
-                >
-                  <AppText variant="caption" color={active ? 'accent' : 'textSecondary'}>
-                    {SCOPE_LABEL[item]}
-                  </AppText>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <TextInput
-            value={originLabel}
-            onChangeText={setOriginLabel}
-            placeholder="Kalkış noktası"
-            placeholderTextColor={theme.colors.textTertiary}
-            style={[
-              styles.input,
-              {
-                color: theme.colors.text,
-                borderColor: theme.colors.border,
-                backgroundColor: theme.colors.inputBackground,
-              },
-            ]}
-          />
-          <TextInput
-            value={originCity}
-            onChangeText={setOriginCity}
-            placeholder="Kalkış şehri"
-            placeholderTextColor={theme.colors.textTertiary}
-            style={[
-              styles.input,
-              {
-                color: theme.colors.text,
-                borderColor: theme.colors.border,
-                backgroundColor: theme.colors.inputBackground,
-              },
-            ]}
-          />
-          <TextInput
-            value={destLabel}
-            onChangeText={setDestLabel}
-            placeholder="Varış noktası"
-            placeholderTextColor={theme.colors.textTertiary}
-            style={[
-              styles.input,
-              {
-                color: theme.colors.text,
-                borderColor: theme.colors.border,
-                backgroundColor: theme.colors.inputBackground,
-              },
-            ]}
-          />
-          <TextInput
-            value={destCity}
-            onChangeText={setDestCity}
-            placeholder="Varış şehri"
-            placeholderTextColor={theme.colors.textTertiary}
-            style={[
-              styles.input,
-              {
-                color: theme.colors.text,
-                borderColor: theme.colors.border,
-                backgroundColor: theme.colors.inputBackground,
-              },
-            ]}
-          />
-
-          <AppText variant="caption" color="textSecondary">
-            Günler
-          </AppText>
-          <View style={styles.days}>
-            {DAYS.map((day) => {
-              const active = weekdays.includes(day.value);
-              return (
-                <Pressable
-                  key={day.value}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  onPress={() => toggleDay(day.value)}
-                  style={[
-                    styles.day,
-                    {
-                      borderColor: active ? theme.colors.primary : theme.colors.border,
-                      backgroundColor: active ? theme.colors.primary : theme.colors.surfaceMuted,
-                    },
-                  ]}
-                >
-                  <AppText variant="caption" color={active ? 'onPrimary' : 'textSecondary'}>
-                    {day.label}
-                  </AppText>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <View style={styles.split}>
-            <TextInput
-              value={departTime}
-              onChangeText={setDepartTime}
-              placeholder="08:00"
-              placeholderTextColor={theme.colors.textTertiary}
-              style={[
-                styles.input,
-                styles.flex,
-                {
-                  color: theme.colors.text,
-                  borderColor: theme.colors.border,
-                  backgroundColor: theme.colors.inputBackground,
-                },
+    <Screen
+      edges={['top', 'left', 'right', 'bottom']}
+      scroll
+      padded
+      refreshControl={
+        <RefreshControl
+          refreshing={recurring.isRefetching}
+          onRefresh={() => void recurring.refetch()}
+          tintColor={theme.colors.primary}
+          colors={[theme.colors.primary]}
+        />
+      }
+    >
+      <View style={styles.content}>
+        <RideHeader
+          title="Düzenli yolculuklar"
+          subtitle="Haftalık planlar ve duraklatma"
+          right={
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Yeni düzenli plan"
+              onPress={openCreate}
+              style={({ pressed }) => [
+                styles.newBtn,
+                { backgroundColor: theme.colors.primary, opacity: pressed ? 0.85 : 1 },
               ]}
-            />
-            <TextInput
-              value={returnTime}
-              onChangeText={setReturnTime}
-              placeholder="Dönüş 18:00"
-              placeholderTextColor={theme.colors.textTertiary}
-              style={[
-                styles.input,
-                styles.flex,
-                {
-                  color: theme.colors.text,
-                  borderColor: theme.colors.border,
-                  backgroundColor: theme.colors.inputBackground,
-                },
-              ]}
-            />
-          </View>
+            >
+              <Ionicons name="add" size={16} color={theme.colors.onPrimary} />
+              <AppText variant="label" color={theme.colors.onPrimary}>
+                Yeni
+              </AppText>
+            </Pressable>
+          }
+        />
 
-          <View style={styles.counterRow}>
-            <AppText variant="body" color="textSecondary">
-              Koltuk
-            </AppText>
-            <View style={styles.counter}>
-              <Pressable
-                onPress={() => setSeats((value) => Math.max(1, value - 1))}
-                style={[styles.stepBtn, { borderColor: theme.colors.border }]}
-              >
-                <Ionicons name="remove" size={14} color={theme.colors.text} />
-              </Pressable>
-              <AppText variant="label">{seats}</AppText>
-              <Pressable
-                onPress={() => setSeats((value) => Math.min(8, value + 1))}
-                style={[styles.stepBtn, { borderColor: theme.colors.border }]}
-              >
-                <Ionicons name="add" size={14} color={theme.colors.text} />
-              </Pressable>
+        <LinearGradient
+          colors={['#233B86', '#2F55D4', '#8057F4']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.hero}
+        >
+          <View style={styles.heroTop}>
+            <View style={styles.heroText}>
+              <AppText variant="overline" style={styles.heroEyebrow}>
+                HAFTALIK PROGRAM
+              </AppText>
+              <AppText variant="h1" style={styles.heroTitle}>
+                {activePlans.length > 0
+                  ? `${activePlans.length} aktif plan`
+                  : 'Programın hazır değil'}
+              </AppText>
+              <AppText variant="body" style={styles.heroSubtitle}>
+                {activePlans.length > 0
+                  ? next
+                    ? `Sonraki sefer ${occurrenceLabel(next)}. Uygun günlerde ilan otomatik üretilir.`
+                    : 'Yaklaşan sefer yok. Duraklatmaları kontrol et veya yeni bir plan ekle.'
+                  : 'İşe, okula veya eve gidişini bir kez tanımla; Trabzone uygun günlerde ilanı kendisi oluştursun.'}
+              </AppText>
+            </View>
+            <View style={styles.heroBadge}>
+              <Ionicons name="repeat" size={20} color="#DCE6FF" />
             </View>
           </View>
 
-          {role === 'driver' ? (
-            <>
-              <TextInput
-                value={price}
-                onChangeText={setPrice}
-                placeholder="Koltuk başına bedel (₺)"
-                keyboardType="decimal-pad"
-                placeholderTextColor={theme.colors.textTertiary}
+          <View style={styles.heroStats}>
+            <HeroStat value={activePlans.length} label="Aktif plan" />
+            <View style={styles.heroDivider} />
+            <HeroStat value={weeklyCount} label="Haftalık sefer" />
+            <View style={styles.heroDivider} />
+            <HeroStat value={pausedCount} label="Duraklatılan gün" />
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Yeni düzenli plan oluştur"
+            onPress={openCreate}
+            style={({ pressed }) => [styles.heroCta, { opacity: pressed ? 0.92 : 1 }]}
+          >
+            <View style={styles.heroCtaIcon}>
+              <Ionicons name="add" size={16} color="#FFFFFF" />
+            </View>
+            <AppText variant="label" color="#2F55D4" style={styles.flex}>
+              Yeni düzenli plan oluştur
+            </AppText>
+            <Ionicons name="arrow-forward" size={15} color="#2F55D4" />
+          </Pressable>
+        </LinearGradient>
+
+        {recurring.isLoading ? (
+          <View style={styles.list}>
+            {[0, 1].map((index) => (
+              <View
+                key={index}
                 style={[
-                  styles.input,
-                  {
-                    color: theme.colors.text,
-                    borderColor: theme.colors.border,
-                    backgroundColor: theme.colors.inputBackground,
-                  },
+                  styles.skeletonCard,
+                  { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
                 ]}
+              >
+                <View style={styles.skeletonHead}>
+                  <Skeleton width={42} height={42} radius={14} />
+                  <View style={styles.flex}>
+                    <Skeleton width="70%" height={15} />
+                    <Skeleton width="45%" height={11} />
+                  </View>
+                </View>
+                <Skeleton height={30} radius={9} />
+                <Skeleton width="60%" height={12} />
+              </View>
+            ))}
+          </View>
+        ) : recurring.isError ? (
+          <RideEmptyState
+            icon="cloud-offline-outline"
+            title="Planlar yüklenemedi"
+            message={recurring.error.message}
+            action={
+              <Button
+                label="Tekrar dene"
+                variant="secondary"
+                onPress={() => void recurring.refetch()}
               />
-              <View style={styles.vehicles}>
-                {(vehicles.data ?? [])
-                  .filter((vehicle) => vehicle.status === 'approved' && vehicle.is_active)
-                  .map((vehicle) => {
-                    const active = vehicleId === vehicle.id;
-                    return (
-                      <Pressable
-                        key={vehicle.id}
-                        onPress={() => setVehicleId(vehicle.id)}
-                        style={[
-                          styles.vehicle,
-                          {
-                            borderColor: active ? theme.colors.primary : theme.colors.border,
-                            backgroundColor: active
-                              ? theme.colors.primarySoft
-                              : theme.colors.surfaceMuted,
-                          },
-                        ]}
-                      >
-                        <Ionicons
-                          name="car-sport-outline"
-                          size={15}
-                          color={theme.colors.primaryDeep}
-                        />
-                        <AppText variant="caption" color={active ? 'primaryDeep' : 'textSecondary'}>
-                          {vehicle.make} {vehicle.model} · {vehicle.plate}
-                        </AppText>
-                      </Pressable>
-                    );
-                  })}
-                {(vehicles.data ?? []).filter(
-                  (vehicle) => vehicle.status === 'approved' && vehicle.is_active,
-                ).length === 0 ? (
-                  <AppText variant="caption" color="danger">
-                    Onaylı araç yok. Önce garajdan araç ekle.
-                  </AppText>
-                ) : null}
-              </View>
-            </>
-          ) : null}
+            }
+          />
+        ) : plans.length === 0 ? (
+          <RideEmptyState
+            icon="repeat-outline"
+            title="Henüz düzenli plan yok"
+            message="Haftanın belirli günlerinde gittiğin güzergâhı tanımla. Plan aktifken uygun her gün için ilan otomatik oluşturulur, tek günlük duraklatma diğer günleri etkilemez."
+            action={<Button label="İlk planı oluştur" onPress={openCreate} />}
+          />
+        ) : (
+          <>
+            <View style={[styles.segment, { backgroundColor: theme.colors.surfaceMuted }]}>
+              {FILTERS.map((item) => {
+                const active = filter === item.key;
+                return (
+                  <Pressable
+                    key={item.key}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    onPress={() => setFilter(item.key)}
+                    style={[
+                      styles.segmentItem,
+                      {
+                        backgroundColor: active ? theme.colors.surface : 'transparent',
+                        borderColor: active ? theme.colors.border : 'transparent',
+                      },
+                    ]}
+                  >
+                    <AppText variant="label" color={active ? 'primaryDeep' : 'textTertiary'}>
+                      {item.label}
+                    </AppText>
+                    <View
+                      style={[
+                        styles.countPill,
+                        {
+                          backgroundColor: active ? theme.colors.primarySoft : theme.colors.surface,
+                        },
+                      ]}
+                    >
+                      <AppText variant="caption" color={active ? 'primaryDeep' : 'textTertiary'}>
+                        {counts[item.key]}
+                      </AppText>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
 
-          <View style={styles.switchRow}>
-            <AppText variant="body" color="textSecondary" style={styles.flex}>
-              Sigarasız araç
-            </AppText>
-            <Switch
-              value={noSmoking}
-              onValueChange={setNoSmoking}
-              trackColor={{ false: theme.colors.surfaceMuted, true: theme.colors.primarySoft }}
-              thumbColor={noSmoking ? theme.colors.primary : theme.colors.textTertiary}
-            />
-          </View>
-          <View style={styles.switchRow}>
-            <AppText variant="body" color="textSecondary" style={styles.flex}>
-              Yalnızca kadın
-            </AppText>
-            <Switch
-              value={womenOnly}
-              onValueChange={setWomenOnly}
-              trackColor={{ false: theme.colors.surfaceMuted, true: theme.colors.primarySoft }}
-              thumbColor={womenOnly ? theme.colors.primary : theme.colors.textTertiary}
-            />
-          </View>
-
-          {error ? (
-            <AppText variant="caption" color="danger">
-              {error}
-            </AppText>
-          ) : null}
-          <Button label="Planı kaydet" loading={save.isPending} onPress={() => void handleSave()} />
-        </Card>
-      ) : null}
-
-      {recurring.isLoading ? (
-        <Card padding={18}>
-          <AppText variant="body" color="textSecondary">
-            Yükleniyor…
-          </AppText>
-        </Card>
-      ) : recurring.isError ? (
-        <RideEmptyState
-          icon="cloud-offline-outline"
-          title="Planlar yüklenemedi"
-          message={recurring.error.message}
-          action={
-            <Button
-              label="Tekrar dene"
-              variant="secondary"
-              onPress={() => void recurring.refetch()}
-            />
-          }
-        />
-      ) : (recurring.data?.length ?? 0) === 0 ? (
-        <RideEmptyState
-          icon="repeat-outline"
-          title="Düzenli plan yok"
-          message="İşe veya okula gidiş planını oluştur; uygun günlerde otomatik ilan üretilir."
-          action={<Button label="Plan oluştur" onPress={() => setShowForm(true)} />}
-        />
-      ) : (
-        <View style={styles.list}>
-          {recurring.data?.map((plan) => (
-            <Card key={plan.id} padding={14} style={styles.card}>
-              <View style={styles.headRow}>
-                <View
-                  style={[
-                    styles.mark,
-                    {
-                      backgroundColor:
-                        plan.role === 'driver' ? theme.colors.primarySoft : theme.colors.accentSoft,
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name={plan.role === 'driver' ? 'car-outline' : 'walk-outline'}
-                    size={17}
-                    color={plan.role === 'driver' ? theme.colors.primaryDeep : theme.colors.accent}
+            {visibleActive.length === 0 && visibleInactive.length === 0 ? (
+              <RideEmptyState
+                icon="funnel-outline"
+                title="Bu filtrede plan yok"
+                message="Seçili rol için kayıtlı düzenli yolculuk bulunmuyor. Filtreyi değiştir veya yeni bir plan oluştur."
+                action={
+                  <Button
+                    label="Tüm planlar"
+                    variant="secondary"
+                    onPress={() => setFilter('all')}
                   />
-                </View>
-                <View style={styles.flex}>
-                  <AppText variant="label" numberOfLines={1}>
-                    {plan.origin_label} → {plan.dest_label}
-                  </AppText>
-                  <AppText variant="caption" color="textTertiary" numberOfLines={1}>
-                    {weekdayLabels(plan.weekdays)} · {plan.depart_time.slice(0, 5)}
-                    {plan.return_time ? ` · dönüş ${plan.return_time.slice(0, 5)}` : ''}
-                  </AppText>
-                </View>
-                <Badge
-                  label={plan.is_active ? 'Aktif' : 'Pasif'}
-                  tone={plan.is_active ? 'success' : 'neutral'}
-                />
-              </View>
-              <View style={styles.badges}>
-                <Badge label={SCOPE_LABEL[plan.scope]} tone="neutral" />
-                <Badge label={plan.role === 'driver' ? 'Sürücü' : 'Yolcu'} tone="primary" />
-                {plan.price_per_seat_cents != null ? (
-                  <Badge label={formatMoney(plan.price_per_seat_cents)} tone="accent" />
-                ) : null}
-              </View>
-              {plan.paused_dates.length ? (
-                <AppText variant="caption" color="textTertiary">
-                  Duraklatılan günler: {plan.paused_dates.slice(0, 6).join(', ')}
-                </AppText>
-              ) : null}
-              <View style={styles.pauseRow}>
-                <TextInput
-                  value={pausedDate}
-                  onChangeText={setPausedDate}
-                  placeholder="YYYY-AA-GG"
-                  placeholderTextColor={theme.colors.textTertiary}
-                  style={[
-                    styles.input,
-                    styles.flex,
-                    {
-                      color: theme.colors.text,
-                      borderColor: theme.colors.border,
-                      backgroundColor: theme.colors.inputBackground,
-                    },
-                  ]}
-                />
-                <Button
-                  label="Günü duraklat"
-                  size="sm"
-                  variant="secondary"
-                  fullWidth={false}
-                  loading={pause.isPending}
-                  onPress={() => handlePause(plan)}
-                />
-              </View>
-              <View style={styles.footRow}>
-                <Button
-                  label="Düzenle"
-                  variant="ghost"
-                  size="sm"
-                  fullWidth={false}
-                  onPress={() =>
-                    router.navigate({
-                      pathname: '/ride/search',
-                      params: { scope: plan.scope },
-                    } as never)
-                  }
-                />
-                <View style={styles.flex} />
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Planı kaldır"
-                  onPress={() => remove.mutate(plan.id)}
-                  style={[styles.smallBtn, { backgroundColor: theme.colors.surfaceMuted }]}
-                >
-                  <Ionicons name="trash-outline" size={16} color={theme.colors.danger} />
-                </Pressable>
-              </View>
-            </Card>
-          ))}
-        </View>
-      )}
+                }
+              />
+            ) : null}
 
-      <Card padding={12} tone="muted">
-        <AppText variant="caption" color="textSecondary">
-          Bir günü duraklatmak diğer tarihlerin rezervasyonlarını etkilemez. Otomatik üretilen
-          ilanlar gerçek kapasite ve doğrulama kontrollerinden geçer.
-        </AppText>
-      </Card>
+            {visibleActive.length > 0 ? (
+              <View style={styles.list}>
+                <View style={styles.sectionHead}>
+                  <AppText variant="label" color="textSecondary">
+                    Aktif planlar
+                  </AppText>
+                  <AppText variant="caption" color="textTertiary">
+                    {visibleActive.length} plan
+                  </AppText>
+                </View>
+                {visibleActive.map((plan) => (
+                  <RecurringPlanCard
+                    key={plan.id}
+                    plan={plan}
+                    onEdit={() => openEdit(plan)}
+                    onPause={() => {
+                      setPauseError(null);
+                      setPauseTarget(plan);
+                    }}
+                    onRemove={() => confirmRemove(plan)}
+                    onReactivate={() => confirmReactivate(plan)}
+                  />
+                ))}
+              </View>
+            ) : null}
+
+            {visibleInactive.length > 0 ? (
+              <View style={styles.list}>
+                <View style={styles.sectionHead}>
+                  <AppText variant="label" color="textSecondary">
+                    Pasif planlar
+                  </AppText>
+                  <AppText variant="caption" color="textTertiary">
+                    Yeniden başlatılabilir
+                  </AppText>
+                </View>
+                {visibleInactive.map((plan) => (
+                  <RecurringPlanCard
+                    key={plan.id}
+                    plan={plan}
+                    onEdit={() => openEdit(plan)}
+                    onPause={() => {
+                      setPauseError(null);
+                      setPauseTarget(plan);
+                    }}
+                    onRemove={() => confirmRemove(plan)}
+                    onReactivate={() => confirmReactivate(plan)}
+                    reactivating={reactivatingId === plan.id}
+                  />
+                ))}
+              </View>
+            ) : null}
+          </>
+        )}
+
+        <View style={[styles.infoCard, { backgroundColor: theme.colors.surfaceMuted }]}>
+          <InfoRow
+            icon="calendar-clear-outline"
+            text="Duraklatma yalnızca seçilen günü etkiler; diğer tarihlerin planı bozulmaz."
+          />
+          <InfoRow
+            icon="sync-outline"
+            text="Aktif planlar için uygun günlerde ilan otomatik üretilir ve kapasite kontrollerinden geçer."
+          />
+          <InfoRow
+            icon="shield-checkmark-outline"
+            text="Sürücü planı için kimlik doğrulaması ve bir araç yeterlidir; ayrıca onay beklemez."
+          />
+        </View>
+
+        {sheet ? (
+          <RecurringPlanSheet
+            plan={sheet.plan}
+            vehicles={vehicles.data ?? []}
+            saving={save.isPending}
+            error={sheetError}
+            driverReady={driverReady}
+            onClose={() => setSheet(null)}
+            onSubmit={(draft) => void handleSubmit(draft)}
+            onOpenGarage={() => {
+              setSheet(null);
+              router.navigate('/ride/garage' as never);
+            }}
+          />
+        ) : null}
+
+        {pauseTarget ? (
+          <RecurringPauseSheet
+            plan={pauseTarget}
+            saving={pause.isPending}
+            error={pauseError}
+            onClose={() => setPauseTarget(null)}
+            onConfirm={(date) => void handlePause(date)}
+          />
+        ) : null}
+      </View>
     </Screen>
   );
 }
 
+function HeroStat({ value, label }: { value: number; label: string }) {
+  return (
+    <View style={styles.heroStat}>
+      <AppText variant="h2" style={styles.heroStatValue}>
+        {value}
+      </AppText>
+      <AppText variant="caption" style={styles.heroStatLabel}>
+        {label}
+      </AppText>
+    </View>
+  );
+}
+
+function InfoRow({
+  icon,
+  text,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  text: string;
+}) {
+  const { theme } = useTheme();
+  return (
+    <View style={styles.infoRow}>
+      <Ionicons name={icon} size={14} color={theme.colors.primaryDeep} />
+      <AppText variant="caption" color="textSecondary" style={styles.flex}>
+        {text}
+      </AppText>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 13,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  form: { gap: 9 },
-  input: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    fontSize: 14,
-  },
-  optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  chip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  days: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
-  day: {
-    width: 42,
-    height: 34,
-    borderRadius: 10,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  split: { flexDirection: 'row', gap: 8 },
-  counterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  counter: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  stepBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 9,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  vehicles: { gap: 6 },
-  vehicle: {
+  content: { width: '100%', maxWidth: 880, alignSelf: 'center', gap: 14 },
+  newBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    borderRadius: 10,
-    borderWidth: 1,
-    padding: 9,
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 12,
   },
-  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  list: { gap: 10 },
-  card: { gap: 9 },
-  headRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
-  mark: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  pauseRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  footRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  smallBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
+  hero: { borderRadius: 24, padding: 18, gap: 14, overflow: 'hidden' },
+  heroTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  heroText: { flex: 1, gap: 5 },
+  heroEyebrow: { color: 'rgba(235,242,255,0.72)', letterSpacing: 1.1, fontSize: 10 },
+  heroTitle: { color: '#FFFFFF' },
+  heroSubtitle: { color: 'rgba(235,242,255,0.86)' },
+  heroBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.14)',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  heroStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    backgroundColor: 'rgba(8,14,32,0.28)',
+    borderRadius: 14,
+    paddingVertical: 10,
+  },
+  heroStat: { alignItems: 'center', gap: 1 },
+  heroStatValue: { color: '#FFFFFF' },
+  heroStatLabel: { color: 'rgba(235,242,255,0.72)' },
+  heroDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 28,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  heroCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    paddingLeft: 8,
+    paddingRight: 14,
+    paddingVertical: 8,
+  },
+  heroCtaIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: '#2F55D4',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  skeletonCard: {
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 15,
+    gap: 12,
+  },
+  skeletonHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  segment: {
+    flexDirection: 'row',
+    gap: 4,
+    padding: 4,
+    borderRadius: 14,
+  },
+  segmentItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  countPill: {
+    minWidth: 20,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 999,
+    alignItems: 'center',
+  },
+  list: { gap: 10 },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingTop: 4 },
+  infoCard: { borderRadius: 16, padding: 13, gap: 9 },
+  infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  flex: { flex: 1 },
 });

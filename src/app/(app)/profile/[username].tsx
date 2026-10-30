@@ -20,6 +20,10 @@ import {
 import { NewsBrandCover } from '@/features/news/components/NewsBrandCover';
 import { useNewsNotifications } from '@/features/news/hooks/use-news-reader';
 import { useCanMessage, useStartDirectConversation } from '@/features/messaging/hooks/use-chat';
+import {
+  MarketMediaViewer,
+  type MarketMediaViewerItem,
+} from '@/features/marketplace/components/MarketMediaViewer';
 import { profileShareLink } from '@/features/share/links';
 import { shareContent } from '@/features/share/share-action';
 import { ConnectionsSheet } from '@/features/profile/components/ConnectionsSheet';
@@ -34,7 +38,9 @@ import { useProfileView } from '@/features/profile/hooks/use-profile-view';
 import { useBlockUser, useUnblockUser } from '@/features/profile/hooks/use-profile-mutations';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import type { ConnectionKind } from '@/features/profile/services/social-service';
+import { ChildProtectedBadge } from '@/features/safety/components/ChildProtectedBadge';
 import { useReportSheet } from '@/features/safety/components/ReportSheetProvider';
+import { useProfileSafetyFlags } from '@/features/safety/hooks/use-safety';
 import { useContentViewCount, useContentViewRegistration } from '@/features/views/use-content-views';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
@@ -47,6 +53,9 @@ export default function PublicProfileScreen() {
   const { openReport } = useReportSheet();
 
   const { data: profile, isLoading, isError, refetch } = useProfileView(handle);
+  // "Çocuk Hesabı" etiketi sunucuda yalnızca sahibine, arkadaşlarına ve
+  // yetkililere döner; yabancı hesaplarda boş nesne gelir.
+  const { data: safetyFlags } = useProfileSafetyFlags(profile?.id);
   // Profil görüntülemesi de hesap bazlı tekilleştirilir; sahibi +0 üretir.
   const profileViewCount = useContentViewCount({ type: 'profile', id: profile?.id ?? null });
   useContentViewRegistration({
@@ -71,6 +80,15 @@ export default function PublicProfileScreen() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [connections, setConnections] = useState<ConnectionKind | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Kapak ve profil fotoğrafı dokununca tam ekran görüntüleyicide açılır.
+  const [viewer, setViewer] = useState<{ items: MarketMediaViewerItem[]; index: number } | null>(
+    null,
+  );
+
+  const openMedia = (id: string, uri: string) => {
+    haptics.selection();
+    setViewer({ items: [{ id, kind: 'image', uri }], index: 0 });
+  };
 
   const fullName = profile
     ? `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || `@${profile.username}`
@@ -161,6 +179,8 @@ export default function PublicProfileScreen() {
   const corporateBio =
     'Trabzone’un resmî haber hesabı. Trabzon ve 18 ilçesinden güncel gelişmeler, doğrulanmış yerel haberler, resmî duyurular ve şehir yaşamından haberler.';
   const displayBio = profile?.bio?.trim() ? profile.bio : isNewsPublisher ? corporateBio : null;
+  const coverUrl = mediaPublicUrl('cover', profile?.cover_path);
+  const avatarUrl = mediaPublicUrl('avatar', profile?.avatar_path);
 
   const toggleNotifications = () => {
     if (!profile) return;
@@ -255,14 +275,21 @@ export default function PublicProfileScreen() {
             <NewsBrandCover />
           ) : (
             <View style={styles.cover}>
-              {profile.cover_path ? (
-                <Image
-                  source={{ uri: mediaPublicUrl('cover', profile.cover_path) ?? undefined }}
+              {coverUrl ? (
+                <Pressable
+                  accessibilityRole="imagebutton"
+                  accessibilityLabel="Kapak fotoğrafını büyüt"
+                  onPress={() => openMedia('cover', coverUrl)}
                   style={StyleSheet.absoluteFill}
-                  contentFit="cover"
-                  transition={200}
-                  cachePolicy="memory-disk"
-                />
+                >
+                  <Image
+                    source={{ uri: coverUrl }}
+                    style={StyleSheet.absoluteFill}
+                    contentFit="cover"
+                    transition={200}
+                    cachePolicy="memory-disk"
+                  />
+                </Pressable>
               ) : (
                 <LinearGradient
                   colors={theme.gradients.aurora}
@@ -284,13 +311,16 @@ export default function PublicProfileScreen() {
               >
                 <Logo size={84} />
               </View>
+            ) : avatarUrl ? (
+              <Pressable
+                accessibilityRole="imagebutton"
+                accessibilityLabel="Profil fotoğrafını büyüt"
+                onPress={() => openMedia('avatar', avatarUrl)}
+              >
+                <Avatar uri={avatarUrl} name={fullName} size={92} ring />
+              </Pressable>
             ) : (
-              <Avatar
-                uri={mediaPublicUrl('avatar', profile.avatar_path)}
-                name={fullName}
-                size={92}
-                ring
-              />
+              <Avatar name={fullName} size={92} ring />
             )}
             {profile.follows_me ? (
               <View
@@ -315,6 +345,7 @@ export default function PublicProfileScreen() {
               {profile.is_verified ? (
                 <Ionicons name="checkmark-circle" size={19} color={theme.colors.primary} />
               ) : null}
+              {safetyFlags?.is_child_protected ? <ChildProtectedBadge /> : null}
             </View>
             <AppText variant="body" color="textSecondary">
               @{profile.username}
@@ -669,6 +700,17 @@ export default function PublicProfileScreen() {
         kind={connections ?? 'followers'}
         onClose={() => setConnections(null)}
       />
+
+      {viewer ? (
+        <MarketMediaViewer
+          visible
+          items={viewer.items}
+          initialIndex={viewer.index}
+          onClose={() => setViewer(null)}
+          // Görselin dışındaki boş alana dokunmak görüntüleyiciyi kapatır.
+          closeOnBackdropPress
+        />
+      ) : null}
     </Screen>
   );
 }

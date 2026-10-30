@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useIsFocused, useLocalSearchParams } from 'expo-router';
 import { setStatusBarStyle } from 'expo-status-bar';
 import { useRouter } from '@/utils/router';
 import { useCallback, useEffect, useState } from 'react';
@@ -27,6 +27,7 @@ export default function ReelViewerScreen() {
   const insets = useSafeAreaInsets();
   const { scheme } = useTheme();
   const { height } = useWindowDimensions();
+  const focused = useIsFocused();
 
   const { data: reel, isLoading, isError, refetch } = useReel(reelId);
   const [muted, setMuted] = useState(false);
@@ -51,7 +52,7 @@ export default function ReelViewerScreen() {
       {reel ? (
         <ReelItem
           reel={reel}
-          active
+          active={focused}
           muted={muted}
           height={height}
           bottomInset={insets.bottom}

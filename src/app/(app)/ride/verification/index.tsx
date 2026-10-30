@@ -420,7 +420,7 @@ export default function RideVerificationScreen() {
     }
     try {
       await apply.mutateAsync(bio.trim());
-      setNotice('Sürücü başvurun alındı. Onaylandığında araç ekleyip ilan yayınlayabilirsin.');
+      setNotice('Sürücü başvurun alındı. İlan yayınlamak için onay beklemen gerekmiyor; kimliğin doğrulandıysa hemen paylaşabilirsin.');
     } catch (cause) {
       setError(errorMessage(cause, 'Başvuru gönderilemedi.'));
     }
@@ -886,8 +886,8 @@ export default function RideVerificationScreen() {
           <AppText variant="title">Sürücü başvurusu</AppText>
           <AppText variant="caption" color="textTertiary">
             {driverReady
-              ? 'Kısa bir tanıtım yazısı yaz. Onaylandığında ilan yayınlayabilirsin.'
-              : 'Başvuru için kimlik ve geçerli sürücü belgesi onayı gerekir.'}
+              ? 'Kısa bir tanıtım yazısı yaz. Sürücü rozeti başvurun onaylanınca görünür; ilan yayınlamayı beklemezsin.'
+              : 'Sürücü rozeti için kimlik ve geçerli sürücü belgesi onayı gerekir.'}
           </AppText>
           <View style={styles.checklist}>
             {[
@@ -953,8 +953,8 @@ export default function RideVerificationScreen() {
             <View style={styles.flex}>
               <AppText variant="bodyStrong">Sürücü yetkin açık</AppText>
               <AppText variant="caption" color="textSecondary">
-                Yolculuk ilanı yayınlayabilirsin. İlan için onaylı bir araç (ruhsat + sigorta)
-                gerekir.
+                Yolculuk ilanı yayınlayabilirsin. Araç onayı beklemezsin; ruhsat ve sigorta
+                belgelerini garajdan tamamlayabilirsin.
               </AppText>
             </View>
           </View>
@@ -1002,8 +1002,8 @@ export default function RideVerificationScreen() {
         <AppText variant="caption" color="textSecondary">
           Belgeler özel `ride-documents` kovasında saklanır. Yalnızca yetkili doğrulama
           inceleyicileri ve sen kendi belgeni görebilirsin. Belge içeriği arama veya eşleştirme
-          sonuçlarında gösterilmez. Doğrulama tamamlanmadan rezervasyon ve ilan işlevleri
-          kullanılamaz.
+          sonuçlarında gösterilmez. Kimlik doğrulaması yapılmadan rezervasyon ve yolculuk
+          paylaşımı kullanılamaz; diğer belgeler ilan yayınlamayı engellemez.
         </AppText>
         <Button
           label="Gizlilik ve veri politikası"

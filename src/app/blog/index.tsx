@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { Link, useLocalSearchParams, useRouter, type Href } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -15,9 +15,8 @@ import { AppText, Button, TextField } from '@/components/ui';
 import { BlogCard } from '@/features/blog/components/BlogCard';
 import { useBlogList } from '@/features/blog/hooks/use-blog';
 import type { BlogListItem } from '@/features/blog/types';
-import { WebFooter } from '@/features/web/components/WebFooter';
-import { WebHeader } from '@/features/web/components/WebHeader';
 import { flatStyle } from '@/features/web/link-style';
+import { PublicShell } from '@/features/web/components/PublicShell';
 import { useWebMeta } from '@/features/web/use-web-meta';
 import { useTheme } from '@/theme/ThemeProvider';
 
@@ -32,12 +31,16 @@ export default function BlogIndexScreen() {
   const initialSearch = typeof params.q === 'string' ? params.q : '';
   const page = Math.max(1, Number.parseInt(String(params.sayfa ?? '1'), 10) || 1);
   const [search, setSearch] = useState(initialSearch);
+  // URL'deki `q` değişince arama alanı da güncel kalmalı. Prop → state
+  // senkronizasyonu effect yerine render sırasında koşullu olarak yapılır
+  // (React'in "adjusting state when props change" deseni).
+  const [syncedSearch, setSyncedSearch] = useState(initialSearch);
+  if (syncedSearch !== initialSearch) {
+    setSyncedSearch(initialSearch);
+    setSearch(initialSearch);
+  }
   const wide = width >= 900;
   const cardWidth = wide ? '31.8%' : width >= 620 ? '48.6%' : '100%';
-
-  useEffect(() => {
-    setSearch(initialSearch);
-  }, [initialSearch]);
 
   const query = useBlogList({
     limit: PAGE_SIZE,
@@ -53,7 +56,9 @@ export default function BlogIndexScreen() {
   const rest = featured ? items.slice(1) : items;
 
   useWebMeta({
-    title: category ? `${category} yazıları | Trabzone Blog` : 'Trabzon Blog | Gezi, Yaşam ve Şehir Rehberleri',
+    title: category
+      ? `${category} yazıları | Trabzone Blog`
+      : 'Trabzon Blog | Gezi, Yaşam ve Şehir Rehberleri',
     description:
       'Trabzon gezi rehberleri, yaylalar, yemek kültürü, ulaşım, emlak ve günlük yaşam üzerine uzun biçimli yerel rehberler.',
     path: '/blog',
@@ -72,126 +77,138 @@ export default function BlogIndexScreen() {
   };
 
   return (
-    <View style={StyleSheet.flatten([styles.root, { backgroundColor: theme.colors.background }])}>
-      <WebHeader />
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <View style={styles.hero}>
-          <AppText variant="overline" color="primary">
-            TRABZON YEREL REHBERİ
-          </AppText>
-          <AppText variant="display" style={styles.title}>
-            Trabzon Blog
-          </AppText>
-          <AppText variant="body" color="textSecondary" style={styles.lede}>
-            Trabzon'u gezmek, orada yaşamak veya yatırım yapmak isteyenler için sahadan derlenmiş
-            uzun rehberler. Ulaşım, yaylalar, yemek kültürü, emlak, öğrenci hayatı ve günlük
-            pratikler.
-          </AppText>
-          <View style={styles.statRow}>
-            <Stat icon="document-text-outline" label={`${total} yazı`} />
-            <Stat icon="albums-outline" label={`${categories.length} kategori`} />
-            <Stat icon="refresh-outline" label="Düzenli güncellenir" />
-          </View>
+    <PublicShell
+      title="Blog"
+      subtitle="Gezi · Yaşam · Yerel rehberler"
+      fallbackHref="/feed"
+      webScroll
+      webContentStyle={styles.scroll}
+      nativeContentStyle={styles.nativeScroll}
+    >
+      <View style={styles.hero}>
+        <AppText variant="overline" color="primary">
+          TRABZON YEREL REHBERİ
+        </AppText>
+        <AppText variant="display" style={styles.title}>
+          Trabzon Blog
+        </AppText>
+        <AppText variant="body" color="textSecondary" style={styles.lede}>
+          Trabzon’u gezmek, orada yaşamak veya yatırım yapmak isteyenler için sahadan derlenmiş uzun
+          rehberler. Ulaşım, yaylalar, yemek kültürü, emlak, öğrenci hayatı ve günlük pratikler.
+        </AppText>
+        <View style={styles.statRow}>
+          <Stat icon="document-text-outline" label={`${total} yazı`} />
+          <Stat icon="albums-outline" label={`${categories.length} kategori`} />
+          <Stat icon="refresh-outline" label="Düzenli güncellenir" />
         </View>
+      </View>
 
-        <View style={[styles.toolbar, !wide && styles.toolbarStack]}>
-          <View style={styles.searchWrap}>
-            <TextField
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Blogda ara: yayla, hamsi, kiralık daire…"
-              leftIcon="search-outline"
-              returnKeyType="search"
-              onSubmitEditing={() => go({ q: search, sayfa: 1 })}
-            />
-          </View>
-          <Button
-            label="Ara"
-            size="md"
-            fullWidth={false}
-            leftIcon={<Ionicons name="search" size={16} color={theme.colors.onPrimary} />}
-            onPress={() => go({ q: search, sayfa: 1 })}
-            style={styles.searchButton}
+      <View style={[styles.toolbar, !wide && styles.toolbarStack]}>
+        <View style={styles.searchWrap}>
+          <TextField
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Blogda ara: yayla, hamsi, kiralık daire…"
+            leftIcon="search-outline"
+            returnKeyType="search"
+            onSubmitEditing={() => go({ q: search, sayfa: 1 })}
           />
         </View>
+        <Button
+          label="Ara"
+          size="md"
+          fullWidth={false}
+          leftIcon={<Ionicons name="search" size={16} color={theme.colors.onPrimary} />}
+          onPress={() => go({ q: search, sayfa: 1 })}
+          style={styles.searchButton}
+        />
+      </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chips}
+      >
+        <CategoryChip
+          label="Tümü"
+          count={total}
+          active={!category}
+          onPress={() => go({ kategori: '', q: initialSearch, sayfa: 1 })}
+        />
+        {categories.map((item) => (
           <CategoryChip
-            label="Tümü"
-            count={total}
-            active={!category}
-            onPress={() => go({ kategori: '', q: initialSearch, sayfa: 1 })}
+            key={item.name}
+            label={item.name}
+            count={item.count}
+            active={category === item.name}
+            onPress={() => go({ kategori: item.name, q: initialSearch, sayfa: 1 })}
           />
-          {categories.map((item) => (
-            <CategoryChip
-              key={item.name}
-              label={item.name}
-              count={item.count}
-              active={category === item.name}
-              onPress={() => go({ kategori: item.name, q: initialSearch, sayfa: 1 })}
-            />
-          ))}
-        </ScrollView>
-
-        {query.isLoading ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={theme.colors.primary} />
-            <AppText variant="caption" color="textTertiary">
-              Yazılar yükleniyor…
-            </AppText>
-          </View>
-        ) : query.isError ? (
-          <View style={[styles.empty, { borderColor: theme.colors.border }]}>
-            <AppText variant="title">Blog yüklenemedi</AppText>
-            <AppText variant="body" color="textSecondary">
-              Bağlantı sorunu olabilir. Sayfayı yenileyip tekrar deneyin.
-            </AppText>
-            <Button label="Tekrar dene" variant="secondary" size="sm" fullWidth={false} onPress={() => void query.refetch()} />
-          </View>
-        ) : items.length === 0 ? (
-          <View style={[styles.empty, { borderColor: theme.colors.border }]}>
-            <AppText variant="title">Bu filtreye uygun yazı yok</AppText>
-            <AppText variant="body" color="textSecondary">
-              Arama kelimesini kısaltın veya kategori seçimini kaldırın.
-            </AppText>
-          </View>
-        ) : (
-          <>
-            {featured ? <FeaturedCard post={featured} wide={wide} /> : null}
-            <View style={styles.grid}>
-              {rest.map((post) => (
-                <BlogCard key={post.id} post={post} width={cardWidth} />
-              ))}
-            </View>
-          </>
-        )}
-
-        {total > PAGE_SIZE ? (
-          <View style={styles.pager}>
-            <Button
-              label="← Önceki"
-              variant="outline"
-              size="sm"
-              fullWidth={false}
-              disabled={page <= 1}
-              onPress={() => go({ sayfa: page - 1 })}
-            />
-            <AppText variant="caption" color="textTertiary">
-              Sayfa {page} / {Math.ceil(total / PAGE_SIZE)}
-            </AppText>
-            <Button
-              label="Sonraki →"
-              variant="outline"
-              size="sm"
-              fullWidth={false}
-              disabled={page >= Math.ceil(total / PAGE_SIZE)}
-              onPress={() => go({ sayfa: page + 1 })}
-            />
-          </View>
-        ) : null}
+        ))}
       </ScrollView>
-      <WebFooter />
-    </View>
+
+      {query.isLoading ? (
+        <View style={styles.center}>
+          <ActivityIndicator color={theme.colors.primary} />
+          <AppText variant="caption" color="textTertiary">
+            Yazılar yükleniyor…
+          </AppText>
+        </View>
+      ) : query.isError ? (
+        <View style={[styles.empty, { borderColor: theme.colors.border }]}>
+          <AppText variant="title">Blog yüklenemedi</AppText>
+          <AppText variant="body" color="textSecondary">
+            Bağlantı sorunu olabilir. Sayfayı yenileyip tekrar deneyin.
+          </AppText>
+          <Button
+            label="Tekrar dene"
+            variant="secondary"
+            size="sm"
+            fullWidth={false}
+            onPress={() => void query.refetch()}
+          />
+        </View>
+      ) : items.length === 0 ? (
+        <View style={[styles.empty, { borderColor: theme.colors.border }]}>
+          <AppText variant="title">Bu filtreye uygun yazı yok</AppText>
+          <AppText variant="body" color="textSecondary">
+            Arama kelimesini kısaltın veya kategori seçimini kaldırın.
+          </AppText>
+        </View>
+      ) : (
+        <>
+          {featured ? <FeaturedCard post={featured} wide={wide} /> : null}
+          <View style={styles.grid}>
+            {rest.map((post) => (
+              <BlogCard key={post.id} post={post} width={cardWidth} />
+            ))}
+          </View>
+        </>
+      )}
+
+      {total > PAGE_SIZE ? (
+        <View style={styles.pager}>
+          <Button
+            label="← Önceki"
+            variant="outline"
+            size="sm"
+            fullWidth={false}
+            disabled={page <= 1}
+            onPress={() => go({ sayfa: page - 1 })}
+          />
+          <AppText variant="caption" color="textTertiary">
+            Sayfa {page} / {Math.ceil(total / PAGE_SIZE)}
+          </AppText>
+          <Button
+            label="Sonraki →"
+            variant="outline"
+            size="sm"
+            fullWidth={false}
+            disabled={page >= Math.ceil(total / PAGE_SIZE)}
+            onPress={() => go({ sayfa: page + 1 })}
+          />
+        </View>
+      ) : null}
+    </PublicShell>
   );
 }
 
@@ -269,7 +286,13 @@ function FeaturedCard({ post, wide }: { post: BlogListItem; wide: boolean }) {
             accessibilityLabel={post.cover_image_alt ?? post.title}
           />
         ) : (
-          <View style={[styles.featuredImage, styles.featuredPlaceholder, { backgroundColor: theme.colors.primarySoft }]}>
+          <View
+            style={[
+              styles.featuredImage,
+              styles.featuredPlaceholder,
+              { backgroundColor: theme.colors.primarySoft },
+            ]}
+          >
             <Ionicons name="newspaper-outline" size={38} color={theme.colors.primaryDeep} />
           </View>
         )}
@@ -289,7 +312,9 @@ function FeaturedCard({ post, wide }: { post: BlogListItem; wide: boolean }) {
             {post.reading_minutes} dk okuma
           </AppText>
           <Link href={`/blog/${post.slug}` as Href} asChild>
-            <Pressable style={flatStyle([styles.readMore, { backgroundColor: theme.colors.primaryDeep }])}>
+            <Pressable
+              style={flatStyle([styles.readMore, { backgroundColor: theme.colors.primaryDeep }])}
+            >
               <AppText variant="bodyStrong" color="onPrimary">
                 Yazıyı oku
               </AppText>
@@ -303,8 +328,8 @@ function FeaturedCard({ post, wide }: { post: BlogListItem; wide: boolean }) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  scroll: { paddingHorizontal: 20, paddingTop: 26, paddingBottom: 50, gap: 20 },
+  scroll: { flexGrow: 1, paddingHorizontal: 20, paddingTop: 26, paddingBottom: 50, gap: 20 },
+  nativeScroll: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24, gap: 20 },
   hero: { maxWidth: 1120, width: '100%', alignSelf: 'center', gap: 9 },
   title: { letterSpacing: -1 },
   lede: { maxWidth: 760, lineHeight: 24 },
@@ -335,7 +360,13 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
   },
   center: { alignItems: 'center', paddingVertical: 60, gap: 10 },
-  empty: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, padding: 26, gap: 8, maxWidth: 620 },
+  empty: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+    padding: 26,
+    gap: 8,
+    maxWidth: 620,
+  },
   pager: {
     maxWidth: 1120,
     width: '100%',

@@ -19,6 +19,10 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+# Firebase Android yapılandırması (FCM). EAS'te GOOGLE_SERVICES_JSON dosya sırrı
+# olarak tanımlanır; depoya girmez (bkz. app.config.ts).
+google-services.json
+GoogleService-Info.plist
 *.orig.*
 supabase/.temp/
 supabase/.branches/

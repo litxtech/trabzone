@@ -1,47 +1,60 @@
 import { Ionicons } from '@expo/vector-icons';
-import { FlashList, type ViewToken } from '@shopify/flash-list';
+import { FlashList, type FlashListRef, type ViewToken } from '@shopify/flash-list';
 import { useRouter } from '@/utils/router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 
 import { FeedHeader } from '@/components/navigation/FeedHeader';
 import { AppText, Screen, Skeleton } from '@/components/ui';
-import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
-import { PROVINCES } from '@/features/profile/constants/regions';
-import { SelectSheet } from '@/components/ui/SelectSheet';
 import { useTheme } from '@/theme/ThemeProvider';
-import { haptics } from '@/utils/haptics';
 
 import { PostCard } from '@/features/feed/components/PostCard';
 import { StoriesRail } from '@/features/feed/components/StoriesRail';
 import { StoryViewer } from '@/features/feed/components/StoryViewer';
+import { LiveNewsRail } from '@/features/live-news/components/LiveNewsRail';
+import { useTabScrollTop } from '@/features/navigation/tab-scroll';
+import { MatchCenterFeedCard } from '@/features/sports/components/MatchCenterFeedCard';
 import { useFeed } from '@/features/feed/hooks/use-feed';
-import type { FeedFilter, FeedPost } from '@/features/feed/services/feed-service';
+import type { FeedPost } from '@/features/feed/services/feed-service';
 import type { StoryGroup } from '@/features/feed/services/stories-service';
 import { trackContentViews, useViewSettings } from '@/features/views/use-content-views';
+import {
+  AdPlacementSlot,
+  interleaveRows,
+  useAdPlacement,
+  type AdPlacementKey,
+  type AdRow,
+} from '@/features/ads';
 
-const FILTERS: { key: FeedFilter; label: string }[] = [
-  { key: 'all', label: 'Tümü' },
-  { key: 'nearby', label: 'Yakınımda' },
-  { key: 'following', label: 'Takip' },
-  { key: 'popular', label: 'Popüler' },
-];
+const AD_PLACEMENT: AdPlacementKey = 'feed_home';
 
 export default function FeedScreen() {
   const { theme } = useTheme();
   const router = useRouter();
-  const { data: profile } = useMyProfile();
+  const listRef = useRef<FlashListRef<AdRow<FeedPost>>>(null);
 
-  const [filter, setFilter] = useState<FeedFilter>('all');
-  const [city, setCity] = useState<string | null>(null);
-  const [cityPickerOpen, setCityPickerOpen] = useState(false);
   const [story, setStory] = useState<{ group: StoryGroup; index: number } | null>(null);
 
-  const effectiveCity = filter === 'nearby' ? (city ?? profile?.city ?? null) : null;
-  const feed = useFeed(filter, effectiveCity);
+  const feed = useFeed('all', null);
   const viewSettings = useViewSettings();
 
+  // Alt menüde "Akış" sekmesine yeniden basıldığında liste başa sarılır;
+  // akışın en altına inen kullanıcı tek dokunuşla yukarı döner.
+  const scrollToTop = useCallback(() => {
+    listRef.current?.scrollToTop({ animated: true });
+  }, []);
+  useTabScrollTop('feed', scrollToTop);
+
+  // Nöbetçi eczane kısayolu akıştan kaldırıldı: sağlık kısayolları hamburger
+  // menüsünde (DrawerMenu → Sağlık) tek yerden yönetiliyor. Böylece akışın
+  // üstü eczane duyurusuyla kaplanmaz ve iki farklı yerde tekrar etmez.
   const posts = useMemo(() => feed.data?.pages.flatMap((page) => page.items) ?? [], [feed.data]);
+  const adPlacement = AD_PLACEMENT;
+  const ads = useAdPlacement(adPlacement, posts.length);
+  const rows = useMemo(
+    () => interleaveRows(posts, ads.positions, (post) => post.id),
+    [ads.positions, posts],
+  );
 
   // Gerçek görüntüleme: kart en az %50 görünür ve eşik süresi kadar ekranda
   // kalmalı. Arka plan sekmesinde zamanlayıcı çalışmaz; kayıt sunucuda
@@ -57,10 +70,14 @@ export default function FeedScreen() {
   );
 
   const onViewableItemsChanged = useCallback(
-    ({ viewableItems }: { viewableItems: ViewToken<FeedPost>[] }) => {
+    ({ viewableItems }: { viewableItems: ViewToken<AdRow<FeedPost>>[] }) => {
       const visible = viewableItems
-        .filter((entry) => entry.isViewable && entry.item)
-        .map((entry) => ({ type: 'post' as const, id: entry.item.id, surface: 'feed' }));
+        .filter((entry) => entry.isViewable && entry.item?.type === 'item')
+        .map((entry) => ({
+          type: 'post' as const,
+          id: (entry.item as Extract<AdRow<FeedPost>, { type: 'item' }>).item.id,
+          surface: 'feed',
+        }));
       if (visible.length > 0) {
         void trackContentViews(visible);
       }
@@ -82,25 +99,25 @@ export default function FeedScreen() {
     router.push('/compose/story' as never);
   }, [router]);
 
-  const onSelectFilter = useCallback(
-    (next: FeedFilter) => {
-      haptics.selection();
-      setFilter(next);
-      if (next === 'nearby' && !city && !profile?.city) {
-        setCityPickerOpen(true);
-      }
-    },
-    [city, profile?.city],
-  );
-
-  const renderPost = useCallback(
-    ({ item }: { item: FeedPost }) => (
-      <View style={styles.cardWrap}>
-        <PostCard post={item} />
-        <View style={[styles.divider, { backgroundColor: theme.colors.divider }]} />
-      </View>
-    ),
-    [theme.colors.divider],
+  const renderRow = useCallback(
+    ({ item }: { item: AdRow<FeedPost> }) =>
+      item.type === 'item' ? (
+        <View style={styles.cardWrap}>
+          <PostCard post={item.item} />
+          <View style={[styles.divider, { backgroundColor: theme.colors.divider }]} />
+        </View>
+      ) : (
+        <View style={styles.cardWrap}>
+          <AdPlacementSlot
+            slot={ads.slotAt(item.after)}
+            placement={adPlacement}
+            onHide={ads.hide}
+            style={styles.adSlot}
+          />
+          <View style={[styles.divider, { backgroundColor: theme.colors.divider }]} />
+        </View>
+      ),
+    [adPlacement, ads, theme.colors.divider],
   );
 
   const header = (
@@ -109,49 +126,9 @@ export default function FeedScreen() {
         <StoriesRail onCreate={openStoryComposer} onOpen={openStory} />
       </View>
 
-      <View style={styles.filterRow}>
-        {FILTERS.map((item) => {
-          const active = filter === item.key;
-          return (
-            <Pressable
-              key={item.key}
-              accessibilityRole="button"
-              accessibilityLabel={item.label}
-              accessibilityState={{ selected: active }}
-              onPress={() => onSelectFilter(item.key)}
-              style={({ pressed }) => [
-                styles.filterPill,
-                {
-                  backgroundColor: active ? theme.colors.primary : theme.colors.surface,
-                  borderColor: active ? theme.colors.primary : theme.colors.border,
-                  opacity: pressed ? 0.75 : 1,
-                },
-              ]}
-            >
-              <AppText variant="label" color={active ? 'onPrimary' : 'textSecondary'}>
-                {item.label}
-              </AppText>
-            </Pressable>
-          );
-        })}
+      <MatchCenterFeedCard />
 
-        {filter === 'nearby' ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Şehir seç"
-            onPress={() => setCityPickerOpen(true)}
-            style={({ pressed }) => [
-              styles.cityChip,
-              { borderColor: theme.colors.border, opacity: pressed ? 0.7 : 1 },
-            ]}
-          >
-            <Ionicons name="location-outline" size={14} color={theme.colors.textSecondary} />
-            <AppText variant="caption" color="textSecondary" numberOfLines={1}>
-              {effectiveCity ?? 'Şehir seç'}
-            </AppText>
-          </Pressable>
-        ) : null}
-      </View>
+      <LiveNewsRail />
     </View>
   );
 
@@ -165,11 +142,7 @@ export default function FeedScreen() {
         </View>
       )}
       <AppText variant="h3" align="center">
-        {feed.isError
-          ? 'Akış yüklenemedi'
-          : filter === 'following'
-            ? 'Takip ettiğin kişiler henüz paylaşmadı'
-            : 'Akış henüz sakin'}
+        {feed.isError ? 'Akış yüklenemedi' : 'Akış henüz sakin'}
       </AppText>
       <AppText variant="body" color="textSecondary" align="center">
         {feed.isError
@@ -225,12 +198,14 @@ export default function FeedScreen() {
         </View>
       ) : (
         <FlashList
+          ref={listRef}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           style={styles.list}
-          data={posts}
-          renderItem={renderPost}
-          keyExtractor={(item) => item.id}
+          data={rows}
+          renderItem={renderRow}
+          keyExtractor={(row) => row.key}
+          getItemType={(row) => row.type}
           ListHeaderComponent={header}
           ListEmptyComponent={empty}
           contentContainerStyle={styles.listContent}
@@ -272,19 +247,6 @@ export default function FeedScreen() {
         startIndex={story?.index ?? 0}
         onClose={closeStory}
       />
-
-      <SelectSheet
-        visible={cityPickerOpen}
-        title="Şehir seç"
-        options={PROVINCES}
-        value={city ?? profile?.city ?? null}
-        onClose={() => setCityPickerOpen(false)}
-        onSelect={(value) => {
-          setCityPickerOpen(false);
-          setCity(value);
-          setFilter('nearby');
-        }}
-      />
     </Screen>
   );
 }
@@ -294,34 +256,9 @@ const styles = StyleSheet.create({
   list: { width: '100%', maxWidth: 680, alignSelf: 'center' },
   // Hikayeler basligin hemen altindan baslar; arada bos bir bant yok.
   storiesWrap: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 10 },
-  filterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-    flexWrap: 'wrap',
-  },
-  filterPill: {
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    minHeight: 36,
-    justifyContent: 'center',
-  },
-  cityChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    maxWidth: 150,
-  },
   listContent: { paddingBottom: 28 },
   cardWrap: { paddingHorizontal: 20 },
+  adSlot: { paddingVertical: 14 },
   divider: { height: StyleSheet.hairlineWidth },
   loading: { paddingHorizontal: 20, gap: 22, paddingTop: 8 },
   skeletonCard: { gap: 10 },

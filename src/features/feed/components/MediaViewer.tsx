@@ -17,6 +17,8 @@ type MediaViewerProps = {
   media: ViewerMedia[];
   startIndex?: number;
   onClose: () => void;
+  /** Medyanın dışındaki boş alana dokunulduğunda kapanır. */
+  closeOnBackdropPress?: boolean;
 };
 
 /**
@@ -26,7 +28,13 @@ type MediaViewerProps = {
  * pan, yatay geçiş, video kontrolleri) tek kaynak olarak kullanılır. Feed,
  * profil, Reels, yorumlar, mesajlar ve ilanlar aynı bileşeni paylaşır.
  */
-export function MediaViewer({ visible, media, startIndex = 0, onClose }: MediaViewerProps) {
+export function MediaViewer({
+  visible,
+  media,
+  startIndex = 0,
+  onClose,
+  closeOnBackdropPress,
+}: MediaViewerProps) {
   const items = useMemo(
     () =>
       media.map((item) => ({
@@ -50,6 +58,7 @@ export function MediaViewer({ visible, media, startIndex = 0, onClose }: MediaVi
       items={items}
       initialIndex={startIndex}
       onClose={onClose}
+      closeOnBackdropPress={closeOnBackdropPress}
     />
   );
 }

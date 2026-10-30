@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { AppText, Badge, Button, TextField } from '@/components/ui';
@@ -12,11 +12,14 @@ import {
   useNewsApiSaveConnection,
   useNewsApiSaveCredentials,
 } from '../../hooks/use-admin-news-api';
-import type { NewsConnection, NewsConnectorKind } from '@/features/news-api/types';
+import type {
+  NewsConnection,
+  NewsConnectorKind,
+  NewsTestResult,
+} from '@/features/news-api/types';
 import { useAdminToast } from '../AdminToast';
 
 import { ChipSelect, FormRow, InfoRow, newsApiStyles } from './shared';
-import type { NewsTestResult } from '@/features/news-api/types';
 
 const CONNECTORS: { value: NewsConnectorKind; label: string }[] = [
   { value: 'rss', label: 'RSS 2.0' },
@@ -96,7 +99,11 @@ export function NewsSourceForm({
   const [error, setError] = useState<string | null>(null);
   const [testDetail, setTestDetail] = useState<NewsTestResult | null>(connection.last_test_detail ?? null);
 
-  useEffect(() => {
+  // Bağlantı kaydı değiştiğinde form alanları render sırasında bir kez
+  // senkronlanır; effect içinde setState çağrısı yapılmaz.
+  const [syncedConnection, setSyncedConnection] = useState<NewsConnection | null>(null);
+  if (syncedConnection !== connection) {
+    setSyncedConnection(connection);
     setName(connection.name);
     setDescription(connection.description ?? '');
     setHomepage(connection.homepage_url ?? '');
@@ -126,7 +133,7 @@ export function NewsSourceForm({
     setAiClassification(connection.ai_classification);
     setNotes(connection.notes ?? '');
     setTestDetail(connection.last_test_detail ?? null);
-  }, [connection]);
+  }
 
   const submit = async () => {
     setError(null);
@@ -293,7 +300,7 @@ export function NewsSourceForm({
         <View style={[styles.secretBox, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }]}>
           <AppText variant="label">API anahtarı / token</AppText>
           <AppText variant="caption" color="textTertiary">
-            Anahtar Supabase Vault'ta şifreli saklanır, istemciye geri gönderilmez ve kayıtlarda maskelenir.
+            Anahtar Supabase Vault’ta şifreli saklanır, istemciye geri gönderilmez ve kayıtlarda maskelenir.
           </AppText>
           <FormRow>
             <TextField

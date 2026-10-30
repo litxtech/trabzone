@@ -53,6 +53,49 @@ export function useLegalDocuments(locale: LegalLocale = 'tr') {
   });
 }
 
+/** Aynı kanalı dinleyen tüm ekranların tazeleme geri çağrıları. */
+const legalListeners = new Set<() => void>();
+let legalChannel: ReturnType<typeof supabase.channel> | null = null;
+let legalChannelReady = false;
+
+const notifyLegalListeners = () => {
+  legalListeners.forEach((listener) => listener());
+};
+
+/**
+ * `legal-policies` kanalını süreç başına bir kez kurar.
+ *
+ * `supabase.channel(topic)` aynı konu için mevcut kanal örneğini döndürür.
+ * Her ekran kendi kanalını kurup `removeChannel` ile kaldırdığında, kaldırma
+ * asenkron olduğu için iki ekran art arda bağlandığında ikinci `.on(...)`
+ * çağrısı "cannot add `postgres_changes` callbacks ... after `subscribe()`"
+ * hatası veriyordu (özellikle React StrictMode'un çift mount'unda). Kanal artık
+ * paylaşılıyor: dinleyiciler bir kümede tutulur, kanal bir kez abone olur.
+ */
+function ensureLegalChannel() {
+  if (legalChannel && legalChannelReady) {
+    return;
+  }
+  const channel = supabase.channel('legal-policies');
+  try {
+    channel
+      .on('broadcast', { event: 'legal_changed' }, notifyLegalListeners)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'safety_policy_versions' },
+        notifyLegalListeners,
+      )
+      .subscribe();
+    legalChannel = channel;
+    legalChannelReady = true;
+  } catch {
+    // Kanal başka bir abone tarafından çoktan kurulmuş olabilir; o kanal zaten
+    // aynı olayları iletiyor, yeniden abone olmaya çalışmayız.
+    legalChannel = channel;
+    legalChannelReady = true;
+  }
+}
+
 /**
  * Yayınlanmış sözleşmeler değiştiğinde açık oturumları anında tazeler.
  * Yönetim panelinden yapılan her yayın/geri alma/düzenleme, sayfa
@@ -74,18 +117,13 @@ export function useLegalRealtime(enabled = true) {
       void queryClient.invalidateQueries({ queryKey: ['legal'] });
       void queryClient.invalidateQueries({ queryKey: ['safety'] });
     };
-    const channel = supabase
-      .channel('legal-policies')
-      .on('broadcast', { event: 'legal_changed' }, refresh)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'safety_policy_versions' },
-        refresh,
-      )
-      .subscribe();
+    legalListeners.add(refresh);
+    ensureLegalChannel();
 
     return () => {
-      void supabase.removeChannel(channel);
+      legalListeners.delete(refresh);
+      // Kanal bilinçli olarak açık bırakılır: sonraki mount'ta yeniden
+      // kullanılır, tekrar abone olma hatası oluşmaz.
     };
   }, [enabled, queryClient]);
 }

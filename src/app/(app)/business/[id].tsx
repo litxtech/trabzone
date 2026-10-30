@@ -16,6 +16,9 @@ import {
   useUpsertPlaceReviewReply,
 } from '@/features/explore/hooks/use-explore';
 import type { PlaceMedia, PlaceReview } from '@/features/explore/types';
+import { formatViewCount } from '@/features/views/format';
+import { useContentViewCount } from '@/features/views/use-content-views';
+import { ContentStatsSheet } from '@/features/views/components/ContentStatsSheet';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 import { useRouter } from '@/utils/router';
@@ -92,6 +95,9 @@ export default function BusinessPanelScreen() {
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const detail = usePlaceDetail(id);
   const place = detail.data;
+  // İşletme sahibi kendi profilini açtığında sayaç artmaz; sayı yine okunur.
+  const viewCount = useContentViewCount({ type: 'place', id: id ?? null });
+  const [statsOpen, setStatsOpen] = useState(false);
 
   const update = useUpdateManagedPlace(id ?? '');
   const removeMedia = useDeletePlaceMedia(id ?? '');
@@ -271,7 +277,7 @@ export default function BusinessPanelScreen() {
       {header}
 
       <View style={[styles.stats, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
-        <Stat label="Görüntülenme" value={place.view_count} />
+        <Stat label="Tekil görüntüleme" value={formatViewCount(viewCount)} />
         <Stat label="Favori" value={place.favorite_count} />
         <Stat label="Yorum" value={place.review_count} />
         <Stat label="Fotoğraf" value={place.photo_count} />
@@ -281,6 +287,33 @@ export default function BusinessPanelScreen() {
           value={place.rating_avg == null ? '—' : place.rating_avg.toFixed(1)}
         />
       </View>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="İşletme görüntüleme istatistiklerini aç"
+        onPress={() => setStatsOpen(true)}
+        style={({ pressed }) => [
+          styles.statsLink,
+          {
+            borderColor: theme.colors.border,
+            backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
+          },
+        ]}
+      >
+        <Ionicons name="eye-outline" size={16} color={theme.colors.primaryDeep} />
+        <AppText variant="caption" color="primaryDeep" style={styles.flex}>
+          Tekil görüntüleme ve etkileşim istatistikleri
+        </AppText>
+        <Ionicons name="chevron-forward" size={15} color={theme.colors.textTertiary} />
+      </Pressable>
+
+      <ContentStatsSheet
+        visible={statsOpen}
+        onClose={() => setStatsOpen(false)}
+        type="place"
+        id={place.id}
+        title={place.name}
+      />
 
       <Card style={styles.section}>
         <SectionTitle icon="create-outline" title="Profil bilgileri" />
@@ -619,6 +652,16 @@ const styles = StyleSheet.create({
   },
   stat: { width: '33.33%', alignItems: 'center', paddingVertical: 8, gap: 1 },
   statDot: { width: 18, height: 3, borderRadius: 2, marginTop: 2 },
+  statsLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    marginTop: 8,
+  },
   section: { gap: 10, marginTop: 12 },
   sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

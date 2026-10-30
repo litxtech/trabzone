@@ -64,8 +64,33 @@ if (socialAuthEnabled && !hasAppleSignIn) {
   process.exit(1);
 }
 
+/**
+ * Push (APNs) yetkisi. `aps-environment` yoksa uygulama derlenir ama hiçbir
+ * bildirim cihaza ulaşmaz; bunu arşiv sonrası fark etmek yerine burada
+ * durduruyoruz. Değer, expo-notifications config plugin `mode` seçeneğinden
+ * gelir (development = sandbox, production = TestFlight/App Store).
+ */
+const apsEnvironment = entitlements['aps-environment'];
+if (!apsEnvironment) {
+  console.error(
+    'HATA: iOS push yetkisi (aps-environment) üretilmemiş. expo-notifications config plugin ' +
+      'app.config.ts içinde etkin olmalı ve Expo/EAS projesinde APNs anahtarı yüklü olmalı.',
+  );
+  process.exit(1);
+}
+
+const profile = process.env.EAS_BUILD_PROFILE ?? '';
+if ((profile === 'production' || profile === 'preview') && apsEnvironment !== 'production') {
+  console.error(
+    `HATA: ${profile} profili için aps-environment "${apsEnvironment}" üretilmiş; ` +
+      'TestFlight/App Store dağıtımı "production" bekler. app.config.ts içindeki mode seçeneğini kontrol edin.',
+  );
+  process.exit(1);
+}
+
 console.log(
   hasAppleSignIn
     ? 'OK: Apple ile giriş yetkisi üretildi (sosyal giriş açık). Profilin yetkiyi içerdiğinden emin olun.'
     : 'OK: Apple ile giriş yetkisi üretilmedi (sosyal giriş kapalı) — mevcut imzalama profiliyle uyumlu.',
 );
+console.log(`OK: push yetkisi üretildi (aps-environment: ${apsEnvironment}).`);

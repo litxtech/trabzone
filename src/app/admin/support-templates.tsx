@@ -40,7 +40,7 @@ export default function AdminSupportTemplatesScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const canManage = (me.data?.permissions ?? []).includes('support.manage');
-  const templates = templatesQuery.data ?? [];
+  const templates = useMemo(() => templatesQuery.data ?? [], [templatesQuery.data]);
 
   const visible = useMemo(() => {
     const term = query.trim().toLocaleLowerCase('tr-TR');

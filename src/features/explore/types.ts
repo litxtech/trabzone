@@ -269,6 +269,52 @@ export type ExploreSearchItem = {
   rating: number | null;
   category: string | null;
   verified: boolean;
+  /** İşletme kaydında varsa açık adres (arama sonucu kartında gösterilir). */
+  address?: string | null;
+  /** İşletme kaydında varsa telefon. */
+  phone?: string | null;
+};
+
+/** Harici harita sağlayıcıları ("Haritaya yer ekle" araması). */
+export type ExternalPlaceSource = 'google' | 'apple' | 'osm';
+
+/**
+ * Google / Apple haritalarından gelen işletme önerisi. Trabzone'da henüz
+ * kaydı olmayan işletmeleri forma tek dokunuşla doldurmak için kullanılır.
+ */
+export type ExternalPlaceSuggestion = {
+  id: string;
+  source: ExternalPlaceSource;
+  /** Aynı işletme iki sağlayıcıda da bulunduysa ikisi birden listelenir. */
+  sources: ExternalPlaceSource[];
+  name: string;
+  address: string;
+  lat: number;
+  lng: number;
+  /** Sağlayıcının kendi kategori etiketi (örn. "Kahvaltı salonu"). */
+  category: string | null;
+  /** Sağlayıcı tip kodları; Trabzone kategorisine eşlemek için kullanılır. */
+  types: string[];
+  phone: string | null;
+  website: string | null;
+  rating: number | null;
+  ratingCount: number | null;
+  /** Sağlayıcı işletmeyi geçici olarak kapalı işaretlediyse true. */
+  closed: boolean;
+  /** Sağlayıcıdaki kalıcı kimlik (örn. OSM `node/123`). Kayıt tekilleştirmede kullanılır. */
+  externalId?: string | null;
+};
+
+/**
+ * Trabzone'da fotoğrafı olmayan işletme için Google Haritalar'dan gelen kapak.
+ * `url` kısa ömürlüdür ve saklanmaz; gösterirken atıf zorunludur.
+ */
+export type ExternalPlacePhoto = {
+  url: string;
+  width: number | null;
+  height: number | null;
+  source: 'google';
+  attributions: { name: string; uri: string | null }[];
 };
 
 export type AreaSearchResult = {
@@ -317,6 +363,20 @@ export type RealEstateListing = {
   district_id: number | null;
   neighborhood_id: number | null;
   cover_path: string | null;
+  /**
+   * Kart üzerindeki fotoğraf şeridi için onaylı görsellerin ilk birkaçı.
+   * Eski liste yanıtlarında bulunmayabilir.
+   */
+  photos?: string[];
+  photo_count?: number;
+  /** İlanı paylaşan kişi; listede kart üzerinde gösterilir. */
+  owner?: {
+    id: string;
+    username: string;
+    display_name: string | null;
+    avatar_path: string | null;
+    is_verified: boolean;
+  } | null;
   is_favorite: boolean;
   is_mine: boolean;
   published_at: string | null;

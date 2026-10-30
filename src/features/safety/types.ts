@@ -172,6 +172,10 @@ export type ChildProtection = {
   content_filter: 'standard' | 'strict';
   enforced_by_system: boolean;
   guardian_consent_required: boolean;
+  /** Kısıtlanmış hesapta gönderiler yalnızca arkadaşlara görünür. */
+  post_visibility: 'followers' | null;
+  /** Kısıtlanmış hesapta konum/şehir etiketi kapalıdır. */
+  post_city_enabled: boolean;
 };
 
 export type GuardianState = {
@@ -189,8 +193,13 @@ export type SafetyState = {
   adult_age: number;
   birth_date_set: boolean;
   birth_date: string | null;
+  age: number | null;
   age_group: AgeGroup;
   is_child_protected: boolean;
+  /** 18 yaş altı hesaplar kısıtlanmış hesap sayılır. */
+  restricted_account: boolean;
+  /** Kısıtlanmış hesaplarda "Çocuk Hesabı", değilse null. */
+  account_label: string | null;
   verification_state: VerificationState;
   guardian_required: boolean;
   evaluated_at: string | null;

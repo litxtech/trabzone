@@ -43,6 +43,10 @@ export type ThemeColors = {
   tabBar: string;
   tabBarBorder: string;
   glass: string;
+  /** Yarı saydam kartlarda görünür kalan cam kenarı. */
+  glassBorder: string;
+  /** Cam kartın üst kenarındaki ince ışık çizgisi. */
+  glassHighlight: string;
   shadow: string;
 };
 
@@ -98,6 +102,8 @@ const lightColors: ThemeColors = {
   tabBar: 'rgba(255, 255, 255, 0.96)',
   tabBarBorder: 'rgba(21, 32, 57, 0.07)',
   glass: 'rgba(255, 255, 255, 0.78)',
+  glassBorder: 'rgba(65, 105, 245, 0.16)',
+  glassHighlight: 'rgba(255, 255, 255, 0.92)',
   shadow: '#1E3A8A',
 };
 
@@ -136,6 +142,8 @@ const darkColors: ThemeColors = {
   tabBar: 'rgba(11, 16, 32, 0.96)',
   tabBarBorder: 'rgba(255, 255, 255, 0.07)',
   glass: 'rgba(20, 28, 48, 0.76)',
+  glassBorder: 'rgba(255, 255, 255, 0.16)',
+  glassHighlight: 'rgba(255, 255, 255, 0.1)',
   shadow: '#000000',
 };
 

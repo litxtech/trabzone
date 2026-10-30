@@ -9,7 +9,16 @@ import { env } from '@/config/env';
  * Sunucu bu adresi zengin kart olarak işler ve uygulama yüklüyse doğrudan
  * ilgili ekrana yönlendirir.
  */
-export type ShareKind = 'post' | 'reel' | 'profile' | 'place' | 'listing' | 'estate';
+export type ShareKind =
+  | 'post'
+  | 'reel'
+  | 'profile'
+  | 'place'
+  | 'listing'
+  | 'estate'
+  | 'live'
+  | 'earthquake'
+  | 'match';
 
 const SEGMENTS: Record<ShareKind, string> = {
   post: 'gonderi',
@@ -18,6 +27,9 @@ const SEGMENTS: Record<ShareKind, string> = {
   place: 'mekan',
   listing: 'ilan',
   estate: 'emlak',
+  live: 'gelisme',
+  earthquake: 'deprem',
+  match: 'mac',
 };
 
 /** `/p/...` adresindeki tür adlarını kanonik türlere çevirir. */
@@ -37,7 +49,23 @@ const TYPE_ALIASES: Record<string, ShareKind> = {
   emlak: 'estate',
   estate: 'estate',
   'real-estate': 'estate',
+  gelisme: 'live',
+  live: 'live',
+  'live-news': 'live',
+  live_news: 'live',
+  'anlik-haber': 'live',
+  breaking: 'live',
+  deprem: 'earthquake',
+  earthquake: 'earthquake',
+  mac: 'match',
+  match: 'match',
 };
+
+/** Maç kimliği sağlayıcının pozitif fixture kimliğidir (TEST maçları paylaşılmaz). */
+const MATCH_ID_RE = /^[1-9][0-9]{0,11}$/;
+
+/** Deprem kimliği kaynak önekli kanonik kimliktir (ör. `afad-597506`). */
+const EARTHQUAKE_ID_RE = /^(afad|usgs)-[a-z0-9]{1,60}$/;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const USERNAME_RE = /^[a-z0-9_.]{3,24}$/;
@@ -87,6 +115,21 @@ export function estateShareLink(id: string): string {
   return shareLink('estate', id);
 }
 
+/** Vatandaşın anlık gelişmesi: `/p/gelisme/{post_id}`. */
+export function liveNewsShareLink(id: string, comment?: string): string {
+  return shareLink('live', id, { comment });
+}
+
+/** Deprem ayrıntısı: `/p/deprem/{afad-…|usgs-…}`. */
+export function earthquakeShareLink(id: string): string {
+  return shareLink('earthquake', id);
+}
+
+/** Maç Arenası: `/p/mac/{fixture_id}`. */
+export function matchShareLink(fixtureId: number | string, comment?: string): string {
+  return shareLink('match', String(fixtureId), { comment });
+}
+
 /**
  * Süreli canlı konum bağlantısı (`/ride/share/{token}`).
  *
@@ -114,6 +157,15 @@ export function resolveShareRoute(type: string, key: string): string | null {
     return USERNAME_RE.test(username) ? `/profile/${username}` : null;
   }
 
+  if (kind === 'earthquake') {
+    const eventId = value.toLowerCase();
+    return EARTHQUAKE_ID_RE.test(eventId) ? `/deprem/${eventId}` : null;
+  }
+
+  if (kind === 'match') {
+    return MATCH_ID_RE.test(value) ? `/trabzonspor/mac/${value}` : null;
+  }
+
   const id = value.toLowerCase();
   if (!UUID_RE.test(id)) {
     return null;
@@ -130,6 +182,8 @@ export function resolveShareRoute(type: string, key: string): string | null {
       return `/marketplace/${id}`;
     case 'estate':
       return `/marketplace/real-estate/${id}`;
+    case 'live':
+      return `/anlik-haber/${id}`;
     default:
       return null;
   }

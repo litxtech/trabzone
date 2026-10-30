@@ -15,6 +15,26 @@ export type Reel = {
   author_is_verified: boolean;
   video_path: string;
   cover_path: string | null;
+  storage_bucket?: 'posts' | 'reels';
+  /** Anlık gelişmeden üretildiyse kanonik gönderi kimliği. */
+  live_news_id?: string | null;
+  live_news?: {
+    post_id: string;
+    canonical_id: string;
+    title: string;
+    summary: string | null;
+    category: string;
+    district: string | null;
+    verification_status:
+      | 'citizen'
+      | 'reviewing'
+      | 'verified'
+      | 'corrected'
+      | 'unverified'
+      | 'removed';
+    moderation_status: 'pending' | 'visible' | 'hidden' | 'removed';
+    published_at: string | null;
+  } | null;
   caption: string | null;
   audio_title: string | null;
   duration_ms: number | null;
@@ -250,9 +270,13 @@ export async function deleteReelComment(commentId: string): Promise<Result<null>
   return ok(null);
 }
 
-export function reelUrl(path: string | null | undefined): string | null {
-  // R2'ye yüklenen reels medyası da aynı yol biçimini kullanır.
-  return publicMediaUrl('reels', path);
+export function reelUrl(
+  path: string | null | undefined,
+  bucket: 'reels' | 'posts' = 'reels',
+): string | null {
+  // Anlık gelişmeden gelen Reels kaydı aynı dosyayı `posts` bucket'ında
+  // işaret eder; fiziksel kopya yoktur.
+  return publicMediaUrl(bucket, path);
 }
 
 /** Yayinlama yarida kalirsa yuklenen dosyalari temizler (en iyi caba). */

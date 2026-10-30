@@ -20,9 +20,8 @@ import { PolicyBody } from '@/features/safety/components/PolicyBody';
 import { buildLegalDirectory, groupLegalDirectory, legalPath } from '../../legal/catalog';
 import { flatStyle } from '../link-style';
 import { useWebMeta } from '../use-web-meta';
-import { WebFooter } from './WebFooter';
-import { WebHeader } from './WebHeader';
 import { webPageRoot } from '../page-root';
+import { PublicShell } from './PublicShell';
 
 type Props = { slug: string; document?: LegalDocument | null; isLoading?: boolean };
 
@@ -78,10 +77,8 @@ export function LegalPage({ slug, document: doc, isLoading }: Props) {
   const grouped = groupLegalDirectory(directory);
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-      <WebHeader />
-
-      <View style={styles.hero}>
+    <PublicShell title={docTitle ?? fallbackTitle} fallbackHref="/settings/legal">
+      <View style={[styles.hero, Platform.OS !== 'web' && styles.heroNative]}>
         <View style={styles.heroInner}>
           <View style={styles.breadcrumb}>
             <Link href={'/' as Href} asChild>
@@ -102,25 +99,18 @@ export function LegalPage({ slug, document: doc, isLoading }: Props) {
           <AppText variant="caption" color="#8EA6D8" style={styles.eyebrow}>
             TRABZONE HUKUKİ MERKEZ
           </AppText>
-          <AppText
-            variant="h1"
-            color="#FFFFFF"
-            style={styles.heroTitle}
-            accessibilityRole="header"
-          >
+          <AppText variant="h1" color="#FFFFFF" style={styles.heroTitle} accessibilityRole="header">
             {docTitle ?? fallbackTitle}
           </AppText>
-          {doc?.summary ?? directoryItem?.description ? (
+          {(doc?.summary ?? directoryItem?.description) ? (
             <AppText variant="body" color="#A9BDE2" style={styles.heroSummary}>
               {doc?.summary ?? directoryItem?.description}
             </AppText>
           ) : null}
 
           <View style={styles.metaRow}>
-            {doc ? (
-              <MetaPill icon="layers-outline" label={`Sürüm ${doc.version}`} />
-            ) : null}
-            {doc?.effective_at ?? doc?.published_at ? (
+            {doc ? <MetaPill icon="layers-outline" label={`Sürüm ${doc.version}`} /> : null}
+            {(doc?.effective_at ?? doc?.published_at) ? (
               <MetaPill
                 icon="calendar-outline"
                 label={`Yürürlük: ${formatDateTr(doc.effective_at ?? doc.published_at ?? '')}`}
@@ -148,7 +138,9 @@ export function LegalPage({ slug, document: doc, isLoading }: Props) {
                 label="Yazdır"
                 variant="secondary"
                 size="sm"
-                leftIcon={<Ionicons name="print-outline" size={15} color={theme.colors.primaryDeep} />}
+                leftIcon={
+                  <Ionicons name="print-outline" size={15} color={theme.colors.primaryDeep} />
+                }
                 onPress={() => window.print()}
               />
             ) : null}
@@ -227,8 +219,7 @@ export function LegalPage({ slug, document: doc, isLoading }: Props) {
               <View style={[styles.paperFooter, { borderTopColor: theme.colors.border }]}>
                 <AppText variant="caption" color="textTertiary">
                   Bu metin Trabzone&apos;un yürürlükteki sürümüdür. Belge sürümü ve yürürlük tarihi
-                  değiştiğinde kullanıcılar bilgilendirilir; zorunlu hâllerde yeniden kabul
-                  istenir.
+                  değiştiğinde kullanıcılar bilgilendirilir; zorunlu hâllerde yeniden kabul istenir.
                 </AppText>
                 <AppText variant="caption" color="textTertiary">
                   Sorularınız için{' '}
@@ -265,67 +256,71 @@ export function LegalPage({ slug, document: doc, isLoading }: Props) {
           </Card>
         </View>
 
-        <View style={styles.aside}>
-          <View style={styles.asideBlock}>
-            <AppText variant="overline" color="textTertiary">
-              HUKUKİ BELGELER
-            </AppText>
-            {grouped.map((group) => (
-              <View key={group.category} style={styles.asideGroup}>
-                <AppText variant="caption" color="textTertiary" style={styles.asideGroupTitle}>
-                  {group.category}
-                </AppText>
-                {group.items.map((item) => {
-                  const active = item.slug === slug;
-                  return (
-                    <Link key={item.slug} href={item.path as Href} asChild>
-                      <Pressable
-                        style={flatStyle([
-                          styles.asideLink,
-                          active ? { backgroundColor: theme.colors.primarySoft } : null,
-                        ])}
-                      >
-                        <AppText
-                          variant={active ? 'bodyStrong' : 'body'}
-                          color={active ? 'primaryDeep' : 'textSecondary'}
-                        >
-                          {item.shortTitle}
-                        </AppText>
-                        {active ? (
-                          <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
-                        ) : null}
-                      </Pressable>
-                    </Link>
-                  );
-                })}
-              </View>
-            ))}
-          </View>
-
-          {sections.filter((section) => section.title).length > 0 ? (
+        {Platform.OS === 'web' ? (
+          <View style={styles.aside}>
             <View style={styles.asideBlock}>
               <AppText variant="overline" color="textTertiary">
-                İÇİNDEKİLER
+                HUKUKİ BELGELER
               </AppText>
-              {sections
-                .filter((section) => section.title)
-                .map((section, index) => (
-                  <AppText
-                    key={`${section.title}-${index}`}
-                    variant="caption"
-                    color="textSecondary"
-                    style={styles.tocItem}
-                  >
-                    {section.title}
+              {grouped.map((group) => (
+                <View key={group.category} style={styles.asideGroup}>
+                  <AppText variant="caption" color="textTertiary" style={styles.asideGroupTitle}>
+                    {group.category}
                   </AppText>
-                ))}
+                  {group.items.map((item) => {
+                    const active = item.slug === slug;
+                    return (
+                      <Link key={item.slug} href={item.path as Href} asChild>
+                        <Pressable
+                          style={flatStyle([
+                            styles.asideLink,
+                            active ? { backgroundColor: theme.colors.primarySoft } : null,
+                          ])}
+                        >
+                          <AppText
+                            variant={active ? 'bodyStrong' : 'body'}
+                            color={active ? 'primaryDeep' : 'textSecondary'}
+                          >
+                            {item.shortTitle}
+                          </AppText>
+                          {active ? (
+                            <Ionicons
+                              name="chevron-forward"
+                              size={14}
+                              color={theme.colors.primary}
+                            />
+                          ) : null}
+                        </Pressable>
+                      </Link>
+                    );
+                  })}
+                </View>
+              ))}
             </View>
-          ) : null}
-        </View>
-      </View>
 
-      <WebFooter />
-    </View>
+            {sections.filter((section) => section.title).length > 0 ? (
+              <View style={styles.asideBlock}>
+                <AppText variant="overline" color="textTertiary">
+                  İÇİNDEKİLER
+                </AppText>
+                {sections
+                  .filter((section) => section.title)
+                  .map((section, index) => (
+                    <AppText
+                      key={`${section.title}-${index}`}
+                      variant="caption"
+                      color="textSecondary"
+                      style={styles.tocItem}
+                    >
+                      {section.title}
+                    </AppText>
+                  ))}
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+      </View>
+    </PublicShell>
   );
 }
 
@@ -363,6 +358,7 @@ const styles = StyleSheet.create({
     paddingBottom: 46,
     paddingHorizontal: 20,
   },
+  heroNative: { paddingTop: 20, paddingBottom: 26 },
   heroInner: { width: '100%', maxWidth: 1160, alignSelf: 'center' },
   breadcrumb: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 18 },
   eyebrow: { letterSpacing: 1.6, marginBottom: 10 },

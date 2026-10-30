@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,6 +17,7 @@ import { DrawingOverlay } from '@/features/explore/components/DrawingOverlay';
 import { useExploreBootstrap, usePlacesMap } from '@/features/explore/hooks/use-explore';
 import type { PlaceMarker } from '@/features/explore/types';
 import { bboxForCamera, polygonClosedGeoJson } from '@/features/explore/utils/geo';
+import { openUrl } from '@/features/in-app-browser';
 import { publicMediaUrl } from '@/features/media/media-service';
 import {
   EMPTY_MARKET_FILTERS,
@@ -444,7 +444,7 @@ export default function MarketMapScreen() {
         <Pressable
           accessibilityRole="link"
           accessibilityLabel="OpenStreetMap veri lisansı"
-          onPress={() => void Linking.openURL('https://www.openstreetmap.org/copyright')}
+          onPress={() => void openUrl('https://www.openstreetmap.org/copyright')}
           style={[
             styles.attribution,
             {

@@ -10,12 +10,12 @@ type Props = {
 };
 
 /**
- * Cocuk Korumali Hesap rozeti.
+ * Çocuk Hesabı (kısıtlanmış hesap) rozeti.
  *
- * GORUNURLUK KURALI: Bu bilesen yalnizca hesap sahibi (kendi profili),
- * dogrulanmis veli ve yetkili moderasyon ekibi tarafindan render edilir.
- * Baska kullanicilarin profillerinde ASLA gosterilmez; sunucu da
- * `safety_profile_flags` uzerinden yabanciya bos nesne dondurur.
+ * GÖRÜNÜRLÜK KURALI: Bu bileşen yalnızca hesap sahibi, hesabın arkadaşları
+ * (karşılıklı takip), doğrulanmış veli ve yetkili moderasyon ekibi tarafından
+ * render edilir. Yabancıya yaş bilgisi verilmez; sunucu da
+ * `safety_profile_flags` üzerinden yabancıya boş nesne döndürür.
  */
 export function ChildProtectedBadge({ variant = 'compact', onPress }: Props) {
   const { theme } = useTheme();
@@ -30,7 +30,7 @@ export function ChildProtectedBadge({ variant = 'compact', onPress }: Props) {
       >
         <Ionicons name="shield-checkmark" size={13} color={theme.colors.primaryDeep} />
         <AppText variant="caption" color="primaryDeep" numberOfLines={1}>
-          Çocuk Korumalı
+          Çocuk Hesabı
         </AppText>
       </View>
     ) : (
@@ -45,11 +45,11 @@ export function ChildProtectedBadge({ variant = 'compact', onPress }: Props) {
         </View>
         <View style={styles.cardText}>
           <AppText variant="title" color="primaryDeep">
-            Çocuk Korumalı Hesap
+            Çocuk Hesabı · Kısıtlanmış Hesap
           </AppText>
           <AppText variant="caption" color="textSecondary">
-            Profilin gizli, tanımadığın kişiler mesaj atamaz. Rozeti yalnızca sen, velin ve yönetim
-            görür.
+            Gönderilerin yalnızca arkadaşlarına görünür. Profilin gizli, tanımadığın kişiler mesaj
+            atamaz; konum paylaşımı kapalıdır. Rozeti yabancılar görmez.
           </AppText>
         </View>
         <Ionicons name="information-circle-outline" size={20} color={theme.colors.primaryDeep} />

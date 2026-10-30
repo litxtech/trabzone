@@ -106,6 +106,20 @@ export default function SettingsScreen() {
           />
           <Divider />
           <SettingRow
+            icon="notifications-outline"
+            label="Bildirimler"
+            value="Push ve türler"
+            onPress={() => router.push('/settings/notifications' as never)}
+          />
+          <Divider />
+          <SettingRow
+            icon="notifications-outline"
+            label="Anlık haber bildirimleri"
+            value="Bölge ve tür"
+            onPress={() => router.push('/settings/live-news')}
+          />
+          <Divider />
+          <SettingRow
             icon="ban-outline"
             label="Engellenen kişiler"
             onPress={() => router.push('/settings/blocked')}

@@ -132,7 +132,7 @@ export default function GarageCreateScreen() {
         photoPaths,
       });
       setSavedId(result.id);
-      setNotice('Araç kaydedildi. Belgeler onaylandığında ilan yayınlanabilir.');
+      setNotice('Araç kaydedildi. Hemen yolculuk ilanı yayınlayabilirsin; belgeler ilanı engellemez.');
     } catch (cause) {
       setError(errorMessage(cause, 'Araç kaydedilemedi.'));
     }
@@ -241,7 +241,7 @@ export default function GarageCreateScreen() {
     <Screen edges={['top', 'left', 'right', 'bottom']} scroll padded>
       <RideHeader
         title={existing ? 'Araç düzenle' : 'Yeni araç'}
-        subtitle="Araç bilgileri ve zorunlu belgeler"
+        subtitle="Araç bilgileri · belgeler isteğe bağlı"
         right={
           <Pressable
             accessibilityRole="button"
@@ -520,8 +520,9 @@ export default function GarageCreateScreen() {
         <Card padding={16} style={styles.form}>
           <AppText variant="title">Belgeler</AppText>
           <AppText variant="caption" color="textTertiary">
-            Ruhsat, sigorta ve muayene belgelerinin geçerlilik tarihi girilmelidir. Belgeler özel
-            `ride-documents` kovasında saklanır ve yalnızca yetkili inceleyiciler erişebilir.
+            Belgeler isteğe bağlıdır; ilan yayınını engellemez. Yüklersen ruhsat, sigorta ve
+            muayene geçerlilik tarihleri takip edilir. Belgeler özel `ride-documents` kovasında
+            saklanır ve yalnızca yetkili inceleyiciler erişebilir.
           </AppText>
           <View style={styles.chips}>
             {(Object.keys(DOC_LABEL) as DocKind[]).map((item) => {

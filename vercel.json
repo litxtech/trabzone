@@ -24,24 +24,35 @@
       "memory": 512,
       "maxDuration": 10
     },
+    "api/match.js": {
+      "includeFiles": "dist/index.html",
+      "memory": 1024,
+      "maxDuration": 15
+    },
+    "api/live-news.js": {
+      "includeFiles": "dist/index.html",
+      "memory": 1024,
+      "maxDuration": 15
+    },
     "api/news.js": {
       "includeFiles": "dist/index.html",
       "memory": 1024,
       "maxDuration": 15
     },
-    "api/sitemap-news.js": {
+    "api/pharmacy.js": {
+      "includeFiles": "dist/index.html",
+      "memory": 1024,
+      "maxDuration": 15
+    },
+    "api/place-search.js": {
       "memory": 512,
       "maxDuration": 15
     },
-    "api/sitemap-blog.js": {
+    "api/place-photo.js": {
       "memory": 512,
       "maxDuration": 15
     },
-    "api/sitemap-hubs.js": {
-      "memory": 512,
-      "maxDuration": 15
-    },
-    "api/sitemap-news.js": {
+    "api/sitemap.js": {
       "memory": 512,
       "maxDuration": 15
     }
@@ -70,14 +81,29 @@
     { "source": "/policy/real-estate-rules", "destination": "/seo/real-estate-rules.html" },
     { "source": "/policy/vehicle-rules", "destination": "/seo/vehicle-rules.html" },
 
-    { "source": "/sitemap-listings.xml", "destination": "/api/sitemap-listings" },
-    { "source": "/sitemap-hubs.xml", "destination": "/api/sitemap-hubs" },
-    { "source": "/sitemap-blog.xml", "destination": "/api/sitemap-blog" },
-    { "source": "/sitemap-news.xml", "destination": "/api/sitemap-news" },
+    { "source": "/sitemap-listings.xml", "destination": "/api/sitemap?type=listings" },
+    { "source": "/sitemap-hubs.xml", "destination": "/api/sitemap?type=hubs" },
+    { "source": "/sitemap-blog.xml", "destination": "/api/sitemap?type=blog" },
+    { "source": "/sitemap-news.xml", "destination": "/api/sitemap?type=news" },
 
     { "source": "/haber/:slug", "destination": "/api/news?slug=:slug" },
     { "source": "/haber", "destination": "/api/news" },
-    { "source": "/sitemap-news.xml", "destination": "/api/sitemap-news" },
+    { "source": "/sitemap-pharmacy.xml", "destination": "/api/sitemap?type=pharmacy" },
+
+    { "source": "/eczaneler/harita", "destination": "/index.html" },
+    { "source": "/nobetci-eczaneler/:district", "destination": "/api/pharmacy?view=duty&district=:district" },
+    { "source": "/nobetci-eczaneler", "destination": "/api/pharmacy?view=duty" },
+    { "source": "/eczaneler/:slug", "destination": "/api/pharmacy?view=detail&slug=:slug" },
+    { "source": "/eczaneler", "destination": "/api/pharmacy?view=index" },
+
+    { "source": "/anlik-haber/:id", "destination": "/api/live-news?id=:id" },
+    { "source": "/live-news/:id", "destination": "/api/live-news?id=:id" },
+    { "source": "/sitemap-live-news.xml", "destination": "/api/sitemap?type=live-news" },
+
+    { "source": "/trabzonspor/bildirimler", "destination": "/index.html" },
+    { "source": "/trabzonspor/mac/:id", "destination": "/api/match?id=:id" },
+    { "source": "/trabzonspor", "destination": "/api/match" },
+    { "source": "/sitemap-sports.xml", "destination": "/api/sitemap?type=sports" },
 
     { "source": "/blog/:slug", "destination": "/api/blog?slug=:slug" },
     { "source": "/blog", "destination": "/api/blog" },
@@ -116,6 +142,10 @@
     {
       "source": "/assets/(.*)",
       "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    },
+    {
+      "source": "/hero-trabzon-1800.webp",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800, stale-while-revalidate=86400" }]
     },
     {
       "source": "/og-image.png",

@@ -27,7 +27,6 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { formatRelativeTr } from '@/utils/date';
 
 type RoleRow = RoleOverview['roles'][number];
-type PermissionRow = RoleOverview['permissions'][number];
 
 const ROLE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   super_admin: 'shield-checkmark-outline',
@@ -64,7 +63,7 @@ export default function AdminRolesScreen() {
   const [pickedRole, setPickedRole] = useState('moderator');
 
   const canManage = (me.data?.permissions ?? []).includes('admin.manage');
-  const roles = overview.data?.roles ?? [];
+  const roles = useMemo(() => overview.data?.roles ?? [], [overview.data]);
   const staffRoles = useMemo(
     () => roles.filter((role) => role.key === 'super_admin' || role.permissions.length > 0),
     [roles],

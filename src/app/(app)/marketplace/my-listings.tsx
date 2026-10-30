@@ -24,6 +24,7 @@ import type {
   MyListingsScope,
 } from '@/features/marketplace/services/marketplace-catalog-service';
 import { useTheme } from '@/theme/ThemeProvider';
+import { ViewCount } from '@/features/views/components/ViewCount';
 import { haptics } from '@/utils/haptics';
 import { useRouter } from '@/utils/router';
 
@@ -43,7 +44,7 @@ const EMPTY_COPY: Record<MyListingsScope, { title: string; body: string }> = {
   },
   pending: {
     title: 'İncelemede ilan yok',
-    body: 'Yeni ilanlar moderasyon tamamlanınca burada görünür.',
+    body: 'Yeni ilanlar anında yayınlanır. Doğrulama bekleyen eski ilanlar burada görünür.',
   },
   draft: { title: 'Taslak yok', body: 'Yarım kalan ilanların otomatik olarak burada saklanır.' },
   expired: {
@@ -213,10 +214,7 @@ export default function MarketMyListingsScreen() {
               />
               <View style={styles.actionsRow}>
                 <View style={styles.stats}>
-                  <Ionicons name="eye-outline" size={12} color={theme.colors.textTertiary} />
-                  <AppText variant="caption" color="textTertiary">
-                    {item.view_count}
-                  </AppText>
+                  <ViewCount type="marketplace_listing" id={item.id} size={12} />
                   <Ionicons name="heart-outline" size={12} color={theme.colors.textTertiary} />
                   <AppText variant="caption" color="textTertiary">
                     {item.favorite_count}

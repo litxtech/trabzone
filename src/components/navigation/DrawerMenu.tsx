@@ -122,6 +122,42 @@ export function DrawerMenu({ onClose }: { onClose: () => void }) {
         />
       </DrawerSection>
 
+      <DrawerSection title="Konaklama">
+        <DrawerRow
+          icon="bed-outline"
+          label="Konaklama Keşfet"
+          hint="Oteller · Bungalovlar · Villalar"
+          tone="primary"
+          onPress={() => go('/konaklama')}
+        />
+        <DrawerDivider />
+        <DrawerRow
+          icon="map-outline"
+          label="Haritada Oteller"
+          onPress={() => go('/konaklama/harita')}
+        />
+        <DrawerDivider />
+        <DrawerRow
+          icon="calendar-outline"
+          label="Rezervasyonlarım"
+          onPress={() => go('/konaklama/rezervasyonlarim')}
+        />
+        <DrawerDivider />
+        <DrawerRow
+          icon="add-circle-outline"
+          label="Otelimi Ekle"
+          hint="Ücretsiz tesis kaydı"
+          onPress={() => go('/konaklama/otel-ekle')}
+        />
+        <DrawerDivider />
+        <DrawerRow
+          icon="business-outline"
+          label="Otel Yönetimim"
+          hint="Rezervasyon · Takvim · Finans"
+          onPress={() => go('/konaklama/yonetim')}
+        />
+      </DrawerSection>
+
       <DrawerSection title="Yolculuk">
         <DrawerRow
           icon="car-sport"
@@ -149,6 +185,29 @@ export function DrawerMenu({ onClose }: { onClose: () => void }) {
           icon="shield-half-outline"
           label="Güvenlik merkezi"
           onPress={() => go('/ride/safety')}
+        />
+      </DrawerSection>
+
+      <DrawerSection title="Sağlık">
+        <DrawerRow
+          icon="medkit"
+          label="Eczaneler"
+          hint="Nöbetçi eczane · Adres · Yol tarifi"
+          tone="primary"
+          onPress={() => go('/eczaneler')}
+        />
+        <DrawerDivider />
+        <DrawerRow
+          icon="map-outline"
+          label="Nöbetçi eczane haritası"
+          onPress={() => go('/eczaneler/harita')}
+        />
+        <DrawerDivider />
+        <DrawerRow
+          icon="pulse-outline"
+          label="Deprem Merkezi"
+          hint="Trabzon ve çevresindeki son depremler"
+          onPress={() => go('/deprem')}
         />
       </DrawerSection>
 

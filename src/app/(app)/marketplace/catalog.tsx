@@ -27,6 +27,7 @@ import {
   useToggleFavoriteV2,
 } from '@/features/marketplace/hooks/use-marketplace-catalog';
 import type { CategoryNode } from '@/features/marketplace/services/marketplace-catalog-service';
+import { AdPlacementSlot, interleaveRows, useAdPlacement, type AdPlacementKey } from '@/features/ads';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 
@@ -37,6 +38,22 @@ const SORT_LABELS: Record<MarketFilters['sort'], string> = {
   popular: 'Popüler',
   near: 'Yakın',
 };
+
+function catalogAdPlacement(kind: string | null): AdPlacementKey | null {
+  if (kind === 'place') {
+    return null;
+  }
+  if (kind === 'vehicle') {
+    return 'vehicle_list';
+  }
+  if (kind === 'job') {
+    return 'job_list';
+  }
+  if (kind === 'real_estate') {
+    return 'real_estate_list';
+  }
+  return 'marketplace_category';
+}
 
 function findNode(nodes: CategoryNode[], slug: string | null): CategoryNode | null {
   if (!slug) {
@@ -168,6 +185,12 @@ export default function MarketCatalogScreen() {
   );
 
   const catalog = useMarketCatalog(queryParams, { enabled: kind !== 'place' });
+  const adPlacement = catalogAdPlacement(kind ?? activeRoot?.kind ?? null);
+  const ads = useAdPlacement(adPlacement, catalog.items.length, { columns: 2 });
+  const rows = useMemo(
+    () => interleaveRows(catalog.items, ads.positions, (item) => item.id),
+    [ads.positions, catalog.items],
+  );
   const title =
     params.title ?? activeRoot?.name ?? (initialQuery ? `“${initialQuery}”` : 'Tüm İlanlar');
   const hasActiveFilters =
@@ -339,19 +362,34 @@ export default function MarketCatalogScreen() {
       ) : (
         <FlashList
           keyboardShouldPersistTaps="handled"
-          data={catalog.items}
+          data={rows}
           numColumns={2}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <View style={styles.cell}>
-              <MarketListingCard
-                listing={item}
-                onPress={() => openListing(item.id)}
-                onToggleFavorite={() => favorite.mutate(item.id)}
-                favoritePending={favorite.isPending && favorite.variables === item.id}
+          keyExtractor={(row) => row.key}
+          getItemType={(row) => row.type}
+          overrideItemLayout={(layout, row) => {
+            if (row.type === 'ad') {
+              layout.span = 2;
+            }
+          }}
+          renderItem={({ item: row }) =>
+            row.type === 'ad' ? (
+              <AdPlacementSlot
+                slot={ads.slotAt(row.after)}
+                placement={adPlacement ?? 'marketplace_category'}
+                onHide={ads.hide}
+                style={styles.adCell}
               />
-            </View>
-          )}
+            ) : (
+              <View style={styles.cell}>
+                <MarketListingCard
+                  listing={row.item}
+                  onPress={() => openListing(row.item.id)}
+                  onToggleFavorite={() => favorite.mutate(row.item.id)}
+                  favoritePending={favorite.isPending && favorite.variables === row.item.id}
+                />
+              </View>
+            )
+          }
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           onEndReached={catalog.loadMore}
@@ -535,6 +573,7 @@ const styles = StyleSheet.create({
   },
   listContent: { paddingHorizontal: 13, paddingBottom: 28 },
   cell: { paddingHorizontal: 5, marginBottom: 10 },
+  adCell: { paddingHorizontal: 5, paddingTop: 0, paddingBottom: 12 },
   skeletonWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',

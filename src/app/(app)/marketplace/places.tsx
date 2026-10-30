@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import { useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
@@ -12,10 +11,11 @@ import {
 } from 'react-native';
 
 import { AppText, IconButton, Screen, Skeleton } from '@/components/ui';
+import { PlaceCoverImage } from '@/features/explore/components/PlaceCoverImage';
 import { useExploreBootstrap } from '@/features/explore/hooks/use-explore';
 import { usePlaces } from '@/features/marketplace/hooks/use-marketplace-catalog';
-import { publicMediaUrl } from '@/features/media/media-service';
 import type { PlaceSummary } from '@/features/marketplace/services/marketplace-catalog-service';
+import { AdPlacementSlot, interleaveRows, useAdPlacement } from '@/features/ads';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 import { useRouter } from '@/utils/router';
@@ -45,7 +45,10 @@ export default function MarketPlacesScreen() {
     [bootstrap.data?.place_categories],
   );
   const districts = bootstrap.data?.districts ?? [];
-  const items = places.data?.items ?? [];
+  const items = useMemo(() => places.data?.items ?? [], [places.data?.items]);
+  const districtName = districts.find((district) => district.id === districtId)?.name ?? null;
+  const ads = useAdPlacement('business_explore', items.length, { contextDistrict: districtName });
+  const rows = useMemo(() => interleaveRows(items, ads.positions, (place) => place.id), [ads.positions, items]);
 
   return (
     <Screen edges={['top', 'left', 'right']} padded={false}>
@@ -173,7 +176,19 @@ export default function MarketPlacesScreen() {
           }
         >
           {items.length ? (
-            items.map((place) => (
+            rows.map((row) => {
+              if (row.type === 'ad') {
+                return (
+                  <AdPlacementSlot
+                    key={row.key}
+                    slot={ads.slotAt(row.after)}
+                    placement="business_explore"
+                    onHide={ads.hide}
+                  />
+                );
+              }
+              const place = row.item;
+              return (
               <PlaceCard
                 key={place.id}
                 place={place}
@@ -193,7 +208,8 @@ export default function MarketPlacesScreen() {
                   } as never);
                 }}
               />
-            ))
+              );
+            })
           ) : places.isError ? (
             <View style={styles.state}>
               <Ionicons name="cloud-offline-outline" size={28} color={theme.colors.textTertiary} />
@@ -246,7 +262,6 @@ function PlaceCard({
   onMap: () => void;
 }) {
   const { theme } = useTheme();
-  const uri = publicMediaUrl('place-media', place.cover_path);
   return (
     <Pressable
       accessibilityRole="button"
@@ -265,17 +280,18 @@ function PlaceCard({
       ]}
     >
       <View style={[styles.cover, { backgroundColor: theme.colors.surfaceMuted }]}>
-        {uri ? (
-          <Image
-            source={{ uri }}
-            style={StyleSheet.absoluteFill}
-            contentFit="cover"
-            transition={160}
-            cachePolicy="memory-disk"
-          />
-        ) : (
-          <Ionicons name="storefront-outline" size={34} color={theme.colors.textTertiary} />
-        )}
+        <PlaceCoverImage
+          coverPath={place.cover_path}
+          name={place.name}
+          lat={place.lat}
+          lng={place.lng}
+          size="card"
+          recycleKey={place.id}
+          style={StyleSheet.absoluteFill}
+          fallback={
+            <Ionicons name="storefront-outline" size={34} color={theme.colors.textTertiary} />
+          }
+        />
         {place.is_verified ? (
           <View style={styles.verified}>
             <Ionicons name="shield-checkmark" size={11} color="#FFFFFF" />

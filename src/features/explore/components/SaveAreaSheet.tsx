@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Switch, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppText, Button, TextField } from '@/components/ui';
+import { useKeyboardBottomInset } from '@/providers/keyboard';
 import { useTheme } from '@/theme/ThemeProvider';
 
 type Props = {
@@ -17,6 +19,7 @@ type Props = {
 export function SaveAreaSheet({ visible, defaultLabel, loading, onSave, onClose }: Props) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboardInset = useKeyboardBottomInset();
   const [label, setLabel] = useState(defaultLabel);
   const [notify, setNotify] = useState(false);
 
@@ -31,7 +34,7 @@ export function SaveAreaSheet({ visible, defaultLabel, loading, onSave, onClose 
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <View style={styles.root}>
+      <Animated.View style={[styles.root, keyboardInset]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Kaydetmeyi kapat"
@@ -81,7 +84,7 @@ export function SaveAreaSheet({ visible, defaultLabel, loading, onSave, onClose 
             />
           </View>
         </View>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }

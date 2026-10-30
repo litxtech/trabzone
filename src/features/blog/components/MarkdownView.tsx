@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, type ReactNode } from 'react';
-import { Image, Linking, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, Platform, ScrollView, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/components/ui';
+import { openUrl } from '@/features/in-app-browser';
 import { useTheme } from '@/theme/ThemeProvider';
 
 type Block =
@@ -200,7 +201,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
             onPress={() => {
               const href = link[2] ?? '';
               if (/^https?:\/\//i.test(href)) {
-                void Linking.openURL(href);
+                void openUrl(href);
               }
             }}
           >

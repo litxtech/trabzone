@@ -4,11 +4,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Link, type Href } from 'expo-router';
 import { useState } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { z } from 'zod';
 
 import { AppText, Button, TextField } from '@/components/ui';
-import { env } from '@/config/env';
+import { socialAvailability } from '@/features/auth/social-availability';
 import { SocialAuthButtons } from '@/features/auth/components/SocialAuthButtons';
 import { UsernameStatusIcon } from '@/features/auth/components/UsernameStatusIcon';
 import {
@@ -26,6 +26,7 @@ import {
 } from '@/features/auth/validators';
 import { finishSignUpFromMetadata } from '@/features/auth/signup-completion';
 import { applyWebRegistrationMetadata } from '@/features/auth/web-registration';
+import { RegistrationConsentBox } from '@/features/legal/components/RegistrationPolicies';
 import { signUpWithPassword } from '@/services/supabase/auth';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useRouter } from '@/utils/router';
@@ -63,13 +64,12 @@ const webRegisterSchema = z
       }, 'Trabzone için en az 13 yaşında olmalısın'),
     password: passwordSchema,
     passwordConfirm: z.string().min(1, 'Şifreyi tekrar gir'),
-    acceptedTerms: z.boolean().refine((value) => value, 'Kullanım Koşullarını kabul etmelisin'),
-    acceptedGuidelines: z
+    acceptedTerms: z
       .boolean()
-      .refine((value) => value, 'Topluluk Kurallarını kabul etmelisin'),
-    acknowledgedPrivacy: z
-      .boolean()
-      .refine((value) => value, 'Gizlilik ve KVKK aydınlatmasını okuduğunu onaylamalısın'),
+      .refine(
+        (value) => value,
+        'Devam etmek için kullanım koşullarını ve tüm politikaları kabul etmelisin',
+      ),
     marketingOptIn: z.boolean(),
     analyticsOptIn: z.boolean(),
   })
@@ -79,13 +79,6 @@ const webRegisterSchema = z
   });
 
 type WebRegisterValues = z.infer<typeof webRegisterSchema>;
-
-function openPolicy(path: string) {
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    window.open(path, '_blank', 'noopener,noreferrer');
-    return;
-  }
-}
 
 export function WebRegisterPage() {
   const router = useRouter();
@@ -112,8 +105,6 @@ export function WebRegisterPage() {
       password: '',
       passwordConfirm: '',
       acceptedTerms: false,
-      acceptedGuidelines: false,
-      acknowledgedPrivacy: false,
       marketingOptIn: false,
       analyticsOptIn: false,
     },
@@ -150,7 +141,6 @@ export function WebRegisterPage() {
       username: values.username,
       birthDate: values.birthDate,
       acceptedTerms: values.acceptedTerms,
-      acceptedGuidelines: values.acceptedGuidelines,
       marketingOptIn: values.marketingOptIn,
       analyticsOptIn: values.analyticsOptIn,
     });
@@ -363,74 +353,11 @@ export function WebRegisterPage() {
             control={control}
             name="acceptedTerms"
             render={({ field, fieldState }) => (
-              <CheckRow
+              <RegistrationConsentBox
                 checked={field.value}
-                onToggle={() => field.onChange(!field.value)}
+                onChange={field.onChange}
                 error={fieldState.error?.message}
-              >
-                <AppText variant="caption" color="textSecondary" style={styles.flex}>
-                  <AppText
-                    variant="caption"
-                    color="primary"
-                    onPress={() => openPolicy('/terms')}
-                  >
-                    Trabzone Kullanım Koşullarını
-                  </AppText>{' '}
-                  okudum ve kabul ediyorum.
-                </AppText>
-              </CheckRow>
-            )}
-          />
-          <Controller
-            control={control}
-            name="acceptedGuidelines"
-            render={({ field, fieldState }) => (
-              <CheckRow
-                checked={field.value}
-                onToggle={() => field.onChange(!field.value)}
-                error={fieldState.error?.message}
-              >
-                <AppText variant="caption" color="textSecondary" style={styles.flex}>
-                  <AppText
-                    variant="caption"
-                    color="primary"
-                    onPress={() => openPolicy('/community-guidelines')}
-                  >
-                    Trabzone Topluluk Kurallarını
-                  </AppText>{' '}
-                  okudum ve kabul ediyorum.
-                </AppText>
-              </CheckRow>
-            )}
-          />
-          <Controller
-            control={control}
-            name="acknowledgedPrivacy"
-            render={({ field, fieldState }) => (
-              <CheckRow
-                checked={field.value}
-                onToggle={() => field.onChange(!field.value)}
-                error={fieldState.error?.message}
-              >
-                <AppText variant="caption" color="textSecondary" style={styles.flex}>
-                  <AppText variant="caption" color="primary" onPress={() => openPolicy('/privacy')}>
-                    Gizlilik Politikası
-                  </AppText>
-                  ,{' '}
-                  <AppText variant="caption" color="primary" onPress={() => openPolicy('/kvkk')}>
-                    KVKK Aydınlatma Metni
-                  </AppText>{' '}
-                  ve{' '}
-                  <AppText
-                    variant="caption"
-                    color="primary"
-                    onPress={() => openPolicy('/child-safety')}
-                  >
-                    Çocuk Koruma Politikası
-                  </AppText>{' '}
-                  hakkında bilgilendirildim.
-                </AppText>
-              </CheckRow>
+              />
             )}
           />
 
@@ -466,7 +393,7 @@ export function WebRegisterPage() {
           </AppText>
         </View>
 
-        {env.enableSocialAuth ? (
+        {socialAvailability().any ? (
           <>
             <View style={styles.divider}>
               <View style={[styles.dividerLine, { backgroundColor: theme.colors.border }]} />
@@ -495,8 +422,9 @@ export function WebRegisterPage() {
           onPress={() => void onSubmit()}
         />
         <AppText variant="caption" color="textTertiary" align="center">
-          Kayıt olarak Trabzone&apos;un sözleşme ve topluluk kurallarını kabul etmiş olursun. Zorunlu
-          olmayan rızalar hesap oluşturma şartı değildir.
+          Kayıt olarak yukarıdaki sözleşme, politika ve kuralların tamamını kabul etmiş olursun. Onay
+          kaydın hesabına işlenir; girişte tekrar sorulmaz. İsteğe bağlı rızalar hesap oluşturma
+          şartı değildir.
         </AppText>
       </View>
     </WebAuthLayout>

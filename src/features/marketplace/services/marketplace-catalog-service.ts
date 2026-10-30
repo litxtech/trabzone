@@ -358,8 +358,52 @@ async function rpc<T>(
   }
 }
 
+/**
+ * İlan medyasını normalize eder.
+ *
+ * `tz_listing_json_v2` görselleri `images` anahtarıyla döndürüyor; eski
+ * istemci sözleşmesi ise `media` bekliyor. İki adı da kabul etmezsek detay
+ * ekranındaki galeri boş kalıyordu (kart önizlemesi `cover_path` ile
+ * çalıştığı için görsel orada görünüyordu).
+ */
+function normalizeListingMedia(raw: Record<string, unknown>): MarketMediaItem[] {
+  const source = Array.isArray(raw.media)
+    ? raw.media
+    : Array.isArray(raw.images)
+      ? raw.images
+      : [];
+  const items: MarketMediaItem[] = [];
+  source.forEach((entry, index) => {
+    if (!entry || typeof entry !== 'object') {
+      return;
+    }
+    const item = entry as Record<string, unknown>;
+    const storagePath = typeof item.storage_path === 'string' ? item.storage_path : null;
+    if (!storagePath) {
+      return;
+    }
+    items.push({
+      id: String(item.id ?? `${raw.id ?? 'listing'}-${index}`),
+      listing_id: String(item.listing_id ?? raw.id ?? ''),
+      storage_path: storagePath,
+      thumb_path:
+        typeof item.thumb_path === 'string' && item.thumb_path ? item.thumb_path : null,
+      kind: item.kind === 'video' ? 'video' : 'image',
+      sort_order: Number(item.sort_order ?? index),
+      is_cover: Boolean(item.is_cover),
+      width: item.width == null ? null : Number(item.width),
+      height: item.height == null ? null : Number(item.height),
+      duration_ms: item.duration_ms == null ? null : Number(item.duration_ms),
+      processing_status: String(item.processing_status ?? 'ready'),
+      created_at: (item.created_at as string | null) ?? null,
+    });
+  });
+  return items;
+}
+
 function normalizeListing(raw: Record<string, unknown>): MarketListing {
-  const media = Array.isArray(raw.media) ? (raw.media as MarketMediaItem[]) : [];
+  const media = normalizeListingMedia(raw);
+  const cover = media.find((item) => item.is_cover) ?? media[0] ?? null;
   return {
     id: String(raw.id),
     seller_id: String(raw.seller_id ?? ''),
@@ -396,8 +440,8 @@ function normalizeListing(raw: Record<string, unknown>): MarketListing {
     view_count: Number(raw.view_count ?? 0),
     favorite_count: Number(raw.favorite_count ?? 0),
     message_count: Number(raw.message_count ?? 0),
-    cover_path: (raw.cover_path as string | null) ?? null,
-    cover_thumb_path: (raw.cover_thumb_path as string | null) ?? null,
+    cover_path: (raw.cover_path as string | null) ?? cover?.storage_path ?? null,
+    cover_thumb_path: (raw.cover_thumb_path as string | null) ?? cover?.thumb_path ?? null,
     media_count: Number(raw.media_count ?? media.length),
     video_count: Number(raw.video_count ?? media.filter((item) => item.kind === 'video').length),
     media,

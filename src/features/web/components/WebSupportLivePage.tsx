@@ -1,7 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Link, type Href } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View, type ScrollViewInstance } from 'react-native';
+import {
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+  type ScrollViewInstance,
+} from 'react-native';
 
 import { AppText, Button, Card, Skeleton } from '@/components/ui';
 import {
@@ -22,8 +30,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { formatDateTr } from '@/utils/date';
 
 import { useWebMeta } from '../use-web-meta';
-import { WebFooter } from './WebFooter';
-import { WebHeader } from './WebHeader';
+import { PublicShell } from './PublicShell';
 
 const STATUS_LABEL: Record<LiveThreadStatus, string> = {
   waiting: 'Sırada',
@@ -50,9 +57,8 @@ export function WebSupportLivePage() {
   });
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-      <WebHeader />
-      <View style={styles.hero}>
+    <PublicShell title="Canlı Destek" fallbackHref="/support">
+      <View style={[styles.hero, Platform.OS !== 'web' && styles.heroNative]}>
         <View style={styles.heroInner}>
           <AppText variant="caption" color="#8EA6D8" style={styles.eyebrow}>
             TRABZONE DESTEK MERKEZİ
@@ -84,7 +90,12 @@ export function WebSupportLivePage() {
                 <Button label="Giriş Yap" size="sm" style={styles.inlineButton} />
               </Link>
               <Link href={'/support' as Href} asChild>
-                <Button label="Destek Merkezi" variant="secondary" size="sm" style={styles.inlineButton} />
+                <Button
+                  label="Destek Merkezi"
+                  variant="secondary"
+                  size="sm"
+                  style={styles.inlineButton}
+                />
               </Link>
               <Link href={'/contact' as Href} asChild>
                 <Button label="İletişim" variant="outline" size="sm" style={styles.inlineButton} />
@@ -95,8 +106,7 @@ export function WebSupportLivePage() {
           <LiveChat />
         )}
       </View>
-      <WebFooter />
-    </View>
+    </PublicShell>
   );
 }
 
@@ -105,17 +115,13 @@ function LiveChat() {
   const { data: presence } = useLivePresence();
   const { data: threads, isLoading } = useMyLiveThreads();
   const startThread = useStartLiveThread();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pickedId, setPickedId] = useState<string | null>(null);
   const [category, setCategory] = useState<string>('account');
   const [starting, setStarting] = useState(false);
 
-  useEffect(() => {
-    const first = threads?.[0];
-    if (!selectedId && first) {
-      setSelectedId(first.id);
-    }
-  }, [selectedId, threads]);
-
+  // Seçim kullanıcıdan gelmiyorsa ilk görüşme gösterilir. Böylece "ilk
+  // görüşmeyi seç" senkronizasyonu için effect + setState gerekmez.
+  const selectedId = pickedId ?? threads?.[0]?.id ?? null;
   const selected = threads?.find((thread) => thread.id === selectedId) ?? null;
   const liveOnline = presence?.online ?? false;
 
@@ -124,7 +130,7 @@ function LiveChat() {
       { category },
       {
         onSuccess: (data) => {
-          setSelectedId(data.id);
+          setPickedId(data.id);
           setStarting(false);
         },
       },
@@ -209,7 +215,7 @@ function LiveChat() {
             return (
               <Pressable
                 key={thread.id}
-                onPress={() => setSelectedId(thread.id)}
+                onPress={() => setPickedId(thread.id)}
                 style={[
                   styles.threadRow,
                   active ? { backgroundColor: theme.colors.primarySoft } : null,
@@ -253,7 +259,11 @@ function LiveChat() {
           <ChatPanel threadId={selected.id} />
         ) : (
           <Card style={styles.emptyChat}>
-            <Ionicons name="chatbubble-ellipses-outline" size={34} color={theme.colors.textTertiary} />
+            <Ionicons
+              name="chatbubble-ellipses-outline"
+              size={34}
+              color={theme.colors.textTertiary}
+            />
             <AppText variant="h3">Bir görüşme seç</AppText>
             <AppText variant="body" color="textSecondary" align="center">
               Soldan mevcut bir görüşmeyi açabilir veya yeni bir canlı destek görüşmesi
@@ -328,12 +338,7 @@ function ChatPanel({ threadId }: { threadId: string }) {
             {thread.thread_no} · {formatDateTr(thread.created_at)}
           </AppText>
         </View>
-        <View
-          style={[
-            styles.statusBadge,
-            { backgroundColor: `${STATUS_COLOR[thread.status]}18` },
-          ]}
-        >
+        <View style={[styles.statusBadge, { backgroundColor: `${STATUS_COLOR[thread.status]}18` }]}>
           <AppText variant="caption" color={STATUS_COLOR[thread.status]}>
             {STATUS_LABEL[thread.status]}
           </AppText>
@@ -367,7 +372,11 @@ function ChatPanel({ threadId }: { threadId: string }) {
         </View>
       ) : null}
 
-      <ScrollView ref={scrollRef} style={styles.messages} contentContainerStyle={styles.messagesContent}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.messages}
+        contentContainerStyle={styles.messagesContent}
+      >
         {thread.messages.length === 0 ? (
           <AppText variant="caption" color="textTertiary" align="center">
             Henüz mesaj yok. İlk mesajını yazarak başla.
@@ -458,9 +467,9 @@ function ChatPanel({ threadId }: { threadId: string }) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
   flex: { flex: 1 },
   hero: { backgroundColor: '#07152E', paddingTop: 56, paddingBottom: 42, paddingHorizontal: 20 },
+  heroNative: { paddingTop: 20, paddingBottom: 24 },
   heroInner: { width: '100%', maxWidth: 1160, alignSelf: 'center' },
   eyebrow: { letterSpacing: 1.6, marginBottom: 10 },
   heroTitle: { maxWidth: 760 },
@@ -499,7 +508,14 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 10,
   },
-  unread: { minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
+  unread: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+  },
   emptyChat: { alignItems: 'center', gap: 8, padding: 44 },
   chatCard: { height: 620, padding: 0, overflow: 'hidden' },
   chatHead: {
@@ -510,7 +526,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   statusBadge: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
-  noticeBox: { flexDirection: 'row', gap: 8, padding: 10, margin: 12, marginBottom: 0, borderRadius: 10 },
+  noticeBox: {
+    flexDirection: 'row',
+    gap: 8,
+    padding: 10,
+    margin: 12,
+    marginBottom: 0,
+    borderRadius: 10,
+  },
   messages: { flex: 1 },
   messagesContent: { padding: 16, gap: 10 },
   systemMessage: { paddingVertical: 4 },

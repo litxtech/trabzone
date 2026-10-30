@@ -215,12 +215,29 @@ export function useToggleListingFavorite() {
   });
 }
 
-export function useExploreSearch(query: string) {
+export function useExploreSearch(query: string, limit = 24) {
   return useQuery<{ items: ExploreSearchItem[] }>({
-    queryKey: api.exploreKeys.search(query),
-    queryFn: () => unwrap(api.fetchExploreSearch(query)),
+    queryKey: [...api.exploreKeys.search(query), limit],
+    queryFn: () => unwrap(api.fetchExploreSearch(query, limit)),
     enabled: query.trim().length >= 2,
     staleTime: 30_000,
+  });
+}
+
+/**
+ * Harita sağlayıcısından seçilen işletmeyi kalıcı kayda dönüştürür.
+ * Başarıda arama önbellekleri tazelenir; yeni kayıt haritada görünür.
+ */
+export function useImportExternalPlace() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Parameters<typeof api.importExternalPlace>[0]) =>
+      unwrap(api.importExternalPlace(input)),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['explore', 'search'] });
+      void client.invalidateQueries({ queryKey: ['explore', 'places'] });
+      void client.invalidateQueries({ queryKey: api.exploreKeys.bootstrap });
+    },
   });
 }
 
@@ -304,7 +321,10 @@ export function useReportContent() {
 // Emlak
 // ---------------------------------------------------------------------------
 
-export function useRealEstateList(filters: Record<string, unknown>) {
+export function useRealEstateList(
+  filters: Record<string, unknown>,
+  options?: { enabled?: boolean },
+) {
   return useQuery<{
     items: RealEstateListing[];
     total: number;
@@ -314,6 +334,7 @@ export function useRealEstateList(filters: Record<string, unknown>) {
     queryKey: ['explore', 're-list', JSON.stringify(filters)],
     queryFn: () => unwrap(api.fetchRealEstateList(filters)),
     placeholderData: (previous) => previous,
+    enabled: options?.enabled ?? true,
   });
 }
 

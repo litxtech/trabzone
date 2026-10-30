@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Switch, TextInput, View } from 'react-native';
 
-import { AppText, Badge, Button, Card } from '@/components/ui';
+import { AppText, Button, Card, IconButton } from '@/components/ui';
 import { Screen } from '@/components/ui/Screen';
 import { errorMessage } from '@/services/errors';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -105,16 +105,19 @@ export default function CreateRideOfferScreen() {
   const fareHint = priceHint.data?.available === true ? priceHint.data : null;
   const fareHintReason = priceHint.data?.available === false ? priceHint.data.reason : null;
 
-  const approvedVehicles = useMemo(
+  const usableVehicles = useMemo(
     () =>
-      (vehicles.data ?? []).filter((vehicle) => vehicle.status === 'approved' && vehicle.is_active),
+      (vehicles.data ?? []).filter(
+        (vehicle) =>
+          vehicle.is_active && vehicle.status !== 'rejected' && vehicle.status !== 'suspended',
+      ),
     [vehicles.data],
   );
   const selectedVehicle =
-    approvedVehicles.find((vehicle) => vehicle.id === vehicleId) ?? approvedVehicles[0] ?? null;
+    usableVehicles.find((vehicle) => vehicle.id === vehicleId) ?? usableVehicles[0] ?? null;
   const totalSeats = selectedVehicle?.seat_capacity ?? 4;
-  const ready =
-    isIdentityVerified(profile.data) && profile.data?.driver_status === 'approved';
+  // İlan anında yayınlanır; tek zorunlu kapı kimlik doğrulamasıdır.
+  const ready = isIdentityVerified(profile.data);
 
   const resolveCoords = async () => {
     setGeoBusy(true);
@@ -242,7 +245,12 @@ export default function CreateRideOfferScreen() {
 
   if (vehicles.isLoading || profile.isLoading) {
     return (
-      <Screen edges={['top', 'left', 'right', 'bottom']} scroll padded>
+      <Screen
+        edges={['top', 'left', 'right', 'bottom']}
+        scroll
+        padded
+        contentContainerStyle={styles.page}
+      >
         <RideHeader title="Yolculuk paylaş" />
         <Card padding={18}>
           <AppText variant="body" color="textSecondary">
@@ -255,19 +263,24 @@ export default function CreateRideOfferScreen() {
 
   if (!ready) {
     return (
-      <Screen edges={['top', 'left', 'right', 'bottom']} scroll padded>
+      <Screen
+        edges={['top', 'left', 'right', 'bottom']}
+        scroll
+        padded
+        contentContainerStyle={styles.page}
+      >
         <RideHeader title="Yolculuk paylaş" />
         <RideEmptyState
           icon="shield-outline"
-          title="Sürücü doğrulaması gerekli"
-          message="İlan yayınlamak için kimlik doğrulaması ve sürücü başvurusunun onaylanması gerekir. Belgelerin incelendikten sonra bu ekran açılır."
+          title="Kimlik doğrulaması gerekli"
+          message="Yolculuk paylaşımı için kimlik doğrulaman tamamlanmış olmalı. Onaylandıktan sonra aracını seçip ilanı anında yayınlayabilirsin; ayrıca bir onay beklemen gerekmez."
           action={
             <View style={styles.stack}>
               <Button
                 label={
-                  profile.data?.driver_status === 'pending'
-                    ? 'Başvuru durumunu gör'
-                    : 'Sürücü başvurusu yap'
+                  profile.data?.identity_status === 'pending'
+                    ? 'Doğrulama durumunu gör'
+                    : 'Kimliğimi doğrula'
                 }
                 onPress={() => router.navigate('/ride/verification' as never)}
               />
@@ -284,10 +297,47 @@ export default function CreateRideOfferScreen() {
   }
 
   return (
-    <Screen edges={['top', 'left', 'right', 'bottom']} scroll padded>
+    <Screen
+      edges={['top', 'left', 'right', 'bottom']}
+      scroll
+      padded
+      contentContainerStyle={styles.page}
+      footer={
+        <View
+          style={[
+            styles.footer,
+            { backgroundColor: theme.colors.background, borderTopColor: theme.colors.divider },
+          ]}
+        >
+          <View style={styles.footerInner}>
+            {error ? (
+              <AppText variant="caption" color="danger" numberOfLines={2}>
+                {error}
+              </AppText>
+            ) : null}
+            <Button
+              label="İlanı yayınla"
+              leftIcon={<Ionicons name="rocket-outline" size={18} color="#FFFFFF" />}
+              loading={publish.isPending}
+              disabled={!selectedVehicle || usableVehicles.length === 0}
+              onPress={() => void handlePublish()}
+            />
+          </View>
+        </View>
+      }
+    >
       <RideHeader
         title="Yolculuk paylaş"
-        subtitle="Sürücü ilanı · gerçek doğrulama ve koltuk kapasitesi"
+        subtitle="Sürücü ilanı · anında yayın"
+        right={
+          <IconButton
+            name="car-outline"
+            accessibilityLabel="Garajım"
+            variant="surface"
+            size={19}
+            onPress={() => router.navigate('/ride/garage' as never)}
+          />
+        }
       />
 
       <View style={styles.optionRow}>
@@ -320,7 +370,12 @@ export default function CreateRideOfferScreen() {
         })}
       </View>
 
-      <Card padding={16} style={styles.form}>
+      <View
+        style={[
+          styles.sectionCard,
+          { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+        ]}
+      >
         <RideSection
           bare
           title="Güzergâh"
@@ -584,18 +639,23 @@ export default function CreateRideOfferScreen() {
             />
           ) : null}
         </View>
-      </Card>
+      </View>
 
-      <Card padding={16} style={styles.form}>
+      <View
+        style={[
+          styles.sectionCard,
+          { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+        ]}
+      >
         <RideSection
           bare
           title="Araç, koltuk ve bedel"
-          subtitle="Yalnızca onaylanmış araçlar yayınlanabilir."
+          subtitle="Aracını seç; ilanın anında yayınlanır, onay beklemez."
         >
-          {approvedVehicles.length === 0 ? (
+          {usableVehicles.length === 0 ? (
             <View style={styles.stack}>
               <AppText variant="body" color="textSecondary">
-                Onaylanmış araç yok.
+                Garajında araç yok.
               </AppText>
               <Button
                 label="Garajıma araç ekle"
@@ -604,7 +664,7 @@ export default function CreateRideOfferScreen() {
             </View>
           ) : (
             <View style={styles.stack}>
-              {approvedVehicles.map((vehicle) => {
+              {usableVehicles.map((vehicle) => {
                 const active = selectedVehicle?.id === vehicle.id;
                 return (
                   <Pressable
@@ -814,9 +874,14 @@ export default function CreateRideOfferScreen() {
             })}
           </View>
         </RideSection>
-      </Card>
+      </View>
 
-      <Card padding={16} style={styles.form}>
+      <View
+        style={[
+          styles.sectionCard,
+          { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+        ]}
+      >
         <RideSection
           bare
           title="Rota ve rezervasyon"
@@ -924,9 +989,14 @@ export default function CreateRideOfferScreen() {
             Özel ve bağlantılara açık ilanlar herkese açık aramada görünmez.
           </AppText>
         </RideSection>
-      </Card>
+      </View>
 
-      <Card padding={16} style={styles.form}>
+      <View
+        style={[
+          styles.sectionCard,
+          { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+        ]}
+      >
         <RideSection
           bare
           title="Yolculuk tercihleri"
@@ -1025,38 +1095,7 @@ export default function CreateRideOfferScreen() {
             ]}
           />
         </RideSection>
-      </Card>
-
-      {error ? (
-        <Card padding={12} tone="muted">
-          <AppText variant="caption" color="danger">
-            {error}
-          </AppText>
-        </Card>
-      ) : null}
-
-      <Card padding={12} tone="primarySoft">
-        <View style={styles.inlineRow}>
-          <Ionicons name="information-circle-outline" size={16} color={theme.colors.primaryDeep} />
-          <AppText variant="caption" color="textSecondary" style={styles.flex}>
-            Kimlik ve sürücü doğrulaman onaylı. İlan yayınlandığında koşul sürümü kaydedilir ve
-            rezervasyonlar bu koşullara göre oluşturulur.
-          </AppText>
-          <Badge label="Doğrulanmış" tone="success" />
-        </View>
-      </Card>
-
-      <Button
-        label="İlanı yayınla"
-        size="lg"
-        leftIcon={<Ionicons name="rocket-outline" size={18} color="#FFFFFF" />}
-        loading={publish.isPending}
-        disabled={!selectedVehicle || approvedVehicles.length === 0}
-        onPress={() => void handlePublish()}
-      />
-      <AppText variant="caption" color="textTertiary" align="center">
-        Yayınlanan ilan gerçek veritabanına yazılır. Sahte ilan veya sahte rezervasyon oluşturulmaz.
-      </AppText>
+      </View>
     </Screen>
   );
 }
@@ -1102,7 +1141,20 @@ function Stepper({
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   stack: { gap: 8 },
-  form: { gap: 14 },
+  page: { width: '100%', maxWidth: 880, alignSelf: 'center', gap: 12 },
+  sectionCard: {
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 14,
+    gap: 12,
+  },
+  footer: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 10,
+  },
+  footerInner: { width: '100%', maxWidth: 880, alignSelf: 'center', gap: 8 },
   optionRow: { flexDirection: 'row', gap: 8 },
   option: {
     flex: 1,
@@ -1154,7 +1206,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  inlineRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   calcCard: { gap: 10 },
   calcHead: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   calcIcon: {

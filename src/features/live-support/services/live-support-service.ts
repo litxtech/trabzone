@@ -2,6 +2,7 @@ import type { PostgrestError } from '@supabase/supabase-js';
 
 import { appError, type AppError } from '@/services/errors';
 import { supabase } from '@/services/supabase/client';
+import { postgresChannel } from '@/services/supabase/realtime';
 import { fail, ok, type Result } from '@/utils/result';
 
 import type {
@@ -132,8 +133,7 @@ export function subscribeToLiveThread(
   threadId: string,
   onMessage: (message: LiveMessage) => void,
 ): () => void {
-  const channel = supabase
-    .channel(`support-live-${threadId}`)
+  const channel = postgresChannel(`support-live-${threadId}`)
     .on(
       'postgres_changes',
       {
@@ -166,8 +166,7 @@ export function subscribeToLiveThread(
 
 /** Danışman panelinde tüm yeni mesajları dinler. */
 export function subscribeToAgentQueue(onChange: () => void): () => void {
-  const channel = supabase
-    .channel('support-agent-queue')
+  const channel = postgresChannel('support-agent-queue')
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'support_live_threads' },

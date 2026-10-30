@@ -1130,6 +1130,8 @@ export type RecurringInput = {
   luggage: string;
   bookingMode: RideBookingMode;
   visibility: RideVisibility;
+  /** Yalnızca güncellemede anlamlıdır: pasif planı yeniden başlatmak için true. */
+  isActive?: boolean | null;
 };
 
 export const saveRecurring = (input: RecurringInput) =>
@@ -1156,6 +1158,7 @@ export const saveRecurring = (input: RecurringInput) =>
       luggage: input.luggage,
       booking_mode: input.bookingMode,
       visibility: input.visibility,
+      is_active: input.isActive ?? null,
     },
   });
 

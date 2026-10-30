@@ -56,16 +56,33 @@ export function MapCanvas({
   const mapRef = useRef<AppleMapHandle | null>(null);
   // `initialCamera` her karede değişebilir; MapKit'e verilen başlangıç kamerası
   // sabit kalmalı, aksi halde kullanıcı kaydırırken harita geri sıçrar.
-  const [baseCamera] = useState(initialCamera);
+  // Açılışta gelen odak (derin bağlantı vb.) doğrudan başlangıç kamerası olur:
+  // ilk karede native görünüm henüz kayıtlı olmadığından `setCameraPosition`
+  // "Unable to find the 'AppleMapsViewWrapper' view" hatasıyla reddedilir.
+  const [baseCamera] = useState(focus?.camera ?? initialCamera);
+  const appliedNonce = useRef(focus?.nonce);
 
   useEffect(() => {
-    if (!focus || !mapRef.current) {
+    if (!focus || !mapRef.current || appliedNonce.current === focus.nonce) {
       return;
     }
-    void mapRef.current.setCameraPosition({
+    appliedNonce.current = focus.nonce;
+    const nonce = focus.nonce;
+    const position = {
       coordinates: { latitude: focus.camera.lat, longitude: focus.camera.lng },
       zoom: focus.camera.zoom,
+    };
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    // Native görünüm açılıştan hemen sonra henüz kayıtlı olmayabilir; MapKit
+    // promise'i reddederse bir kez daha denenir, sökülmüşse vazgeçilir.
+    mapRef.current.setCameraPosition(position).catch(() => {
+      retry = setTimeout(() => {
+        if (appliedNonce.current === nonce) {
+          mapRef.current?.setCameraPosition(position).catch(() => {});
+        }
+      }, 300);
     });
+    return () => clearTimeout(retry);
     // Yalnızca programatik odak isteklerinde kamera taşınır.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus?.nonce]);
@@ -74,7 +91,7 @@ export function MapCanvas({
     () =>
       markers.map((point) => {
         const tone = markerTone(point.kind);
-        const color = toneColor(theme, tone);
+        const color = point.color ?? toneColor(theme, tone);
         if (point.kind === 'cluster') {
           return {
             id: point.id,

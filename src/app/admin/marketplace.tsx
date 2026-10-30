@@ -1416,8 +1416,8 @@ function ListingDetailBody({
       </AppText>
       <AppText variant="caption" color="textTertiary">
         @{listing.seller_username} · {listing.category_name ?? 'Kategori yok'} ·{' '}
-        {listing.district ?? listing.city ?? 'Konum yok'} · {listing.view_count} görüntülenme ·{' '}
-        {listing.favorite_count} favori
+        {listing.district ?? listing.city ?? 'Konum yok'} · {listing.view_count} eski toplam
+        görüntüleme · {listing.favorite_count} favori
       </AppText>
       <AppText variant="caption" color="textTertiary">
         Oluşturma: {new Date(listing.created_at).toLocaleString('tr-TR')}

@@ -14,7 +14,8 @@ export type CommentMenuAction =
   | 'report'
   | 'block'
   | 'copy'
-  | 'share';
+  | 'share'
+  | 'share_thread';
 
 type Item = {
   key: CommentMenuAction;
@@ -60,6 +61,12 @@ export function CommentActionMenu({
     },
     { key: 'copy', label: 'Bağlantıyı kopyala', icon: 'link-outline' },
     { key: 'share', label: 'Paylaş', icon: 'share-outline' },
+    {
+      key: 'share_thread',
+      label: 'Konuşmayı görsel olarak paylaş',
+      icon: 'albums-outline',
+      hidden: comment.id.startsWith('temp-'),
+    },
   ];
 
   return (

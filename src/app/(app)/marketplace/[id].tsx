@@ -22,6 +22,9 @@ import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { listingShareLink } from '@/features/share/links';
 import { shareContent } from '@/features/share/share-action';
 import { useReportSheet } from '@/features/safety/components/ReportSheetProvider';
+import { formatViewCount } from '@/features/views/format';
+import { useContentViewCount, useContentViewRegistration } from '@/features/views/use-content-views';
+import { ContentStatsSheet } from '@/features/views/components/ContentStatsSheet';
 import { MarketListingCard } from '@/features/marketplace/components/MarketListingCard';
 import {
   MarketMediaViewer,
@@ -45,6 +48,7 @@ import {
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatDateTr } from '@/utils/date';
 import { haptics } from '@/utils/haptics';
+import { afterSheetDismiss } from '@/utils/sheet';
 import { useRouter } from '@/utils/router';
 
 const ATTRIBUTE_LABELS: Record<string, string> = {
@@ -148,11 +152,22 @@ export default function MarketListingDetailScreen() {
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   const galleryRef = useRef<FlatList<MarketMediaItem>>(null);
 
   const detail = query.data;
   const listing = detail?.listing;
   const seller = detail?.seller;
+  const viewCount = useContentViewCount({
+    type: 'marketplace_listing',
+    id: listingId || null,
+  });
+  useContentViewRegistration({
+    type: 'marketplace_listing',
+    id: listingId || null,
+    surface: 'listing_detail',
+    enabled: Boolean(listing),
+  });
   const sellerListings = useSellerListings(listing?.seller_id ?? null);
   const media = useMemo(() => listing?.media ?? [], [listing?.media]);
   const viewerItems = useMemo(() => mediaViewerItems(media), [media]);
@@ -226,7 +241,7 @@ export default function MarketListingDetailScreen() {
   }
 
   const messages = listing.message_count > 0 ? `${listing.message_count} mesaj` : 'Yeni ilan';
-  const views = `${listing.view_count} görüntülenme`;
+  const views = `${formatViewCount(viewCount)} tekil görüntüleme`;
   const phoneAllowed = Boolean(phone) && !listing.is_mine;
 
   const share = async () => {
@@ -330,6 +345,12 @@ export default function MarketListingDetailScreen() {
   const menuItems = listing.is_mine
     ? [
         { key: 'edit', label: 'İlanı düzenle', icon: 'create-outline' as const },
+        {
+          key: 'stats',
+          label: 'İlan istatistikleri',
+          icon: 'eye-outline' as const,
+          description: 'Tekil görüntüleme ve etkileşim özeti',
+        },
         { key: 'sold', label: 'Satıldı olarak işaretle', icon: 'checkmark-done-outline' as const },
         { key: 'archive', label: 'Yayından kaldır', icon: 'eye-off-outline' as const },
         { key: 'delete', label: 'İlanı sil', icon: 'trash-outline' as const, destructive: true },
@@ -853,6 +874,8 @@ export default function MarketListingDetailScreen() {
           setMenuOpen(false);
           if (key === 'edit') {
             router.push({ pathname: '/marketplace/create', params: { id: listing.id } } as never);
+          } else if (key === 'stats') {
+            afterSheetDismiss(() => setStatsOpen(true));
           } else if (key === 'sold') {
             Alert.alert('Satıldı olarak işaretle', 'İlan yayından kaldırılacak. Emin misin?', [
               { text: 'Vazgeç', style: 'cancel' },
@@ -865,15 +888,27 @@ export default function MarketListingDetailScreen() {
           } else if (key === 'share') {
             void share();
           } else if (key === 'report') {
-            openReport({
-              targetType: 'listing',
-              targetId: listing.id,
-              targetUserId: listing.seller_id,
-              targetLabel: listing.title,
-            });
+            afterSheetDismiss(() =>
+              openReport({
+                targetType: 'listing',
+                targetId: listing.id,
+                targetUserId: listing.seller_id,
+                targetLabel: listing.title,
+              }),
+            );
           }
         }}
       />
+
+      {listing.is_mine ? (
+        <ContentStatsSheet
+          visible={statsOpen}
+          onClose={() => setStatsOpen(false)}
+          type="marketplace_listing"
+          id={listing.id}
+          title={listing.title}
+        />
+      ) : null}
     </View>
   );
 }

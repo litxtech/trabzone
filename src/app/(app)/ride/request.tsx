@@ -3,7 +3,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Switch, TextInput, View } from 'react-native';
 
-import { AppText, Button, Card } from '@/components/ui';
+import { AppText, Button, Card, IconButton } from '@/components/ui';
 import { Screen } from '@/components/ui/Screen';
 import { errorMessage } from '@/services/errors';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -115,7 +115,12 @@ export default function CreateRideRequestScreen() {
 
   if (created) {
     return (
-      <Screen edges={['top', 'left', 'right', 'bottom']} scroll padded>
+      <Screen
+        edges={['top', 'left', 'right', 'bottom']}
+        scroll
+        padded
+        contentContainerStyle={styles.page}
+      >
         <RideHeader
           title="Talebin yayında"
           subtitle="Sürücüler talebini eşleştirme motorunda görebilir."
@@ -146,10 +151,45 @@ export default function CreateRideRequestScreen() {
   }
 
   return (
-    <Screen edges={['top', 'left', 'right', 'bottom']} scroll padded>
+    <Screen
+      edges={['top', 'left', 'right', 'bottom']}
+      scroll
+      padded
+      contentContainerStyle={styles.page}
+      footer={
+        <View
+          style={[
+            styles.footer,
+            { backgroundColor: theme.colors.background, borderTopColor: theme.colors.divider },
+          ]}
+        >
+          <View style={styles.footerInner}>
+            {error ? (
+              <AppText variant="caption" color="danger" numberOfLines={2}>
+                {error}
+              </AppText>
+            ) : null}
+            <Button
+              label="Talebi yayınla"
+              loading={create.isPending}
+              onPress={() => void handleCreate()}
+            />
+          </View>
+        </View>
+      }
+    >
       <RideHeader
-        title="Yolcu talebi oluştur"
+        title="Yolcu talebi"
         subtitle="Sürücüler uygun güzergâhı bulduğunda eşleşir"
+        right={
+          <IconButton
+            name="list-outline"
+            accessibilityLabel="Yolcu taleplerim"
+            variant="surface"
+            size={19}
+            onPress={() => router.navigate('/ride/requests' as never)}
+          />
+        }
       />
 
       <View style={styles.optionRow}>
@@ -182,7 +222,12 @@ export default function CreateRideRequestScreen() {
         })}
       </View>
 
-      <Card padding={16}>
+      <View
+        style={[
+          styles.sectionCard,
+          { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+        ]}
+      >
         <RideSection
           bare
           title="Nereden, nereye?"
@@ -249,9 +294,14 @@ export default function CreateRideRequestScreen() {
             />
           </View>
         </RideSection>
-      </Card>
+      </View>
 
-      <Card padding={16}>
+      <View
+        style={[
+          styles.sectionCard,
+          { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+        ]}
+      >
         <RideSection
           bare
           title="Ne zaman?"
@@ -372,9 +422,14 @@ export default function CreateRideRequestScreen() {
             })}
           </View>
         </RideSection>
-      </Card>
+      </View>
 
-      <Card padding={16}>
+      <View
+        style={[
+          styles.sectionCard,
+          { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+        ]}
+      >
         <RideSection
           bare
           title="Zorunlu tercihler"
@@ -450,31 +505,27 @@ export default function CreateRideRequestScreen() {
             ]}
           />
         </RideSection>
-      </Card>
-
-      {error ? (
-        <Card padding={12} tone="muted">
-          <AppText variant="caption" color="danger">
-            {error}
-          </AppText>
-        </Card>
-      ) : null}
-
-      <Button
-        label="Talebi yayınla"
-        size="lg"
-        loading={create.isPending}
-        onPress={() => void handleCreate()}
-      />
-      <AppText variant="caption" color="textTertiary" align="center">
-        Talebin gerçek veritabanına yazılır ve sürücülerin eşleştirme sonuçlarında görünür.
-      </AppText>
+      </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  page: { width: '100%', maxWidth: 880, alignSelf: 'center', gap: 12 },
   flex: { flex: 1 },
+  sectionCard: {
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 14,
+    gap: 12,
+  },
+  footer: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 10,
+  },
+  footerInner: { width: '100%', maxWidth: 880, alignSelf: 'center', gap: 8 },
   optionRow: { flexDirection: 'row', gap: 8 },
   option: {
     flex: 1,

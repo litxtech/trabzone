@@ -155,11 +155,11 @@ const TOKENS: Record<string, Mapping> = {
     code: 'invalid_input',
     message: 'Araç için ruhsat ve sigorta belgesi yüklenmeli.',
   },
-  vehicle_required: { code: 'invalid_input', message: 'Önce onaylı bir araç eklemelisin.' },
+  vehicle_required: { code: 'invalid_input', message: 'Önce garajına bir araç eklemelisin.' },
   vehicle_not_found: { code: 'not_found', message: 'Araç bulunamadı.' },
   vehicle_not_approved: {
     code: 'forbidden',
-    message: 'Seçtiğin araç onaylı değil. Garajdan onaylı bir araç seç.',
+    message: 'Seçtiğin araç kullanılamıyor (pasif, reddedilmiş veya askıda). Garajdan başka bir araç seç.',
   },
   vehicle_has_active_offers: {
     code: 'invalid_input',
@@ -493,6 +493,228 @@ const TOKENS: Record<string, Mapping> = {
     message: 'Seçilen hesap aktif değil. Başka bir yayın hesabı seç.',
   },
   feed_url_required: { code: 'invalid_input', message: 'Feed veya API adresi zorunlu.' },
+
+  // --- Eczane rehberi ------------------------------------------------------
+  pharmacy_not_found: { code: 'not_found', message: 'Eczane bulunamadı. Kayıt kaldırılmış olabilir.' },
+  pharmacy_profile_missing: {
+    code: 'not_found',
+    message: 'Eczanenin rehber profili bulunamadı. Yönetici profil oluşturmalı.',
+  },
+  source_not_found: { code: 'not_found', message: 'Veri kaynağı bulunamadı.' },
+  record_not_found: { code: 'not_found', message: 'Kayıt bulunamadı. Liste eskimiş olabilir.' },
+  sensitive_personal_data: {
+    code: 'invalid_input',
+    message:
+      'Yorumda reçete, TC kimlik numarası veya kişisel sağlık bilgisi paylaşılamaz. Bu tür bilgileri kaldırıp tekrar dene.',
+  },
+  unknown_neighborhood: {
+    code: 'invalid_input',
+    message: 'Seçilen mahalle eczane kayıtlarında bulunamadı. Başka bir mahalle seç.',
+  },
+  district_required_for_neighborhood: {
+    code: 'invalid_input',
+    message: 'Mahalle bildirimi için önce ilçe seçmelisin.',
+  },
+  notifications_disabled: {
+    code: 'forbidden',
+    message: 'Eczane nöbet bildirimleri şu anda kapalı. Yönetici etkinleştirdikten sonra tekrar dene.',
+  },
+  invalid_window: {
+    code: 'invalid_input',
+    message: 'Nöbet bitişi başlangıçtan en fazla 30 saat sonra olabilir.',
+  },
+  coordinates_out_of_bounds: {
+    code: 'invalid_input',
+    message: 'Girilen koordinatlar Trabzon sınırlarının dışında.',
+  },
+  coordinates_required: {
+    code: 'invalid_input',
+    message: 'Haritada işaretlemek için enlem ve boylam birlikte girilmeli.',
+  },
+  secret_must_be_env_name: {
+    code: 'invalid_input',
+    message:
+      'API anahtarı buraya yazılmaz. Yalnızca sunucudaki ortam değişkeninin adı girilebilir (örn. COLLECTAPI_KEY).',
+  },
+  invalid_bbox: { code: 'invalid_input', message: 'Harita alanı geçersiz. Haritayı yenileyip tekrar dene.' },
+  missing_fields: { code: 'invalid_input', message: 'Zorunlu alanlar eksik.' },
+
+  // --- Deprem Merkezi -----------------------------------------------------
+  earthquake_not_found: { code: 'not_found', message: 'Bu deprem kaydı bulunamadı.' },
+  earthquake_removed: {
+    code: 'not_found',
+    message: 'Bu deprem kaydı kaynak tarafından geri çekildiği veya geçersiz bulunduğu için kaldırıldı.',
+  },
+  invalid_region: { code: 'invalid_input', message: 'Geçersiz bölge seçimi.' },
+  region_disabled: { code: 'invalid_input', message: 'Bu bölge seçeneği şu anda kapalı.' },
+  invalid_radius: { code: 'invalid_input', message: 'Mesafe 50, 100, 150 veya 250 km olabilir.' },
+  invalid_magnitude: { code: 'invalid_input', message: 'Geçersiz büyüklük eşiği.' },
+  invalid_quiet_hours: { code: 'invalid_input', message: 'Sessiz saatler 0–23 arasında olmalı.' },
+  invalid_push_token: { code: 'invalid_input', message: 'Bildirim cihaz kaydı geçersiz.' },
+  invalid_platform: { code: 'invalid_input', message: 'Desteklenmeyen platform.' },
+  primary_required: { code: 'invalid_input', message: 'Bir birincil veri kaynağı seçili kalmalı.' },
+  duplicate_source: {
+    code: 'invalid_input',
+    message: 'İki kayıt aynı kaynaktan geliyor; aynı deprem olarak birleştirilemez.',
+  },
+  invalid_range: { code: 'invalid_input', message: 'Bitiş tarihi başlangıçtan sonra olmalı.' },
+  range_too_large: { code: 'invalid_input', message: 'Tarih aralığı en fazla 10 yıl olabilir.' },
+  invalid_order: { code: 'invalid_input', message: 'Geçersiz sıralama.' },
+  invalid_source: { code: 'invalid_input', message: 'Geçersiz veri kaynağı.' },
+  invalid_bucket: { code: 'invalid_input', message: 'Geçersiz zaman aralığı.' },
+  invalid_provider: { code: 'invalid_input', message: 'Geçersiz veri kaynağı.' },
+  invalid_permission: { code: 'invalid_input', message: 'Geçersiz yetki.' },
+
+  // --- Trabzonspor Maç Arenası ---------------------------------------------
+  account_inactive: { code: 'forbidden', message: 'Hesabın aktif değil. Bu işlemi yapamazsın.' },
+  comments_locked: { code: 'forbidden', message: 'Bu maçın yorumları moderasyon nedeniyle kilitlendi.' },
+  comment_not_found: { code: 'not_found', message: 'Yorum bulunamadı. Silinmiş olabilir.' },
+  content_not_found: { code: 'not_found', message: 'İçerik bulunamadı veya herkese açık değil.' },
+  invalid_content_type: { code: 'invalid_input', message: 'Geçersiz içerik türü.' },
+  sports_chat_closed: { code: 'forbidden', message: 'Canlı sohbet şu anda mesaj gönderimine kapalı.' },
+  sports_chat_sanctioned: {
+    code: 'forbidden',
+    message: 'Moderasyon kararı nedeniyle bu sohbette şu an mesaj gönderemezsin.',
+  },
+  sports_chat_child_protected: {
+    code: 'forbidden',
+    message: 'Hesap güvenlik ayarların herkese açık canlı sohbete mesaj göndermeye izin vermiyor.',
+  },
+  sports_chat_invalid_length: { code: 'invalid_input', message: 'Mesaj boş olamaz veya çok uzun.' },
+  sports_chat_link_blocked: { code: 'invalid_input', message: 'Canlı sohbette bağlantı paylaşılamaz.' },
+  sports_chat_spam: { code: 'invalid_input', message: 'Mesaj tekrar eden karakterler içeriyor.' },
+  sports_chat_blocked_term: { code: 'invalid_input', message: 'Mesaj topluluk kurallarına aykırı ifade içeriyor.' },
+  sports_chat_slow_mode: {
+    code: 'rate_limited',
+    message: 'Yavaş mod açık. Bir sonraki mesaj için biraz bekle.',
+  },
+  sports_chat_duplicate: { code: 'duplicate', message: 'Aynı mesajı kısa süre içinde tekrar gönderemezsin.' },
+  sports_chat_invalid_reply: { code: 'invalid_input', message: 'Yanıtlanan mesaj artık görünmüyor.' },
+  sports_poll_closed: { code: 'invalid_input', message: 'Bu anket oylamaya kapalı.' },
+  sports_poll_already_voted: {
+    code: 'duplicate',
+    message: 'Bu ankette oyunu kullandın; oy değişikliğine izin verilmiyor veya hakkın doldu.',
+  },
+  sports_poll_invalid_options: { code: 'invalid_input', message: 'Anket için 2-6 benzersiz seçenek gerekli.' },
+  sports_media_not_public: {
+    code: 'invalid_input',
+    message: 'Taraftar alanına yalnızca herkese açık gönderiler eklenebilir.',
+  },
+  sports_media_required: { code: 'invalid_input', message: 'Bu kategori için fotoğraf veya video eklemelisin.' },
+  sports_media_window: {
+    code: 'invalid_input',
+    message: 'Gönderiler yalnızca maçtan 3 gün önce ile 3 gün sonra arasında eklenebilir.',
+  },
+  sports_reason_required: { code: 'invalid_input', message: 'İşlem için en az 5 karakterlik bir gerekçe yaz.' },
+  sports_setting_not_allowed: { code: 'invalid_input', message: 'Bu ayar panelden değiştirilemez.' },
+  sports_team_not_configured: {
+    code: 'invalid_input',
+    message: 'Takım henüz doğrulanmadı. API bağlantısını kurup takım aramasını çalıştır.',
+  },
+  sports_team_unknown: {
+    code: 'not_found',
+    message: 'Takım API aramasından gelen adaylar arasında yok. Önce takım aramasını çalıştır.',
+  },
+  sports_invalid_payload: { code: 'invalid_input', message: 'Veri sağlayıcı yanıtı geçersiz.' },
+
+  // --- Konaklama / otel yönetimi -------------------------------------------
+  property_not_found: { code: 'not_found', message: 'Tesis bulunamadı. Kaldırılmış olabilir.' },
+  property_not_verified: {
+    code: 'forbidden',
+    message: 'Tesis doğrulanmadan rezervasyona açılamaz. Önce tesis doğrulamasını tamamla.',
+  },
+  property_not_published: { code: 'not_found', message: 'Bu tesis şu anda yayında değil.' },
+  property_required: { code: 'invalid_input', message: 'Önce tesis bilgilerini kaydetmelisin.' },
+  property_not_submittable: {
+    code: 'invalid_input',
+    message: 'Tesis doğrulamaya gönderilemiyor. Eksik belge veya bilgileri tamamla.',
+  },
+  verification_pending: {
+    code: 'invalid_input',
+    message: 'Tesis doğrulaması zaten inceleniyor. Sonucu beklemelisin.',
+  },
+  already_verified: { code: 'duplicate', message: 'Bu tesis zaten doğrulanmış.' },
+  only_owner: { code: 'forbidden', message: 'Bu işlemi yalnızca tesis sahibi yapabilir.' },
+  cannot_change_owner: { code: 'forbidden', message: 'Tesis sahibi bu ekrandan değiştirilemez.' },
+  room_type_not_found: { code: 'not_found', message: 'Oda tipi bulunamadı.' },
+  rate_plan_not_found: { code: 'not_found', message: 'Fiyat planı bulunamadı.' },
+  room_not_found: { code: 'not_found', message: 'Oda bulunamadı.' },
+  room_unavailable: {
+    code: 'invalid_input',
+    message: 'Seçilen oda bu tarihlerde dolu veya bakımda. Başka bir oda seç.',
+  },
+  duplicate_room_number: { code: 'duplicate', message: 'Bu oda numarası zaten kullanılıyor.' },
+  room_number_required: { code: 'invalid_input', message: 'Oda numarası zorunlu.' },
+  guest_name_required: { code: 'invalid_input', message: 'Misafir adı zorunlu.' },
+  guest_not_found: { code: 'not_found', message: 'Misafir kaydı bulunamadı.' },
+  source_required: {
+    code: 'invalid_input',
+    message: 'Rezervasyon kaynağı seçilmeli (Trabzone, telefon, resepsiyon vb.).',
+  },
+  invalid_dates: { code: 'invalid_input', message: 'Tarihler geçersiz. Çıkış, girişten sonra olmalı.' },
+  invalid_date_range: { code: 'invalid_input', message: 'Tarih aralığı geçersiz.' },
+  invalid_occupancy: { code: 'invalid_input', message: 'Kişi sayısı oda kapasitesini aşıyor.' },
+  capacity_exceeded: { code: 'invalid_input', message: 'Seçilen kişi sayısı oda kapasitesini aşıyor.' },
+  min_stay_not_met: {
+    code: 'invalid_input',
+    message: 'Seçilen tarihler için minimum konaklama gecesi karşılanmıyor.',
+  },
+  max_stay_exceeded: { code: 'invalid_input', message: 'Konaklama maksimum gece sınırını aşıyor.' },
+  sold_out: { code: 'invalid_input', message: 'Bu tarihlerde uygun oda kalmadı.' },
+  no_availability: { code: 'invalid_input', message: 'Bu tarihlerde müsaitlik yok.' },
+  dates_closed: {
+    code: 'invalid_input',
+    message: 'Seçilen tarihler satışa kapalı veya giriş/çıkışa kapalı.',
+  },
+  booking_closed: { code: 'invalid_input', message: 'Bu rezervasyon şu anda kabul edilmiyor.' },
+  rate_closed: { code: 'invalid_input', message: 'Bu fiyat planı seçilen tarihlerde kapalı.' },
+  campaign_not_found: { code: 'not_found', message: 'Kampanya bulunamadı.' },
+  campaign_not_started: { code: 'invalid_input', message: 'Kampanya henüz başlamadı.' },
+  campaign_expired: { code: 'invalid_input', message: 'Kampanyanın süresi doldu.' },
+  campaign_quota_exceeded: { code: 'invalid_input', message: 'Kampanya kontenjanı doldu.' },
+  cash_account_not_found: { code: 'not_found', message: 'Kasa hesabı bulunamadı.' },
+  cash_account_required: { code: 'invalid_input', message: 'Önce bir kasa hesabı tanımla.' },
+  transaction_not_found: { code: 'not_found', message: 'Kasa hareketi bulunamadı.' },
+  already_reversed: {
+    code: 'duplicate',
+    message: 'Bu kasa hareketi zaten ters kayıtla düzeltilmiş.',
+  },
+  reverse_of_reverse: { code: 'invalid_input', message: 'Ters kayıt işlemi ters kayıtla düzeltilemez.' },
+  insufficient_balance: { code: 'invalid_input', message: 'Kasa bakiyesi bu işlem için yetersiz.' },
+  folio_not_found: { code: 'not_found', message: 'Folio kaydı bulunamadı.' },
+  task_not_found: { code: 'not_found', message: 'Kat hizmetleri görevi bulunamadı.' },
+  block_not_found: { code: 'not_found', message: 'Oda blokesi bulunamadı.' },
+  block_conflict: { code: 'invalid_input', message: 'Bu tarihlerde zaten bloke veya rezervasyon var.' },
+  staff_not_found: { code: 'not_found', message: 'Personel kaydı bulunamadı.' },
+  staff_limit_reached: { code: 'invalid_input', message: 'Personel ekleme sınırına ulaşıldı.' },
+  cannot_remove_owner: { code: 'forbidden', message: 'Tesis sahibi personel listesinden çıkarılamaz.' },
+  document_not_found: { code: 'not_found', message: 'Belge bulunamadı.' },
+  document_locked: {
+    code: 'forbidden',
+    message: 'Kesinleşmiş belge değiştirilemez. Yeni bir belge oluştur.',
+  },
+  reservation_locked: {
+    code: 'forbidden',
+    message: 'Bu rezervasyon kesinleştiği için doğrudan değiştirilemez. İptal veya düzeltme işlemi kullan.',
+  },
+  reservation_not_editable: {
+    code: 'forbidden',
+    message: 'Bu rezervasyonun durumu düzenlemeye uygun değil.',
+  },
+  reservation_has_payments: {
+    code: 'forbidden',
+    message: 'Ödeme alınmış rezervasyon silinemez. İptal veya ters kayıt kullan.',
+  },
+  reservation_has_folio: {
+    code: 'forbidden',
+    message: 'Folio hareketi olan rezervasyon silinemez. İptal veya düzeltme kullan.',
+  },
+  hold_expired: {
+    code: 'invalid_input',
+    message: 'Rezervasyon için ayrılan süre doldu. Müsaitliği yeniden kontrol et.',
+  },
+  review_hidden: { code: 'forbidden', message: 'Bu değerlendirme yayından kaldırılmış.' },
+  message_thread_closed: { code: 'forbidden', message: 'Bu mesaj konuşması kapatılmış.' },
 };
 
 const RATE_LIMIT_PREFIX = 'rate_limited:';
@@ -515,6 +737,9 @@ export function rpcError(error: PostgrestError | null | undefined): AppError {
 
   if (error.code === '42501') {
     return appError('forbidden');
+  }
+  if (error.code === 'P0002') {
+    return appError('not_found');
   }
   if (error.code === '23505') {
     return appError('duplicate');

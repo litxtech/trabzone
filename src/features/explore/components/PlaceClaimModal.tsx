@@ -2,12 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppText, Button, IconButton, TextField } from '@/components/ui';
 import { pickMedia } from '@/features/media/media-picker';
 import { uploadMedia } from '@/features/media/media-service';
 import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
+import { useKeyboardBottomInset } from '@/providers/keyboard';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 
@@ -35,6 +37,7 @@ const EVIDENCE = [
 export function PlaceClaimModal({ visible, placeId, placeName, onClose, onSubmitted }: Props) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboardInset = useKeyboardBottomInset();
   const profile = useMyProfile();
   const claim = useSubmitPlaceClaim();
 
@@ -130,7 +133,7 @@ export function PlaceClaimModal({ visible, placeId, placeName, onClose, onSubmit
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={close} statusBarTranslucent>
-      <View style={styles.root}>
+      <Animated.View style={[styles.root, keyboardInset]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Başvuru penceresini kapat"
@@ -287,7 +290,7 @@ export function PlaceClaimModal({ visible, placeId, placeName, onClose, onSubmit
             <Button label="Başvuruyu gönder" onPress={() => void send()} loading={busy} disabled={!valid || busy} />
           </View>
         </View>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }

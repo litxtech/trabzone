@@ -1,15 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Link, type Href } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 
 import { useWebMeta } from '../use-web-meta';
-import { WebFooter } from './WebFooter';
-import { WebHeader } from './WebHeader';
-import { webPageRoot } from '../page-root';
+import { PublicShell } from './PublicShell';
 
 const PILLARS: { icon: keyof typeof Ionicons.glyphMap; title: string; body: string }[] = [
   {
@@ -76,14 +74,12 @@ export function WebAboutPage() {
   });
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-      <WebHeader />
-
+    <PublicShell title="Hakkımızda" fallbackHref="/">
       <LinearGradient
         colors={['#04070E', '#081228', '#0C1730']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={styles.hero}
+        style={[styles.hero, Platform.OS !== 'web' && styles.heroNative]}
       >
         <View style={styles.heroInner}>
           <AppText variant="overline" color="#9DB6FF" style={styles.eyebrow}>
@@ -132,8 +128,8 @@ export function WebAboutPage() {
           </AppText>
           <AppText variant="body" color="textSecondary" style={styles.paragraph}>
             Platformun amacı, şehirdeki insanları, işletmeleri ve fırsatları tek bir dijital
-            merkezde buluşturmaktır. Web, iOS ve Android uygulamaları aynı hesabı ve aynı
-            topluluğu paylaşır.
+            merkezde buluşturmaktır. Web, iOS ve Android uygulamaları aynı hesabı ve aynı topluluğu
+            paylaşır.
           </AppText>
         </View>
 
@@ -170,24 +166,26 @@ export function WebAboutPage() {
         </View>
 
         <View style={styles.noteCard}>
-          <Ionicons name="information-circle-outline" size={18} color={theme.colors.textSecondary} />
+          <Ionicons
+            name="information-circle-outline"
+            size={18}
+            color={theme.colors.textSecondary}
+          />
           <AppText variant="caption" color="textSecondary" style={styles.flex}>
-            Trabzone bir sosyal keşif ve ilan platformudur. Marketplace üzerinden yapılan
-            işlemlerde platform içi ödeme altyapısı etkin değildir; taraflar işlem öncesi gerekli
-            kontrolleri yapmalıdır.
+            Trabzone bir sosyal keşif ve ilan platformudur. Marketplace üzerinden yapılan işlemlerde
+            platform içi ödeme altyapısı etkin değildir; taraflar işlem öncesi gerekli kontrolleri
+            yapmalıdır.
           </AppText>
         </View>
       </View>
-
-      <WebFooter />
-    </View>
+    </PublicShell>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { ...webPageRoot },
   flex: { flex: 1 },
   hero: { paddingVertical: 64 },
+  heroNative: { paddingVertical: 26 },
   heroInner: {
     width: '100%',
     maxWidth: 1080,

@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { ActivityIndicator, Linking, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { AppText, Badge, Button, TextField } from '@/components/ui';
+import { openUrl } from '@/features/in-app-browser';
 import { errorMessage } from '@/services/errors';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatDateTimeTr } from '@/utils/date';
@@ -160,7 +161,7 @@ export function NewsItemDetailModal({
                 size="sm"
                 variant="outline"
                 fullWidth={false}
-                onPress={() => void Linking.openURL(detail.canonical_url as string)}
+                onPress={() => void openUrl(detail.canonical_url)}
               />
             ) : null}
 

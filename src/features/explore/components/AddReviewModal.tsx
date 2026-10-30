@@ -11,11 +11,13 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppText, Button, IconButton } from '@/components/ui';
 import { pickMedia, type PickedAsset } from '@/features/media/media-picker';
 import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
+import { useKeyboardBottomInset } from '@/providers/keyboard';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 
@@ -39,6 +41,7 @@ const RATING_LABEL = ['', 'Çok kötü', 'Kötü', 'Orta', 'İyi', 'Mükemmel'];
 export function AddReviewModal({ visible, placeId, placeName, existing, onClose, onSaved }: Props) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboardInset = useKeyboardBottomInset();
   const profile = useMyProfile();
   const upsert = useUpsertPlaceReview(placeId);
 
@@ -150,7 +153,7 @@ export function AddReviewModal({ visible, placeId, placeName, existing, onClose,
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={close} statusBarTranslucent>
-      <View style={styles.root}>
+      <Animated.View style={[styles.root, keyboardInset]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Yorum penceresini kapat"
@@ -332,7 +335,7 @@ export function AddReviewModal({ visible, placeId, placeName, existing, onClose,
             />
           </View>
         </View>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }

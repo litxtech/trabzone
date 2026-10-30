@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { AppText, Badge, Button, TextField } from '@/components/ui';
 import { AdminPage, AdminSection, FilterChips, Pager } from '@/features/admin/components/AdminPage';

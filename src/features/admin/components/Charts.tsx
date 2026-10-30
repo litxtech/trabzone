@@ -67,7 +67,10 @@ export function TrendChart({
       ? `${linePath} L ${coords[coords.length - 1]?.x.toFixed(2)} ${PAD_TOP + innerH} L ${coords[0]?.x.toFixed(2)} ${PAD_TOP + innerH} Z`
       : '';
 
-  const tickIndexes = n <= 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
+  // n === 2 iken [0, 0, 1] üretiliyordu: aynı etiket iki kez çizilip
+  // "Encountered two children with the same key" uyarısına yol açıyordu.
+  const tickIndexes =
+    n <= 1 ? [0] : Array.from(new Set([0, Math.floor((n - 1) / 2), n - 1]));
   const gridValues = [0, 0.5, 1];
 
   if (data.length === 0) {
@@ -260,7 +263,7 @@ export function Distribution({
               .reduce((sum, entry) => sum + (entry.value / total) * circumference, 0);
             return (
               <Circle
-                key={item.label}
+                key={`${item.label}-${index}`}
                 cx={62}
                 cy={62}
                 r={radius}
@@ -286,7 +289,7 @@ export function Distribution({
 
       <View style={styles.legend}>
         {data.slice(0, 8).map((item, index) => (
-          <View key={item.label} style={styles.legendRow}>
+          <View key={`${item.label}-${index}`} style={styles.legendRow}>
             <View
               style={[styles.dot, { backgroundColor: palette[index % palette.length] }]}
             />
@@ -321,8 +324,8 @@ export function HorizontalBars({
   }
   return (
     <View style={{ gap: 9 }}>
-      {data.map((point) => (
-        <View key={point.label} style={{ gap: 4 }}>
+      {data.map((point, index) => (
+        <View key={`${point.label}-${index}`} style={{ gap: 4 }}>
           <View style={styles.hRow}>
             <AppText variant="caption" color="textSecondary" numberOfLines={1} style={styles.flex}>
               {point.label}

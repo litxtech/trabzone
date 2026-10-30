@@ -73,6 +73,44 @@ function patchPostEverywhere(
   );
 }
 
+/** Önbellekteki listelerde (akış, kaydedilenler, profil) gönderiyi arar. */
+export function findCachedPost(
+  queryClient: ReturnType<typeof useQueryClient>,
+  postId: string,
+): FeedPost | undefined {
+  if (!postId) {
+    return undefined;
+  }
+
+  const own = queryClient.getQueryData<FeedPost | null>(feedQueryKeys.post(postId));
+  if (own) {
+    return own;
+  }
+
+  const lists = queryClient.getQueriesData<InfiniteFeed>({ queryKey: ['feed', 'list'] });
+  for (const [, data] of lists) {
+    const found = data?.pages
+      .flatMap((page) => page.items)
+      .find((item) => item.id === postId);
+    if (found) {
+      return found;
+    }
+  }
+
+  const flat = [
+    ...queryClient.getQueriesData<FeedPost[]>({ queryKey: ['feed', 'profile'] }),
+    ...queryClient.getQueriesData<FeedPost[]>({ queryKey: feedQueryKeys.saved }),
+  ];
+  for (const [, data] of flat) {
+    const found = data?.find((item) => item.id === postId);
+    if (found) {
+      return found;
+    }
+  }
+
+  return undefined;
+}
+
 export function useFeed(filter: FeedFilter, city: string | null) {
   return useInfiniteQuery({
     queryKey: feedQueryKeys.feed(filter, city),
@@ -84,11 +122,16 @@ export function useFeed(filter: FeedFilter, city: string | null) {
 }
 
 export function usePost(postId: string) {
+  const queryClient = useQueryClient();
+
   return useQuery({
     queryKey: feedQueryKeys.post(postId),
     queryFn: () => unwrap(fetchPost(postId)),
     enabled: Boolean(postId),
     staleTime: 15_000,
+    // Akışta/profil listesinde zaten yüklü olan gönderi detay ekranında anında
+    // boyanır; RPC yanıtı gelene kadar boş spinner gösterilmez.
+    placeholderData: () => findCachedPost(queryClient, postId),
   });
 }
 

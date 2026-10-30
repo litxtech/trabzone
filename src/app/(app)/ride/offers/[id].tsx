@@ -10,7 +10,8 @@ import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { availableSeatCount, normalizeSeatSelection, occupiedSeatSet } from '@/features/pricing';
 import { useAuthStore } from '@/stores/auth-store';
 import { errorMessage } from '@/services/errors';
-import { useTheme } from '@/theme/ThemeProvider';
+import { useContentViewCount, useContentViewRegistration } from '@/features/views/use-content-views';
+import { ViewCount } from '@/features/views/components/ViewCount';
 
 import {
   VERIFIED_BLUE,
@@ -45,6 +46,7 @@ import {
 import { rideVehiclePhotoUrl } from '@/features/ride/services/ride-service';
 import { formatDate, formatDuration, formatMoney, formatTime } from '@/features/ride/utils/format';
 import { isIdentityVerified } from '@/features/ride/utils/identity';
+import { useTheme } from '@/theme/ThemeProvider';
 
 const FUEL: Record<string, string> = {
   gasoline: 'Benzin',
@@ -66,8 +68,17 @@ export default function RideOfferDetailScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const offerId = String(params.id ?? '');
   const session = useAuthStore((state) => state.session);
-
+  // Sorgu, görüntüleme kaydından önce tanımlanmalı: kayıt `offerQuery.data`
+  // üzerinden aktifleşiyor (önce tanımlanmazsa TDZ hatası veriyordu).
   const offerQuery = useRideOffer(offerId || null);
+  const rideViewCount = useContentViewCount({ type: 'ride_offer', id: offerId || null });
+  useContentViewRegistration({
+    type: 'ride_offer',
+    id: offerId || null,
+    surface: 'ride_offer_detail',
+    enabled: Boolean(offerQuery.data),
+  });
+
   const profile = useRideProfile();
   const config = useRidePublicConfig();
   const waitlistOffers = useRideWaitlistOffers();
@@ -255,6 +266,10 @@ export default function RideOfferDetailScreen() {
         subtitle={`${formatDate(offer.depart_at)} · ${formatTime(offer.depart_at)}`}
         right={<StatusPill status={offer.status} />}
       />
+
+      <View style={styles.viewMeta}>
+        <ViewCount type="ride_offer" id={offer.id} initial={rideViewCount} showLabel />
+      </View>
 
       <RideMapPreview
         origin={{ lat: offer.origin_lat, lng: offer.origin_lng }}
@@ -870,6 +885,7 @@ export default function RideOfferDetailScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  viewMeta: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
   stack: { gap: 8 },
   center: { paddingVertical: 60, alignItems: 'center', gap: 8 },
   driverCard: { gap: 10 },

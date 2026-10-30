@@ -187,6 +187,8 @@ export function staticMapUrl(input: {
   height: number;
   dark: boolean;
   markers?: LatLng[];
+  /** Uygulama içi güzergâh; verilirse haritada yol çizgisi olarak gösterilir. */
+  route?: LatLng[];
 }): string | null {
   const token = tokenParam();
   if (!token) {
@@ -199,13 +201,32 @@ export function staticMapUrl(input: {
   const pins = markers
     .map((point) => `pin-s+4169F5(${point.lng.toFixed(5)},${point.lat.toFixed(5)})`)
     .join(',');
-  const overlay = pins ? `${pins}/` : '';
+  const overlays: string[] = [];
+  if (input.route && input.route.length > 1) {
+    const line = simplifyLine(input.route, 80)
+      .map((point) => `${point.lng.toFixed(5)},${point.lat.toFixed(5)}`)
+      .join(',');
+    overlays.push(`path-4+4169F5-0.9(${encodeURIComponent(line).replace(/%2C/g, ',')})`);
+  }
+  if (pins) {
+    overlays.push(pins);
+  }
+  const overlay = overlays.length ? `${overlays.join(',')}/` : '';
   const style = input.dark ? MAPBOX_STATIC_STYLE.dark : MAPBOX_STATIC_STYLE.light;
   return (
     `https://api.mapbox.com/styles/v1/${style}/static/${overlay}` +
     `${input.center.lng.toFixed(5)},${input.center.lat.toFixed(5)},${zoom},0/` +
-    `${width}x${height}@2x?padding=32&access_token=${token}`
+    `${width}x${height}@2x?access_token=${token}`
   );
+}
+
+/** Statik harita URL'si için uzun güzergâhları seyreltir. */
+function simplifyLine(points: LatLng[], max: number): LatLng[] {
+  if (points.length <= max) {
+    return points;
+  }
+  const step = Math.ceil(points.length / max);
+  return points.filter((_, index) => index % step === 0 || index === points.length - 1);
 }
 
 /** Mapbox Directions/Geocoding kullanımı için hata mesajı. */

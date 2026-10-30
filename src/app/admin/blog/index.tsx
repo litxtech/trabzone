@@ -154,7 +154,7 @@ export default function AdminBlogScreen() {
       },
       {
         key: 'views',
-        label: 'Görüntüleme',
+        label: 'Eski toplam',
         width: 0.7,
         hideOnMobile: true,
         render: (row) => (

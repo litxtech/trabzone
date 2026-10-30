@@ -28,6 +28,9 @@ import { MapSheet } from '@/features/map/components/MapSheet';
 import { publicMediaUrl } from '@/features/media/media-service';
 import { MapCanvas } from '@/features/map/components/MapCanvas';
 import type { MapPoint } from '@/features/map/types';
+import { formatViewCount } from '@/features/views/format';
+import { useContentViewCount, useContentViewRegistration } from '@/features/views/use-content-views';
+import { ContentStatsSheet } from '@/features/views/components/ContentStatsSheet';
 import { useStartDirectConversation } from '@/features/messaging/hooks/use-chat';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { estateShareLink } from '@/features/share/links';
@@ -79,11 +82,19 @@ export default function RealEstateDetailScreen() {
   const startChat = useStartDirectConversation();
 
   const [viewer, setViewer] = useState<{ index: number } | null>(null);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState<(typeof REPORT_REASONS)[number]['key']>('fake');
   const [reportDetails, setReportDetails] = useState('');
 
   const data = listing.data;
+  const viewCount = useContentViewCount({ type: 'real_estate_listing', id: listingId || null });
+  useContentViewRegistration({
+    type: 'real_estate_listing',
+    id: listingId || null,
+    surface: 'real_estate_detail',
+    enabled: Boolean(data),
+  });
 
   const viewerMedia = useMemo<ViewerMedia[]>(
     () =>
@@ -394,11 +405,11 @@ export default function RealEstateDetailScreen() {
                 <AppText variant="bodyStrong">Bu ilan size ait</AppText>
                 <AppText variant="caption" color="textSecondary">
                   {data.status === 'draft' || data.status === 'rejected'
-                    ? 'Taslağı düzenleyip EİDS doğrulamasına gönderebilirsin.'
-                    : 'Yayın ve doğrulama durumu admin moderasyonuyla yönetilir.'}
+                    ? 'İlanı düzenleyip anında yayınlayabilirsin.'
+                    : 'İlanın durumu ve doğrulama rozeti burada görünür. Bilgileri dilediğin an güncelleyebilirsin.'}
                 </AppText>
               </View>
-              {data.status === 'draft' || data.status === 'rejected' ? (
+              {['draft', 'rejected', 'published', 'expired', 'archived'].includes(data.status) ? (
                 <Button
                   label="Düzenle"
                   size="sm"
@@ -495,8 +506,27 @@ export default function RealEstateDetailScreen() {
               value={formatDate(data.published_at ?? data.created_at)}
             />
             <InfoLine label="Güncelleme" value={formatDate(data.updated_at)} />
-            <InfoLine label="Görüntülenme" value={String(data.view_count)} />
-            {data.expires_at ? (
+            <InfoLine label="Görüntülenme" value={`${formatViewCount(viewCount)} tekil`} />
+            {data.is_mine ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Tekil görüntüleme istatistiklerini aç"
+                onPress={() => setStatsOpen(true)}
+                style={({ pressed }) => [
+                  styles.statsRow,
+                  {
+                    borderColor: theme.colors.border,
+                    backgroundColor: pressed ? theme.colors.surfaceMuted : 'transparent',
+                  },
+                ]}
+              >
+                <Ionicons name="eye-outline" size={16} color={theme.colors.primaryDeep} />
+                <AppText variant="caption" color="primaryDeep" style={styles.flex}>
+                  Tekil görüntüleme istatistikleri
+                </AppText>
+                <Ionicons name="chevron-forward" size={15} color={theme.colors.textTertiary} />
+              </Pressable>
+            ) : null}            {data.expires_at ? (
               <InfoLine label="Yayın bitişi" value={formatDate(data.expires_at)} />
             ) : null}
           </Card>
@@ -505,8 +535,8 @@ export default function RealEstateDetailScreen() {
             <Ionicons name="shield-checkmark-outline" size={18} color={theme.colors.primaryDeep} />
             <AppText variant="caption" color="textSecondary" style={styles.flex}>
               Kapora veya ödeme göndermeden önce taşınmazı yerinde gör ve tapu/Yetki belgesi
-              doğrulamasını iste. Trabzone, doğrulanmamış ilanı yayınlamaz; yine de iletişimde
-              dikkatli ol.
+              doğrulamasını iste. İlanlar anında yayınlanır; doğrulama rozeti olmayan ilanlarda
+              iletişimde dikkatli ol.
             </AppText>
           </View>
 
@@ -640,6 +670,16 @@ export default function RealEstateDetailScreen() {
           maxLength={1000}
         />
       </MapSheet>
+
+      {data.is_mine ? (
+        <ContentStatsSheet
+          visible={statsOpen}
+          onClose={() => setStatsOpen(false)}
+          type="real_estate_listing"
+          id={data.id}
+          title={data.title}
+        />
+      ) : null}
     </View>
   );
 }
@@ -940,6 +980,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   footerButton: { flex: 1.25 },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginTop: 4,
+  },
   reasonList: { gap: 7 },
   reason: {
     flexDirection: 'row',

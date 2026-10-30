@@ -41,6 +41,38 @@ const GOOGLE_IOS_URL_SCHEME = GOOGLE_IOS_CLIENT_ID
 const UNIVERSAL_LINKS_ENABLED = process.env.EXPO_PUBLIC_ENABLE_UNIVERSAL_LINKS === 'true';
 const LINK_HOSTS = ['www.trabzoneapp.com', 'trabzoneapp.com'];
 
+/**
+ * APNs ortamı. TestFlight/App Store dağıtımı `production`, development build
+ * ve simülatör `development` (sandbox) APNs kullanır. EAS build profilinden
+ * türetilir; yerel derlemelerde sandbox kalır.
+ */
+const EAS_BUILD_PROFILE = process.env.EAS_BUILD_PROFILE ?? '';
+const NOTIFICATIONS_MODE: 'development' | 'production' =
+  EAS_BUILD_PROFILE === 'production' || EAS_BUILD_PROFILE === 'preview' ? 'production' : 'development';
+
+/**
+ * Firebase Android yapılandırması (FCM).
+ *
+ * Android'de `getExpoPushTokenAsync()` FirebaseApp üzerinden FCM token'ı ister;
+ * `google-services.json` derlemeye girmezse `FirebaseApp` başlatılamaz ve token
+ * alınamaz ("Default FirebaseApp is not initialized"). Token olmayınca sunucu
+ * hiçbir push gönderemez — uygulama kapalıyken/arkada hiçbir bildirim gelmez.
+ *
+ * Dosya depoya konmaz (Firebase projesinin kimlik bilgilerini taşır); yolu
+ * `GOOGLE_SERVICES_JSON` ortam değişkeniyle verilir (yerelde .env, EAS'te dosya
+ * sırrı). Tanımlı değilse alan hiç eklenmez: derleme çalışır ama Android cihaz
+ * push token'ı üretemez, bu yüzden yapılandırma sırasında uyarı basılır.
+ * `npm run push:doctor` aynı eksiği ayrıntılı raporlar.
+ */
+const GOOGLE_SERVICES_FILE = process.env.GOOGLE_SERVICES_JSON?.trim() || null;
+
+if (!GOOGLE_SERVICES_FILE) {
+  console.warn(
+    '[app.config] GOOGLE_SERVICES_JSON tanımlı değil: Android push (FCM) token\'ı alınamaz. ' +
+      'Bkz. .env.example / npm run push:doctor.',
+  );
+}
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'Trabzone',
@@ -78,6 +110,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   android: {
     package: BUNDLE_ID,
+    ...(GOOGLE_SERVICES_FILE ? { googleServicesFile: GOOGLE_SERVICES_FILE } : {}),
     predictiveBackGestureEnabled: true,
     // Paylaşım bağlantıları `/p/*` altında toplanır; diğer web sayfaları
     // tarayıcıda kalır. Etkinleştirmek için ortamda
@@ -89,11 +122,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
             {
               action: 'VIEW',
               autoVerify: true,
-              data: LINK_HOSTS.map((host) => ({
-                scheme: 'https',
-                host,
-                pathPrefix: '/p',
-              })),
+              data: LINK_HOSTS.flatMap((host) =>
+                ['/p', '/eczaneler', '/nobetci-eczaneler', '/deprem'].map((pathPrefix) => ({
+                  scheme: 'https',
+                  host,
+                  pathPrefix,
+                })),
+              ),
               category: ['BROWSABLE', 'DEFAULT'],
             },
           ],
@@ -125,6 +160,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     'expo-router',
+    // Görsel işlem hattı: disk önbelleği ve animated/cross-fade desteği için
+    // config plugin gerekli (expo-image 58.0.18+).
+    'expo-image',
     // Yetki (entitlement) eklediği için yalnızca sosyal giriş açıkken eklenir.
     ...(SOCIAL_AUTH_ENABLED ? ['expo-apple-authentication' as const] : []),
     // Google native giriş: tarayıcı yerine sistemin hesap seçicisi açılır.
@@ -150,6 +188,20 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     'expo-secure-store',
+    // Standart push bildirimleri (Expo Push). Kritik uyarı yetkisi istenmez.
+    // - defaultChannel: sunucudaki push-dispatch kanal kimlikleriyle eşleşmeli
+    //   (social / messages / alerts; kaynak: push-registration.ts).
+    // - mode: APNs ortamı (production = TestFlight/App Store, development = sandbox).
+    [
+      'expo-notifications',
+      {
+        color: '#0B2A6B',
+        icon: './assets/brand/icons/notification-icon.png',
+        defaultChannel: 'social',
+        mode: NOTIFICATIONS_MODE,
+        enableBackgroundRemoteNotifications: false,
+      },
+    ],
     [
       'expo-location',
       {
@@ -218,6 +270,40 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           enablePngCrunchInReleaseBuilds: true,
           // Hermes V1: daha hızlı açılış, daha az bellek (RN 0.84+ varsayılanı).
           useHermesV1: true,
+          /**
+           * R8 keep kuralları.
+           *
+           * `react-native-compressor` 2.x Nitro tabanlıdır: native taraf
+           * HybridObject sınıflarını **isimle** (JNI) bulur. R8 bu sınıfları
+           * yeniden adlandırdığında ya da tamamen budadığında video sıkıştırma
+           * çağrısı JS hatası olarak değil, süreç ölümü olarak sonuçlanıyordu:
+           * kullanıcı video paylaşırken uygulama kapanıyordu. Kurallar hem
+           * Nitro çekirdeğini hem derleyici modülünü korur.
+           */
+          extraProguardRules: [
+            '# --- react-native-nitro-modules (JNI isim cozumlemesi) ---',
+            '-keep class com.margelo.nitro.** { *; }',
+            '-keep class com.margelo.nitro.**$* { *; }',
+            '-keep class * extends com.margelo.nitro.core.HybridObject { *; }',
+            '-keepclasseswithmembernames class * { native <methods>; }',
+            '',
+            '# --- react-native-compressor (video/audio/image codec) ---',
+            '-keep class com.reactnativecompressor.** { *; }',
+            '-keep class com.reactnativecompressor.**$* { *; }',
+            '-dontwarn com.reactnativecompressor.**',
+            '',
+            '# --- LiveKit Android SDK (JNI + relabeled jni_zero) ---',
+            // LiveKit, WebRTC/JNI köprüsünde `org.jni_zero` sınıflarını kendi
+            // paketi altına taşır (`livekit.org.jni_zero`). R8 bu JNI sınıfını
+            // derleme sırasında bulamadığı için release build
+            // `:app:minifyReleaseWithR8` adımında başarısız oluyordu
+            // ("Missing classes detected while running R8").
+            '-dontwarn livekit.org.jni_zero.**',
+            '-keep class livekit.org.jni_zero.** { *; }',
+            '-keep class io.livekit.** { *; }',
+            '-dontwarn io.livekit.**',
+            '-keepclasseswithmembernames class livekit.** { native <methods>; }',
+          ].join('\n'),
         },
         ios: {
           // expo-maps (Apple Maps) iOS 18+ gerektirir.

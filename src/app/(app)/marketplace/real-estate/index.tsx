@@ -1,8 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { useQueryClient } from '@tanstack/react-query';
 import { useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -10,13 +9,13 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppText, Badge, Button, IconButton, TextField } from '@/components/ui';
-import { MapSheet } from '@/features/map/components/MapSheet';
+import { AppText, Badge, Button, Skeleton } from '@/components/ui';
+import { Screen } from '@/components/ui/Screen';
 import {
   useDeleteRealEstateSavedSearch,
   useExploreBootstrap,
@@ -29,6 +28,8 @@ import {
 } from '@/features/explore/hooks/use-explore';
 import type { RealEstateListing, RealEstateSavedSearch } from '@/features/explore/types';
 import { formatMoney } from '@/features/explore/utils/format';
+import { AdPlacementSlot, interleaveRows, useAdPlacement } from '@/features/ads';
+import { MapSheet } from '@/features/map/components/MapSheet';
 import {
   EMPTY_RE_FILTERS,
   RealEstateFilterSheet,
@@ -39,102 +40,76 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 import { useRouter } from '@/utils/router';
 
-type QuickKey = 'rent-home' | 'sale-home' | 'rent-shop' | 'sale-shop' | 'transfer' | 'land' | null;
+type ListingKind = RealEstateFilters['listingKind'];
 
-type QuickCategory = {
-  key: Exclude<QuickKey, null>;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  kind: 'rent' | 'sale' | 'transfer';
-  category: string | null;
-  tone: string;
-};
-
-const QUICK_CATEGORIES: QuickCategory[] = [
-  {
-    key: 'rent-home',
-    label: 'Kiralık Ev',
-    icon: 'key-outline',
-    kind: 'rent',
-    category: null,
-    tone: '#4169F5',
-  },
-  {
-    key: 'sale-home',
-    label: 'Satılık Ev',
-    icon: 'home-outline',
-    kind: 'sale',
-    category: null,
-    tone: '#8057F4',
-  },
-  {
-    key: 'rent-shop',
-    label: 'Kiralık Dükkân',
-    icon: 'storefront-outline',
-    kind: 'rent',
-    category: 'kiralik-dukkan',
-    tone: '#0EA5A4',
-  },
-  {
-    key: 'sale-shop',
-    label: 'Satılık Dükkân',
-    icon: 'business-outline',
-    kind: 'sale',
-    category: 'satilik-dukkan',
-    tone: '#F59E0B',
-  },
-  {
-    key: 'transfer',
-    label: 'Devren İşletme',
-    icon: 'swap-horizontal-outline',
-    kind: 'transfer',
-    category: null,
-    tone: '#EC4899',
-  },
-  {
-    key: 'land',
-    label: 'Arsa ve Arazi',
-    icon: 'map-outline',
-    kind: 'sale',
-    category: 'satilik-arsa',
-    tone: '#16A34A',
-  },
+const KIND_TABS: { key: ListingKind; label: string }[] = [
+  { key: null, label: 'Tümü' },
+  { key: 'rent', label: 'Kiralık' },
+  { key: 'sale', label: 'Satılık' },
+  { key: 'transfer', label: 'Devren' },
 ];
 
-function filtersFromQuick(quick: QuickCategory): RealEstateFilters {
-  return {
-    ...EMPTY_RE_FILTERS,
-    listingKind: quick.kind,
-    category: quick.category,
-  };
-}
+const SORT_OPTIONS: { key: RealEstateFilters['sort']; label: string }[] = [
+  { key: 'new', label: 'En yeni' },
+  { key: 'price_asc', label: 'Fiyat artan' },
+  { key: 'price_desc', label: 'Fiyat azalan' },
+  { key: 'popular', label: 'Popüler' },
+];
+
+const CONTENT_MAX_WIDTH = 1080;
+const GRID_GAP = 10;
 
 export default function RealEstateHomeScreen() {
   const { theme, scheme } = useTheme();
   const router = useRouter();
   const client = useQueryClient();
   const { width } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
   const bootstrap = useExploreBootstrap();
-  const districts = bootstrap.data?.districts ?? [];
-  const categories = bootstrap.data?.real_estate_categories ?? [];
+  const districts = useMemo(() => bootstrap.data?.districts ?? [], [bootstrap.data?.districts]);
+  const categories = useMemo(
+    () => bootstrap.data?.real_estate_categories ?? [],
+    [bootstrap.data?.real_estate_categories],
+  );
 
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [quick, setQuick] = useState<QuickKey>(null);
   const [filters, setFilters] = useState<RealEstateFilters>(EMPTY_RE_FILTERS);
+  const [showAll, setShowAll] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveLabel, setSaveLabel] = useState('');
   const [saveNotify, setSaveNotify] = useState(true);
 
-  const newest = useRealEstateList({ sort: 'new', limit: 8 });
-  const rent = useRealEstateList({ sort: 'new', listing_kind: 'rent', limit: 8 });
-  const sale = useRealEstateList({ sort: 'new', listing_kind: 'sale', limit: 8 });
-  const favorites = useRealEstateList({ sort: 'new', favorites: true, limit: 8 });
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (filters.districtId != null) count += 1;
+    if (filters.minPrice != null || filters.maxPrice != null) count += 1;
+    if (filters.minM2 != null || filters.maxM2 != null) count += 1;
+    if (filters.rooms != null) count += 1;
+    if (filters.maxBuildingAge != null) count += 1;
+    if (filters.ownerType != null) count += 1;
+    return count;
+  }, [filters]);
+
+  const isFiltering =
+    Boolean(debounced.trim()) ||
+    filters.listingKind != null ||
+    filters.category != null ||
+    activeFilterCount > 0;
+
+  const listMode = isFiltering || showAll;
+  const browse = !listMode;
+
+  const newest = useRealEstateList({ sort: 'new', limit: 9 }, { enabled: browse });
+  const rent = useRealEstateList({ sort: 'new', listing_kind: 'rent', limit: 8 }, { enabled: browse });
+  const sale = useRealEstateList({ sort: 'new', listing_kind: 'sale', limit: 8 }, { enabled: browse });
+  const favorites = useRealEstateList(
+    { sort: 'new', favorites: true, limit: 8 },
+    { enabled: browse },
+  );
   const myListings = useMyListings();
   const savedSearches = useRealEstateSavedSearches();
   const saveSearch = useSaveRealEstateSearch();
@@ -142,46 +117,54 @@ export default function RealEstateHomeScreen() {
   const toggleNotify = useSetRealEstateSearchNotify();
   const favorite = useToggleListingFavorite();
 
-  const activeQuick = QUICK_CATEGORIES.find((item) => item.key === quick) ?? null;
-  const effectiveFilters = activeQuick ? filtersFromQuick(activeQuick) : filters;
-  const isFiltering =
-    Boolean(search.trim()) ||
-    Boolean(activeQuick) ||
-    filters.listingKind != null ||
-    filters.category != null ||
-    filters.districtId != null ||
-    filters.neighborhoodId != null ||
-    filters.minPrice != null ||
-    filters.maxPrice != null ||
-    filters.minM2 != null ||
-    filters.maxM2 != null ||
-    filters.rooms != null ||
-    filters.maxBuildingAge != null ||
-    filters.ownerType != null;
-
   const listParams = useMemo(() => {
     const params: Record<string, unknown> = {
-      sort: effectiveFilters.sort,
+      sort: filters.sort,
       limit: 30,
     };
-    if (effectiveFilters.listingKind) params.listing_kind = effectiveFilters.listingKind;
-    if (effectiveFilters.category) params.category = effectiveFilters.category;
-    if (effectiveFilters.districtId != null) params.district_id = effectiveFilters.districtId;
-    if (effectiveFilters.neighborhoodId != null)
-      params.neighborhood_id = effectiveFilters.neighborhoodId;
-    if (effectiveFilters.minPrice != null) params.min_price = effectiveFilters.minPrice;
-    if (effectiveFilters.maxPrice != null) params.max_price = effectiveFilters.maxPrice;
-    if (effectiveFilters.minM2 != null) params.min_m2 = effectiveFilters.minM2;
-    if (effectiveFilters.maxM2 != null) params.max_m2 = effectiveFilters.maxM2;
-    if (effectiveFilters.rooms != null) params.rooms = effectiveFilters.rooms;
-    if (effectiveFilters.maxBuildingAge != null)
-      params.max_building_age = effectiveFilters.maxBuildingAge;
-    if (effectiveFilters.ownerType) params.owner_type = effectiveFilters.ownerType;
+    if (filters.listingKind) params.listing_kind = filters.listingKind;
+    if (filters.category) params.category = filters.category;
+    if (filters.districtId != null) params.district_id = filters.districtId;
+    if (filters.neighborhoodId != null) params.neighborhood_id = filters.neighborhoodId;
+    if (filters.minPrice != null) params.min_price = filters.minPrice;
+    if (filters.maxPrice != null) params.max_price = filters.maxPrice;
+    if (filters.minM2 != null) params.min_m2 = filters.minM2;
+    if (filters.maxM2 != null) params.max_m2 = filters.maxM2;
+    if (filters.rooms != null) params.rooms = filters.rooms;
+    if (filters.maxBuildingAge != null) params.max_building_age = filters.maxBuildingAge;
+    if (filters.ownerType) params.owner_type = filters.ownerType;
     if (debounced.trim()) params.query = debounced.trim();
     return params;
-  }, [debounced, effectiveFilters]);
+  }, [debounced, filters]);
 
-  const results = useRealEstateList(listParams);
+  const results = useRealEstateList(listParams, { enabled: listMode });
+  const resultItems = useMemo(() => results.data?.items ?? [], [results.data?.items]);
+
+  const pageWidth = Math.min(width, CONTENT_MAX_WIDTH);
+  const columns = pageWidth >= 900 ? 3 : 2;
+  const cardWidth = Math.floor(
+    (pageWidth - theme.layout.screenPadding * 2 - GRID_GAP * (columns - 1)) / columns,
+  );
+
+  const ads = useAdPlacement('real_estate_list', resultItems.length, {
+    columns,
+    enabled: listMode,
+    contextDistrict:
+      districts.find((district) => district.id === filters.districtId)?.name ?? null,
+  });
+  const resultRows = useMemo(
+    () => interleaveRows(resultItems, ads.positions, (listing) => listing.id),
+    [ads.positions, resultItems],
+  );
+
+  const categoryOptions = useMemo(
+    () =>
+      categories
+        .filter((category) => category.children.length > 0)
+        .flatMap((category) => category.children)
+        .filter((category) => !filters.listingKind || category.listing_kind === filters.listingKind),
+    [categories, filters.listingKind],
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -204,18 +187,26 @@ export default function RealEstateHomeScreen() {
   const openListing = (listing: RealEstateListing) =>
     navigate(`/marketplace/real-estate/${listing.id}`);
 
+  const openCreate = () => navigate('/marketplace/real-estate/create');
+
+  const clearAll = () => {
+    setFilters(EMPTY_RE_FILTERS);
+    setShowAll(false);
+    setSearch('');
+    setDebounced('');
+  };
+
   const openMap = () => {
     const params = new URLSearchParams();
     params.set('mode', 're');
-    const source = effectiveFilters;
-    if (source.listingKind) params.set('kind', source.listingKind);
-    if (source.category) params.set('category', source.category);
-    if (source.districtId != null) params.set('districtId', String(source.districtId));
-    if (source.neighborhoodId != null) params.set('neighborhoodId', String(source.neighborhoodId));
-    if (source.minPrice != null) params.set('minPrice', String(source.minPrice));
-    if (source.maxPrice != null) params.set('maxPrice', String(source.maxPrice));
-    if (source.minM2 != null) params.set('minM2', String(source.minM2));
-    if (source.rooms != null) params.set('rooms', String(source.rooms));
+    if (filters.listingKind) params.set('kind', filters.listingKind);
+    if (filters.category) params.set('category', filters.category);
+    if (filters.districtId != null) params.set('districtId', String(filters.districtId));
+    if (filters.neighborhoodId != null) params.set('neighborhoodId', String(filters.neighborhoodId));
+    if (filters.minPrice != null) params.set('minPrice', String(filters.minPrice));
+    if (filters.maxPrice != null) params.set('maxPrice', String(filters.maxPrice));
+    if (filters.minM2 != null) params.set('minM2', String(filters.minM2));
+    if (filters.rooms != null) params.set('rooms', String(filters.rooms));
     if (debounced.trim()) params.set('q', debounced.trim());
     navigate(`/explore?${params.toString()}`);
   };
@@ -263,19 +254,17 @@ export default function RealEstateHomeScreen() {
       return;
     }
     const raw: Record<string, unknown> = {};
-    if (effectiveFilters.listingKind) raw.listing_kind = effectiveFilters.listingKind;
-    if (effectiveFilters.category) raw.category = effectiveFilters.category;
-    if (effectiveFilters.districtId != null) raw.district_id = effectiveFilters.districtId;
-    if (effectiveFilters.neighborhoodId != null)
-      raw.neighborhood_id = effectiveFilters.neighborhoodId;
-    if (effectiveFilters.minPrice != null) raw.min_price = effectiveFilters.minPrice;
-    if (effectiveFilters.maxPrice != null) raw.max_price = effectiveFilters.maxPrice;
-    if (effectiveFilters.minM2 != null) raw.min_m2 = effectiveFilters.minM2;
-    if (effectiveFilters.maxM2 != null) raw.max_m2 = effectiveFilters.maxM2;
-    if (effectiveFilters.rooms != null) raw.rooms = effectiveFilters.rooms;
-    if (effectiveFilters.maxBuildingAge != null)
-      raw.max_building_age = effectiveFilters.maxBuildingAge;
-    if (effectiveFilters.ownerType) raw.owner_type = effectiveFilters.ownerType;
+    if (filters.listingKind) raw.listing_kind = filters.listingKind;
+    if (filters.category) raw.category = filters.category;
+    if (filters.districtId != null) raw.district_id = filters.districtId;
+    if (filters.neighborhoodId != null) raw.neighborhood_id = filters.neighborhoodId;
+    if (filters.minPrice != null) raw.min_price = filters.minPrice;
+    if (filters.maxPrice != null) raw.max_price = filters.maxPrice;
+    if (filters.minM2 != null) raw.min_m2 = filters.minM2;
+    if (filters.maxM2 != null) raw.max_m2 = filters.maxM2;
+    if (filters.rooms != null) raw.rooms = filters.rooms;
+    if (filters.maxBuildingAge != null) raw.max_building_age = filters.maxBuildingAge;
+    if (filters.ownerType) raw.owner_type = filters.ownerType;
     if (debounced.trim()) raw.query = debounced.trim();
 
     saveSearch.mutate(
@@ -292,134 +281,160 @@ export default function RealEstateHomeScreen() {
     );
   };
 
-  const clearAll = () => {
-    setQuick(null);
-    setFilters(EMPTY_RE_FILTERS);
-    setSearch('');
-    setDebounced('');
-  };
-
   const myActiveCount = myListings.data?.items.length ?? 0;
   const savedCount = savedSearches.data?.length ?? 0;
-  const cardWidth = Math.max(150, (width - 40 - 10) / 2);
-  const eidsEnabled = Boolean(bootstrap.data?.eids_enabled);
+  const selectedCategory = categoryOptions.find((item) => item.slug === filters.category) ?? null;
+  const districtName =
+    districts.find((district) => district.id === filters.districtId)?.name ?? null;
+  const total = listMode ? (results.data?.total ?? null) : (newest.data?.total ?? null);
 
-  const header = (
-    <View>
-      {/*
-        Hero, durum çubuğunun (çentik) altına kadar uzanan tam genişlikte bir
-        yüzey. İç boşluk `insets.top` ile verilir; böylece hiçbir kart çentiğin
-        altına girmez, arka plan ise ekranın en üstüne kadar devam eder.
-      */}
-      <View style={styles.hero}>
-        <LinearGradient
-          colors={
-            scheme === 'dark'
-              ? ['#16264F', '#0C1426', '#1D1840']
-              : ['#0B2A6F', '#1459E8', '#5B34D6']
-          }
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[styles.heroFill, { paddingTop: insets.top + 10 }]}
-        >
-          {/* Yumuşak ışık halkaları: düz gradyanı "cam" hissine yaklaştırır. */}
-          <View pointerEvents="none" style={styles.glowLarge} />
-          <View pointerEvents="none" style={styles.glowSmall} />
+  const resultTitle =
+    [filters.listingKind ? KIND_TABS.find((tab) => tab.key === filters.listingKind)?.label : null,
+     selectedCategory?.name.replace(/^(Kiralık|Satılık|Devren)\s+/i, '') ?? null]
+      .filter(Boolean)
+      .join(' · ') || (debounced.trim() ? `“${debounced.trim()}” araması` : 'Arama sonuçları');
 
-          <View style={styles.heroBar}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Geri"
-              hitSlop={8}
-              onPress={() => {
-                if (router.canGoBack()) {
-                  router.back();
-                  return;
-                }
-                // Derin baglanti veya drawer ile dogrudan acildiysa yigin bos.
-                router.replace('/marketplace' as never);
-              }}
-              style={({ pressed }) => [styles.glassIcon, { opacity: pressed ? 0.7 : 1 }]}
-            >
-              <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
-            </Pressable>
+  const summaryParts: string[] = [];
+  if (districtName) summaryParts.push(districtName);
+  if (filters.minPrice != null || filters.maxPrice != null) {
+    const min = filters.minPrice != null ? formatMoney(filters.minPrice * 100) : null;
+    const max = filters.maxPrice != null ? formatMoney(filters.maxPrice * 100) : null;
+    summaryParts.push(min && max ? `${min}–${max}` : min ? `${min} ve üzeri` : `${max} ve altı`);
+  }
+  if (filters.rooms != null) summaryParts.push(`${filters.rooms}+1`);
+  if (activeFilterCount > 0 && summaryParts.length === 0) {
+    summaryParts.push(`${activeFilterCount} filtre`);
+  }
 
-            <View style={styles.flex}>
-              <AppText variant="overline" color="rgba(255,255,255,0.66)">
-                TRABZONE
-              </AppText>
-              <AppText variant="h1" color="#FFFFFF" numberOfLines={1}>
-                Emlak
-              </AppText>
-            </View>
+  const handleKind = (kind: ListingKind) => {
+    haptics.tap();
+    setFilters((current) => ({ ...current, listingKind: kind, category: null }));
+  };
 
+  const setCategory = (slug: string | null) => {
+    haptics.tap();
+    setFilters((current) => ({ ...current, category: current.category === slug ? null : slug }));
+  };
+
+  const setSort = (sort: RealEstateFilters['sort']) => {
+    haptics.tap();
+    setFilters((current) => ({ ...current, sort }));
+  };
+
+  return (
+    <>
+      <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+      <Screen
+        edges={['top', 'left', 'right', 'bottom']}
+        scroll
+        padded
+        contentContainerStyle={styles.page}
+        refreshControl={
+          <RefreshControl
+            refreshing={listMode ? results.isRefetching : newest.isRefetching}
+            onRefresh={() => {
+              void client.invalidateQueries({ queryKey: ['explore', 're-list'] });
+              void client.invalidateQueries({ queryKey: ['explore', 'my-listings'] });
+              void client.invalidateQueries({ queryKey: ['explore', 're-saved'] });
+            }}
+            tintColor={theme.colors.primary}
+            colors={[theme.colors.primary]}
+          />
+        }
+      >
+        {/* Üst çubuk: geri, başlık ve yalnızca ilan sahibine anlamlı ikonlar. */}
+        <View style={styles.headerRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Geri"
+            hitSlop={8}
+            onPress={() => {
+              if (router.canGoBack()) {
+                router.back();
+                return;
+              }
+              router.replace('/marketplace' as never);
+            }}
+            style={({ pressed }) => [
+              styles.round,
+              {
+                backgroundColor: theme.colors.surface,
+                borderColor: theme.colors.border,
+                opacity: pressed ? 0.7 : 1,
+              },
+            ]}
+          >
+            <Ionicons name="chevron-back" size={21} color={theme.colors.text} />
+          </Pressable>
+
+          <View style={styles.headerText}>
+            <AppText variant="h2" numberOfLines={1}>
+              Emlak
+            </AppText>
+            <AppText variant="caption" color="textTertiary" numberOfLines={1}>
+              {total != null && total > 0 ? `Trabzon · ${total} ilan` : 'Trabzon’da emlak'}
+            </AppText>
+          </View>
+
+          {myActiveCount > 0 ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="İlanlarım"
               hitSlop={6}
               onPress={() => navigate('/marketplace/real-estate/my-listings')}
-              style={({ pressed }) => [styles.glassIcon, { opacity: pressed ? 0.7 : 1 }]}
+              style={({ pressed }) => [
+                styles.round,
+                {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
             >
-              <Ionicons name="albums-outline" size={19} color="#FFFFFF" />
-              {myActiveCount > 0 ? (
-                <Badge label={String(myActiveCount)} tone="accent" style={styles.heroBadge} />
-              ) : null}
+              <Ionicons name="albums-outline" size={19} color={theme.colors.text} />
+              <View style={[styles.countDot, { backgroundColor: theme.colors.primaryDeep }]}>
+                <AppText variant="caption" color="#FFFFFF" style={styles.countDotText}>
+                  {myActiveCount}
+                </AppText>
+              </View>
             </Pressable>
+          ) : null}
 
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Filtreler"
-              hitSlop={6}
-              onPress={() => setFilterOpen(true)}
-              style={({ pressed }) => [styles.glassIcon, { opacity: pressed ? 0.7 : 1 }]}
-            >
-              <Ionicons name="options-outline" size={19} color="#FFFFFF" />
-            </Pressable>
-          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Yeni ilan oluştur"
+            hitSlop={6}
+            onPress={openCreate}
+            style={({ pressed }) => [
+              styles.round,
+              {
+                backgroundColor: theme.colors.primaryDeep,
+                borderColor: theme.colors.primaryDeep,
+                opacity: pressed ? 0.8 : 1,
+              },
+            ]}
+          >
+            <Ionicons name="add" size={22} color="#FFFFFF" />
+          </Pressable>
+        </View>
 
-          <AppText variant="body" color="rgba(255,255,255,0.82)" numberOfLines={1}>
-            Trabzon’da aradığın yeri keşfet.
-          </AppText>
-
-          <View style={styles.heroPills}>
-            <View style={styles.verifiedPill}>
-              <Ionicons name="shield-checkmark" size={12} color="#A7F3D0" />
-              <AppText variant="caption" color="rgba(255,255,255,0.88)" numberOfLines={1}>
-                Doğrulanmış ilanlar
-              </AppText>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Haritada keşfet"
-              onPress={openMap}
-              style={({ pressed }) => [styles.mapPill, { opacity: pressed ? 0.75 : 1 }]}
-            >
-              <Ionicons name="map-outline" size={13} color="#FFFFFF" />
-              <AppText variant="caption" color="#FFFFFF">
-                Haritada keşfet
-              </AppText>
-            </Pressable>
-          </View>
-        </LinearGradient>
-      </View>
-
-      {/* Arama alanı hero'nun alt kenarına taşar: katmanlı, modern görünüm. */}
-      <View style={styles.searchWrap}>
+        {/* Arama alanı: filtre düğmesi kutunun içinde, tek satır. */}
         <View
           style={[
             styles.searchBox,
-            theme.shadows.card,
             { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
           ]}
         >
-          <Ionicons name="search-outline" size={19} color={theme.colors.textTertiary} />
-          <TextField
+          <Ionicons name="search-outline" size={18} color={theme.colors.textTertiary} />
+          <TextInput
             value={search}
             onChangeText={updateSearch}
-            placeholder="Ev, dükkân, arsa veya mahalle ara…"
+            placeholder="Mahalle, ilan veya anahtar kelime ara"
+            placeholderTextColor={theme.colors.textTertiary}
+            style={[styles.searchInput, theme.typography.body, { color: theme.colors.text }]}
             returnKeyType="search"
             onSubmitEditing={() => setDebounced(search)}
-            containerStyle={styles.searchField}
+            accessibilityLabel="Emlak ara"
           />
           {search.length > 0 ? (
             <Pressable
@@ -431,288 +446,347 @@ export default function RealEstateHomeScreen() {
               <Ionicons name="close-circle" size={18} color={theme.colors.textTertiary} />
             </Pressable>
           ) : null}
-        </View>
-      </View>
-
-      <View style={styles.headerBody}>
-        {!eidsEnabled ? (
-          <View
-            style={[
-              styles.notice,
-              { backgroundColor: theme.colors.warningSoft, borderColor: theme.colors.warning },
-            ]}
+          <View style={[styles.searchDivider, { backgroundColor: theme.colors.border }]} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Filtreler"
+            hitSlop={6}
+            onPress={() => setFilterOpen(true)}
+            style={({ pressed }) => [styles.filterButton, { opacity: pressed ? 0.6 : 1 }]}
           >
-            <Ionicons name="information-circle-outline" size={17} color={theme.colors.warning} />
-            <AppText variant="caption" color="textSecondary" style={styles.flex}>
-              EİDS entegrasyonu henüz etkin değil. Yeni ilanlar taslak/doğrulama bekleme durumunda
-              kalır ve yayınlanmaz. Yasal doğrulama atlanmaz.
-            </AppText>
-          </View>
-        ) : null}
+            <Ionicons
+              name="options-outline"
+              size={18}
+              color={activeFilterCount > 0 ? theme.colors.primaryDeep : theme.colors.textSecondary}
+            />
+            {activeFilterCount > 0 ? (
+              <View style={[styles.filterBadge, { backgroundColor: theme.colors.primaryDeep }]}>
+                <AppText variant="caption" color="#FFFFFF" style={styles.filterBadgeText}>
+                  {activeFilterCount}
+                </AppText>
+              </View>
+            ) : null}
+          </Pressable>
+        </View>
 
-        <View style={styles.quickGrid}>
-          {QUICK_CATEGORIES.map((item) => {
-            const active = quick === item.key;
+        {/* Kiralık / Satılık / Devren: ilan türü tek dokunuşla. */}
+        <View style={[styles.segment, { backgroundColor: theme.colors.surfaceMuted }]}>
+          {KIND_TABS.map((tab) => {
+            const active = filters.listingKind === tab.key;
             return (
               <Pressable
-                key={item.key}
+                key={tab.label}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
-                onPress={() => {
-                  haptics.tap();
-                  setQuick(active ? null : item.key);
-                  setFilters(EMPTY_RE_FILTERS);
-                }}
+                onPress={() => handleKind(tab.key)}
                 style={[
-                  styles.quickCard,
-                  {
-                    backgroundColor: active ? theme.colors.primaryDeep : theme.colors.surface,
-                    borderColor: active ? theme.colors.primaryDeep : theme.colors.border,
-                  },
-                  !active ? theme.shadows.xs : null,
+                  styles.segmentItem,
+                  active
+                    ? {
+                        backgroundColor: theme.colors.surface,
+                        borderColor: theme.colors.border,
+                      }
+                    : null,
                 ]}
               >
-                <View
-                  style={[
-                    styles.quickIcon,
-                    { backgroundColor: active ? 'rgba(255,255,255,0.16)' : `${item.tone}18` },
-                  ]}
-                >
-                  <Ionicons name={item.icon} size={18} color={active ? '#FFFFFF' : item.tone} />
-                </View>
                 <AppText
-                  variant="caption"
-                  color={active ? 'onPrimary' : 'text'}
-                  numberOfLines={2}
-                  style={styles.quickLabel}
+                  variant="label"
+                  color={active ? 'primaryDeep' : 'textTertiary'}
+                  numberOfLines={1}
                 >
-                  {item.label}
+                  {tab.label}
                 </AppText>
               </Pressable>
             );
           })}
         </View>
 
-        <View style={styles.shortcuts}>
-          <Shortcut
-            icon="map-outline"
-            label="Haritada Keşfet"
-            hint="Alan çiz, fiyatları gör"
-            onPress={openMap}
-            tone={theme.colors.primaryDeep}
-          />
-          <Shortcut
+        {/* Tür çipleri yalnızca bir ilan türü seçildiğinde görünür: üst alan sade kalır. */}
+        {filters.listingKind && categoryOptions.length > 0 ? (
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.hScroll}
+            contentContainerStyle={styles.chipRow}
+          >
+            <Chip
+              label="Tüm türler"
+              active={filters.category == null}
+              onPress={() => setCategory(null)}
+            />
+            {categoryOptions.map((category) => (
+              <Chip
+                key={category.slug}
+                label={category.name.replace(/^(Kiralık|Satılık|Devren)\s+/i, '')}
+                active={filters.category === category.slug}
+                onPress={() => setCategory(category.slug)}
+              />
+            ))}
+          </ScrollView>
+        ) : null}
+
+        <View style={styles.linkRow}>
+          <LinkChip icon="map-outline" label="Haritada keşfet" onPress={openMap} />
+          <LinkChip
             icon="bookmark-outline"
-            label="Kaydedilen Aramalar"
-            hint={savedCount > 0 ? `${savedCount} kayıtlı arama` : 'Henüz arama yok'}
+            label={savedCount > 0 ? `Kayıtlı aramalar · ${savedCount}` : 'Kayıtlı aramalar'}
             onPress={() => setSavedOpen(true)}
-            tone={theme.colors.accent}
           />
         </View>
 
-        {isFiltering ? (
-          <View style={styles.resultsHead}>
-            <View style={styles.flex}>
-              <AppText variant="h3">{activeQuick ? activeQuick.label : 'Arama sonuçları'}</AppText>
-              <AppText variant="caption" color="textTertiary">
-                {results.isFetching ? 'Güncelleniyor…' : `${results.data?.total ?? 0} ilan`}
-              </AppText>
+        {listMode ? (
+          <>
+            <View style={styles.resultsHead}>
+              <View style={styles.flex}>
+                <AppText variant="h3" numberOfLines={1}>
+                  {isFiltering ? resultTitle : 'Tüm ilanlar'}
+                </AppText>
+                <AppText variant="caption" color="textTertiary" numberOfLines={1}>
+                  {results.isFetching
+                    ? 'Güncelleniyor…'
+                    : [`${results.data?.total ?? 0} ilan`, ...summaryParts].join(' · ')}
+                </AppText>
+              </View>
+              {isFiltering ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Bu aramayı kaydet"
+                  onPress={() => {
+                    setSaveLabel(resultTitle);
+                    setSaveOpen(true);
+                  }}
+                  style={[styles.clearChip, { backgroundColor: theme.colors.primarySoft }]}
+                >
+                  <Ionicons name="bookmark-outline" size={13} color={theme.colors.primaryDeep} />
+                  <AppText variant="caption" color="primaryDeep">
+                    Kaydet
+                  </AppText>
+                </Pressable>
+              ) : null}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={isFiltering ? 'Filtreleri temizle' : 'Listeyi kapat'}
+                onPress={() => {
+                  if (isFiltering) {
+                    clearAll();
+                    return;
+                  }
+                  setShowAll(false);
+                }}
+                style={[styles.clearChip, { backgroundColor: theme.colors.surfaceMuted }]}
+              >
+                <Ionicons name="close" size={13} color={theme.colors.textSecondary} />
+                <AppText variant="caption" color="textSecondary">
+                  {isFiltering ? 'Temizle' : 'Kapat'}
+                </AppText>
+              </Pressable>
             </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Haritada göster"
-              onPress={openMap}
-              style={[styles.smallAction, { backgroundColor: theme.colors.primarySoft }]}
-            >
-              <Ionicons name="map-outline" size={14} color={theme.colors.primaryDeep} />
-              <AppText variant="caption" color="primaryDeep">
-                Harita
-              </AppText>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Bu aramayı kaydet"
-              onPress={() => {
-                setSaveLabel(activeQuick?.label ?? 'Emlak aramam');
-                setSaveOpen(true);
-              }}
-              style={[styles.smallAction, { backgroundColor: theme.colors.surfaceMuted }]}
-            >
-              <Ionicons name="bookmark-outline" size={14} color={theme.colors.textSecondary} />
-              <AppText variant="caption" color="textSecondary">
-                Kaydet
-              </AppText>
-            </Pressable>
-          </View>
-        ) : null}
-      </View>
-    </View>
-  );
 
-  return (
-    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-      {/* Hero koyu bir yüzey olduğu için durum çubuğu ikonları her temada açık. */}
-      <StatusBar style="light" />
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
-        contentInsetAdjustmentBehavior="never"
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        refreshControl={
-          <RefreshControl
-            refreshing={newest.isRefetching && !results.isRefetching}
-            progressViewOffset={insets.top + 12}
-            onRefresh={() => {
-              void client.invalidateQueries({ queryKey: ['explore', 're-list'] });
-              void client.invalidateQueries({ queryKey: ['explore', 'my-listings'] });
-              void client.invalidateQueries({ queryKey: ['explore', 're-saved'] });
-            }}
-            tintColor={theme.colors.primary}
-            colors={[theme.colors.primary]}
-          />
-        }
-      >
-        {header}
-
-        {isFiltering ? (
-          results.isLoading ? (
-            <LoadingBlock label="İlanlar yükleniyor…" />
-          ) : results.data && results.data.items.length > 0 ? (
-            <View style={styles.grid}>
-              {results.data.items.map((listing) => (
-                <ListingCard
-                  key={listing.id}
-                  listing={listing}
-                  width={cardWidth}
-                  onPress={() => openListing(listing)}
-                  onToggleFavorite={() => toggleFavorite(listing)}
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.hScroll}
+              contentContainerStyle={styles.chipRow}
+            >
+              {SORT_OPTIONS.map((option) => (
+                <Chip
+                  key={option.key}
+                  label={option.label}
+                  active={filters.sort === option.key}
+                  onPress={() => setSort(option.key)}
                 />
               ))}
-            </View>
-          ) : (
-            <EmptyState
-              icon="search-outline"
-              title="Uygun ilan bulunamadı"
-              body="Filtreleri gevşetmeyi veya haritada alan çizmeyi dene."
-              actionLabel="Filtreleri temizle"
-              onAction={clearAll}
-            />
-          )
+            </ScrollView>
+
+            {results.isLoading ? (
+              <GridSkeleton cardWidth={cardWidth} />
+            ) : resultItems.length > 0 ? (
+              <View style={styles.grid}>
+                {resultRows.map((row) =>
+                  row.type === 'ad' ? (
+                    <AdPlacementSlot
+                      key={row.key}
+                      slot={ads.slotAt(row.after)}
+                      placement="real_estate_list"
+                      onHide={ads.hide}
+                      style={styles.adRow}
+                    />
+                  ) : (
+                    <ListingCard
+                      key={row.key}
+                      listing={row.item}
+                      width={cardWidth}
+                      onPress={() => openListing(row.item)}
+                      onToggleFavorite={() => toggleFavorite(row.item)}
+                    />
+                  ),
+                )}
+              </View>
+            ) : (
+              <View
+                style={[
+                  styles.emptyCard,
+                  { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                ]}
+              >
+                <View style={[styles.emptyIcon, { backgroundColor: theme.colors.primarySoft }]}>
+                  <Ionicons name="search-outline" size={24} color={theme.colors.primaryDeep} />
+                </View>
+                <AppText variant="h3" align="center">
+                  {isFiltering ? 'Uygun ilan bulunamadı' : 'Henüz ilan yok'}
+                </AppText>
+                <AppText variant="body" color="textSecondary" align="center">
+                  {isFiltering
+                    ? 'Filtreleri gevşetmeyi veya haritada alan çizmeyi dene.'
+                    : 'Yayınlanmış ilan bulunmuyor. İlk ilanı sen oluşturabilirsin.'}
+                </AppText>
+                <View style={styles.emptyActions}>
+                  <Button
+                    label={isFiltering ? 'Filtreleri temizle' : 'İlan oluştur'}
+                    onPress={isFiltering ? clearAll : openCreate}
+                    style={styles.flex}
+                    size="sm"
+                  />
+                  <Button
+                    label={isFiltering ? 'Haritada dene' : 'Haritada keşfet'}
+                    variant="outline"
+                    onPress={openMap}
+                    style={styles.flex}
+                    size="sm"
+                  />
+                </View>
+              </View>
+            )}
+          </>
         ) : (
           <>
-            <Section
-              title="Yeni İlanlar"
-              subtitle="Son yayınlanan doğrulanmış kayıtlar"
-              data={newest.data?.items ?? []}
-              loading={newest.isLoading}
-              onSeeAll={() => navigate('/explore?mode=re')}
-              onOpen={openListing}
-              onFavorite={toggleFavorite}
-            />
-            <Section
-              title="Kiralık Konutlar"
-              subtitle="Aylık kiralık daire, villa ve müstakil evler"
-              data={rent.data?.items ?? []}
-              loading={rent.isLoading}
-              onSeeAll={() => navigate('/explore?mode=re&kind=rent')}
-              onOpen={openListing}
-              onFavorite={toggleFavorite}
-            />
-            <Section
-              title="Satılık ve Ticari"
-              subtitle="Satılık konut, işyeri ve arsa ilanları"
-              data={sale.data?.items ?? []}
-              loading={sale.isLoading}
-              onSeeAll={() => navigate('/explore?mode=re&kind=sale')}
-              onOpen={openListing}
-              onFavorite={toggleFavorite}
-            />
-            <Section
-              title="Favorilerim"
-              subtitle="Kaydettiğin emlak ilanları"
-              data={favorites.data?.items ?? []}
-              loading={favorites.isLoading}
-              showSeeAll={false}
-              onSeeAll={() => undefined}
-              onOpen={openListing}
-              onFavorite={toggleFavorite}
-              emptyLabel="Henüz favori ilan yok. Kartlardaki kalbe dokunarak kaydet."
-            />
+            {newest.isLoading ? (
+              <GridSkeleton cardWidth={cardWidth} />
+            ) : (newest.data?.items.length ?? 0) > 0 ? (
+              <View style={styles.section}>
+                <SectionHead
+                  title="Öne çıkanlar"
+                  subtitle="Trabzon'da son yayınlanan ilanlar"
+                  onMore={() => setShowAll(true)}
+                />
+                <View style={styles.grid}>
+                  {newest.data?.items.map((listing) => (
+                    <ListingCard
+                      key={listing.id}
+                      listing={listing}
+                      width={cardWidth}
+                      onPress={() => openListing(listing)}
+                      onToggleFavorite={() => toggleFavorite(listing)}
+                    />
+                  ))}
+                </View>
+              </View>
+            ) : (
+              <EmptyDiscover onCreate={openCreate} onExploreMap={openMap} />
+            )}
+
+            {(rent.data?.items.length ?? 0) > 0 ? (
+              <Rail
+                title="Kiralık konutlar"
+                subtitle="Aylık kiralık daire, villa ve müstakil evler"
+                items={rent.data?.items ?? []}
+                onMore={() => {
+                  setFilters((current) => ({ ...current, listingKind: 'rent', category: null }));
+                }}
+                onOpen={openListing}
+                onFavorite={toggleFavorite}
+              />
+            ) : null}
+
+            {(sale.data?.items.length ?? 0) > 0 ? (
+              <Rail
+                title="Satılık ve ticari"
+                subtitle="Satılık konut, işyeri ve arsa ilanları"
+                items={sale.data?.items ?? []}
+                onMore={() => {
+                  setFilters((current) => ({ ...current, listingKind: 'sale', category: null }));
+                }}
+                onOpen={openListing}
+                onFavorite={toggleFavorite}
+              />
+            ) : null}
+
+            {(favorites.data?.items.length ?? 0) > 0 ? (
+              <Rail
+                title="Favorilerin"
+                subtitle="Kalbe dokunarak kaydettiğin ilanlar"
+                items={favorites.data?.items ?? []}
+                onOpen={openListing}
+                onFavorite={toggleFavorite}
+              />
+            ) : null}
 
             {myListings.data && myListings.data.items.length > 0 ? (
               <View style={styles.section}>
-                <View style={styles.sectionHead}>
-                  <View style={styles.flex}>
-                    <AppText variant="h3">İlanlarım</AppText>
-                    <AppText variant="caption" color="textTertiary">
-                      Taslak, doğrulama ve yayın durumlarını yönet
-                    </AppText>
-                  </View>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Tüm ilanlarım"
-                    onPress={() => navigate('/marketplace/real-estate/my-listings')}
-                  >
-                    <AppText variant="caption" color="primaryDeep">
-                      Tümü
-                    </AppText>
-                  </Pressable>
-                </View>
-                <View style={styles.myList}>
-                  {myListings.data.items.slice(0, 3).map((item) => (
+                <SectionHead
+                  title="İlanlarım"
+                  subtitle="Yayın, taslak ve doğrulama durumları"
+                  onMore={() => navigate('/marketplace/real-estate/my-listings')}
+                />
+                <View
+                  style={[
+                    styles.myCard,
+                    { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                  ]}
+                >
+                  {myListings.data.items.slice(0, 3).map((item, index) => (
                     <Pressable
                       key={item.id}
                       accessibilityRole="button"
                       accessibilityLabel={item.title}
                       onPress={() => navigate(`/marketplace/real-estate/${item.id}`)}
-                      style={[styles.myRow, { borderColor: theme.colors.border }]}
+                      style={({ pressed }) => [
+                        styles.myRow,
+                        index > 0
+                          ? { borderTopWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border }
+                          : null,
+                        { opacity: pressed ? 0.7 : 1 },
+                      ]}
                     >
                       <View style={styles.flex}>
                         <AppText variant="bodyStrong" numberOfLines={1}>
                           {item.title}
                         </AppText>
-                        <AppText variant="caption" color="textTertiary">
+                        <AppText variant="caption" color="textTertiary" numberOfLines={1}>
                           {formatMoney(item.price_cents, item.currency)} · {item.category_name}
                         </AppText>
                       </View>
-                      <StatusBadge status={item.status} eids={item.eids_status} />
+                      <MyListingBadge status={item.status} eids={item.eids_status} />
                     </Pressable>
                   ))}
                 </View>
               </View>
             ) : null}
+
+            {(newest.data?.items.length ?? 0) > 0 ? (
+              <View
+                style={[
+                  styles.cta,
+                  { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                ]}
+              >
+                <View style={[styles.ctaIcon, { backgroundColor: theme.colors.primarySoft }]}>
+                  <Ionicons name="add" size={20} color={theme.colors.primaryDeep} />
+                </View>
+                <View style={styles.flex}>
+                  <AppText variant="bodyStrong">İlanın var mı?</AppText>
+                  <AppText variant="caption" color="textTertiary" numberOfLines={2}>
+                    İlanın anında yayınlanır; onay beklemez.
+                  </AppText>
+                </View>
+                <Button label="İlan ver" size="sm" fullWidth={false} onPress={openCreate} />
+              </View>
+            ) : null}
           </>
         )}
-
-        <LinearGradient
-          colors={['#101B3B', '#1C2D63', '#422A7D']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[theme.shadows.card, styles.cta]}
-        >
-          <View style={styles.ctaIcon}>
-            <Ionicons name="add-circle-outline" size={22} color="#FFFFFF" />
-          </View>
-          <View style={styles.flex}>
-            <AppText variant="bodyStrong" color="#FFFFFF">
-              İlanın var mı?
-            </AppText>
-            <AppText variant="caption" color="rgba(255,255,255,0.78)">
-              EİDS doğrulamasıyla güvenli biçimde yayınla.
-            </AppText>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Yeni ilan oluştur"
-            onPress={() => navigate('/marketplace/real-estate/create')}
-            style={styles.ctaButton}
-          >
-            <AppText variant="caption" color="#0B1220" style={styles.ctaButtonText}>
-              İlan ver
-            </AppText>
-          </Pressable>
-        </LinearGradient>
-      </ScrollView>
+      </Screen>
 
       <RealEstateFilterSheet
         visible={filterOpen}
@@ -722,7 +796,6 @@ export default function RealEstateHomeScreen() {
         onClose={() => setFilterOpen(false)}
         onApply={(next) => {
           setFilters(next);
-          setQuick(null);
           setFilterOpen(false);
         }}
       />
@@ -735,10 +808,19 @@ export default function RealEstateHomeScreen() {
         maxHeightRatio={0.8}
       >
         {savedSearches.isLoading ? (
-          <LoadingBlock label="Aramalar yükleniyor…" />
+          <View style={styles.sheetLoading}>
+            <Skeleton height={56} radius={14} />
+            <Skeleton height={56} radius={14} />
+          </View>
         ) : savedSearches.data && savedSearches.data.length > 0 ? (
           savedSearches.data.map((item) => (
-            <View key={item.id} style={[styles.savedRow, { borderColor: theme.colors.border }]}>
+            <View
+              key={item.id}
+              style={[
+                styles.savedRow,
+                { borderColor: theme.colors.border, backgroundColor: theme.colors.surface },
+              ]}
+            >
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={item.label}
@@ -753,21 +835,30 @@ export default function RealEstateHomeScreen() {
                   {item.notify_enabled ? 'Bildirim açık' : 'Bildirim kapalı'}
                 </AppText>
               </Pressable>
-              <IconButton
-                name={item.notify_enabled ? 'notifications' : 'notifications-off-outline'}
+              <Pressable
+                accessibilityRole="button"
                 accessibilityLabel={item.notify_enabled ? 'Bildirimi kapat' : 'Bildirimi aç'}
-                size={17}
+                hitSlop={8}
                 onPress={() =>
                   toggleNotify.mutate(
                     { id: item.id, notify: !item.notify_enabled },
                     { onError: (error) => Alert.alert('Güncellenemedi', error.message) },
                   )
                 }
-              />
-              <IconButton
-                name="trash-outline"
+                style={styles.rowIcon}
+              >
+                <Ionicons
+                  name={item.notify_enabled ? 'notifications' : 'notifications-off-outline'}
+                  size={17}
+                  color={
+                    item.notify_enabled ? theme.colors.primaryDeep : theme.colors.textTertiary
+                  }
+                />
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
                 accessibilityLabel="Aramayı sil"
-                size={17}
+                hitSlop={8}
                 onPress={() =>
                   Alert.alert('Aramayı sil', item.label, [
                     { text: 'Vazgeç', style: 'cancel' },
@@ -781,12 +872,17 @@ export default function RealEstateHomeScreen() {
                     },
                   ])
                 }
-              />
+                style={styles.rowIcon}
+              >
+                <Ionicons name="trash-outline" size={17} color={theme.colors.textTertiary} />
+              </Pressable>
             </View>
           ))
         ) : (
           <View style={styles.savedEmpty}>
-            <Ionicons name="bookmark-outline" size={30} color={theme.colors.textTertiary} />
+            <View style={[styles.emptyIcon, { backgroundColor: theme.colors.surfaceMuted }]}>
+              <Ionicons name="bookmark-outline" size={24} color={theme.colors.textTertiary} />
+            </View>
             <AppText variant="body" color="textSecondary" align="center">
               Henüz kaydedilmiş arama yok. Sonuç ekranındaki “Kaydet” ile filtrelerini
               saklayabilirsin.
@@ -810,12 +906,21 @@ export default function RealEstateHomeScreen() {
           />
         }
       >
-        <TextField
-          label="Arama adı"
+        <TextInput
           value={saveLabel}
           onChangeText={setSaveLabel}
           placeholder="Örn. Ortahisar kiralık daire"
+          placeholderTextColor={theme.colors.textTertiary}
           maxLength={80}
+          style={[
+            styles.sheetInput,
+            theme.typography.body,
+            {
+              color: theme.colors.text,
+              backgroundColor: theme.colors.inputBackground,
+              borderColor: theme.colors.border,
+            },
+          ]}
         />
         <Pressable
           accessibilityRole="switch"
@@ -836,22 +941,40 @@ export default function RealEstateHomeScreen() {
           </View>
         </Pressable>
       </MapSheet>
-    </View>
+    </>
   );
 }
 
-function Shortcut({
+function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  const { theme } = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={[
+        styles.chip,
+        {
+          backgroundColor: active ? theme.colors.primaryDeep : theme.colors.surface,
+          borderColor: active ? theme.colors.primaryDeep : theme.colors.border,
+        },
+      ]}
+    >
+      <AppText variant="caption" color={active ? 'onPrimary' : 'textSecondary'}>
+        {label}
+      </AppText>
+    </Pressable>
+  );
+}
+
+function LinkChip({
   icon,
   label,
-  hint,
   onPress,
-  tone,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
-  hint: string;
   onPress: () => void;
-  tone: string;
 }) {
   const { theme } = useTheme();
   return (
@@ -860,109 +983,171 @@ function Shortcut({
       accessibilityLabel={label}
       onPress={onPress}
       style={({ pressed }) => [
-        styles.shortcut,
-        theme.shadows.xs,
+        styles.linkChip,
         {
           backgroundColor: theme.colors.surface,
           borderColor: theme.colors.border,
-          opacity: pressed ? 0.85 : 1,
+          opacity: pressed ? 0.7 : 1,
         },
       ]}
     >
-      <View style={[styles.shortcutIcon, { backgroundColor: `${tone}18` }]}>
-        <Ionicons name={icon} size={18} color={tone} />
-      </View>
-      <View style={styles.flex}>
-        <AppText variant="caption" numberOfLines={1}>
-          {label}
-        </AppText>
-        <AppText
-          variant="caption"
-          color="textTertiary"
-          numberOfLines={1}
-          style={styles.shortcutHint}
-        >
-          {hint}
-        </AppText>
-      </View>
+      <Ionicons name={icon} size={15} color={theme.colors.primaryDeep} />
+      <AppText variant="caption" color="textSecondary" numberOfLines={1}>
+        {label}
+      </AppText>
     </Pressable>
   );
 }
 
-function Section({
+function SectionHead({
   title,
   subtitle,
-  data,
-  loading,
-  emptyLabel = 'Bu bölümde henüz yayınlanmış ilan yok.',
-  showSeeAll = true,
-  onSeeAll,
+  onMore,
+}: {
+  title: string;
+  subtitle: string;
+  onMore?: () => void;
+}) {
+  const { theme } = useTheme();
+  return (
+    <View style={styles.sectionHead}>
+      <View style={styles.flex}>
+        <AppText variant="h3" numberOfLines={1}>
+          {title}
+        </AppText>
+        <AppText variant="caption" color="textTertiary" numberOfLines={1}>
+          {subtitle}
+        </AppText>
+      </View>
+      {onMore ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${title} tümünü gör`}
+          onPress={onMore}
+          style={({ pressed }) => [
+            styles.moreChip,
+            { backgroundColor: theme.colors.surfaceMuted, opacity: pressed ? 0.7 : 1 },
+          ]}
+        >
+          <AppText variant="caption" color="textSecondary">
+            Tümü
+          </AppText>
+          <Ionicons name="chevron-forward" size={12} color={theme.colors.textTertiary} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function Rail({
+  title,
+  subtitle,
+  items,
+  onMore,
   onOpen,
   onFavorite,
 }: {
   title: string;
   subtitle: string;
-  data: RealEstateListing[];
-  loading: boolean;
-  emptyLabel?: string;
-  showSeeAll?: boolean;
-  onSeeAll: () => void;
+  items: RealEstateListing[];
+  onMore?: () => void;
   onOpen: (listing: RealEstateListing) => void;
   onFavorite: (listing: RealEstateListing) => void;
 }) {
-  const { theme } = useTheme();
   return (
     <View style={styles.section}>
-      <View style={styles.sectionHead}>
-        <View style={styles.flex}>
-          <AppText variant="h3">{title}</AppText>
-          <AppText variant="caption" color="textTertiary">
-            {subtitle}
-          </AppText>
-        </View>
-        {showSeeAll && data.length > 0 ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${title} tümünü gör`}
-            onPress={onSeeAll}
-          >
-            <AppText variant="caption" color="primaryDeep">
-              Tümü
-            </AppText>
-          </Pressable>
-        ) : null}
-      </View>
-      {loading ? (
-        <LoadingBlock label="İlanlar yükleniyor…" />
-      ) : data.length === 0 ? (
-        <View style={[styles.sectionEmpty, { backgroundColor: theme.colors.surfaceMuted }]}>
-          <AppText variant="caption" color="textTertiary" align="center">
-            {emptyLabel}
-          </AppText>
-        </View>
-      ) : (
-        <ScrollView
-          keyboardShouldPersistTaps="handled"
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.horizontal}
-        >
-          {data.map((listing) => (
-            <ListingCard
-              key={listing.id}
-              listing={listing}
-              width={270}
-              onPress={() => onOpen(listing)}
-              onToggleFavorite={() => onFavorite(listing)}
-            />
-          ))}
-        </ScrollView>
-      )}
+      <SectionHead title={title} subtitle={subtitle} onMore={onMore} />
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.hScroll}
+        contentContainerStyle={styles.rail}
+      >
+        {items.map((listing) => (
+          <ListingCard
+            key={listing.id}
+            listing={listing}
+            width={252}
+            onPress={() => onOpen(listing)}
+            onToggleFavorite={() => onFavorite(listing)}
+          />
+        ))}
+      </ScrollView>
     </View>
   );
 }
 
-export function StatusBadge({ status, eids }: { status: string; eids: string }) {
+function GridSkeleton({ cardWidth }: { cardWidth: number }) {
+  return (
+    <View style={styles.grid}>
+      {[0, 1, 2, 3].map((index) => (
+        <View key={index} style={{ width: cardWidth }}>
+          <Skeleton height={152} radius={16} />
+          <Skeleton height={14} radius={7} style={styles.skeletonLine} />
+          <Skeleton height={14} radius={7} width="60%" />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function EmptyDiscover({
+  onCreate,
+  onExploreMap,
+}: {
+  onCreate: () => void;
+  onExploreMap: () => void;
+}) {
+  const { theme } = useTheme();
+  return (
+    <View
+      style={[
+        styles.emptyCard,
+        { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+      ]}
+    >
+      <View style={[styles.emptyIcon, { backgroundColor: theme.colors.primarySoft }]}>
+        <Ionicons name="home-outline" size={24} color={theme.colors.primaryDeep} />
+      </View>
+      <AppText variant="h3" align="center">
+        Trabzon’da ilk ilanı sen ver
+      </AppText>
+      <AppText variant="body" color="textSecondary" align="center">
+        Şu anda yayında ilan yok. İlanını oluşturduğun an yayınlanır; adresin gizli kalır.
+      </AppText>
+      <View style={styles.emptyActions}>
+        <Button label="İlan oluştur" onPress={onCreate} style={styles.flex} size="sm" />
+        <Button
+          label="Haritada keşfet"
+          variant="outline"
+          onPress={onExploreMap}
+          style={styles.flex}
+          size="sm"
+        />
+      </View>
+      <View style={styles.trustRow}>
+        <TrustItem icon="flash-outline" label="Anında yayın" />
+        <TrustItem icon="eye-off-outline" label="Gizli konum" />
+        <TrustItem icon="pricetag-outline" label="Ücretsiz ilan" />
+      </View>
+    </View>
+  );
+}
+
+function TrustItem({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
+  const { theme } = useTheme();
+  return (
+    <View style={styles.trustItem}>
+      <Ionicons name={icon} size={13} color={theme.colors.textTertiary} />
+      <AppText variant="caption" color="textTertiary">
+        {label}
+      </AppText>
+    </View>
+  );
+}
+
+function MyListingBadge({ status, eids }: { status: string; eids?: string | null }) {
   const map: Record<string, { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' }> =
     {
       published: { label: 'Yayında', tone: 'success' },
@@ -980,189 +1165,201 @@ export function StatusBadge({ status, eids }: { status: string; eids: string }) 
   return <Badge label={entry.label} tone={entry.tone} />;
 }
 
-function LoadingBlock({ label }: { label: string }) {
-  const { theme } = useTheme();
-  return (
-    <View style={[styles.loading, { backgroundColor: theme.colors.surfaceMuted }]}>
-      <AppText variant="caption" color="textTertiary">
-        {label}
-      </AppText>
-    </View>
-  );
-}
-
-function EmptyState({
-  icon,
-  title,
-  body,
-  actionLabel,
-  onAction,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  body: string;
-  actionLabel: string;
-  onAction: () => void;
-}) {
-  const { theme } = useTheme();
-  return (
-    <View style={styles.empty}>
-      <View style={[styles.emptyIcon, { backgroundColor: theme.colors.primarySoft }]}>
-        <Ionicons name={icon} size={26} color={theme.colors.primaryDeep} />
-      </View>
-      <AppText variant="h3" align="center">
-        {title}
-      </AppText>
-      <AppText variant="body" color="textSecondary" align="center">
-        {body}
-      </AppText>
-      <Button
-        label={actionLabel}
-        variant="secondary"
-        onPress={onAction}
-        style={styles.emptyButton}
-      />
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  // Hero tüm genişliği kaplar ve durum çubuğunun altına kadar uzar; köşeleri
-  // yalnızca altta yuvarlatılır ki üstte "kesik" bir yüzey gibi görünmesin.
-  hero: {
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
-    overflow: 'hidden',
-  },
-  heroFill: {
-    paddingHorizontal: 20,
-    paddingBottom: 40,
+  page: {
+    width: '100%',
+    maxWidth: CONTENT_MAX_WIDTH,
+    alignSelf: 'center',
     gap: 12,
+    paddingTop: 2,
   },
-  glowLarge: {
-    position: 'absolute',
-    width: 260,
-    height: 260,
-    borderRadius: 130,
-    top: -110,
-    right: -70,
-    backgroundColor: 'rgba(255,255,255,0.10)',
-  },
-  glowSmall: {
-    position: 'absolute',
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    bottom: -40,
-    left: -50,
-    backgroundColor: 'rgba(167,139,250,0.28)',
-  },
-  heroBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 2 },
-  glassIcon: {
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerText: { flex: 1, gap: 1 },
+  round: {
     width: 40,
     height: 40,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.16)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.22)',
   },
-  heroBadge: { position: 'absolute', top: -5, right: -5, paddingHorizontal: 6, paddingVertical: 1 },
-  heroPills: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 2 },
-  verifiedPill: { flexDirection: 'row', alignItems: 'center', gap: 5, flex: 1 },
-  mapPill: {
-    flexDirection: 'row',
+  countDot: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 4,
+    borderRadius: 8,
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 11,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    justifyContent: 'center',
   },
-  // Arama kutusu hero'nun 28px üstüne biner: kart kenarı çentikten uzak kalır.
-  searchWrap: { paddingHorizontal: 20, marginTop: -26 },
+  countDotText: { fontSize: 9, fontWeight: '700', lineHeight: 12 },
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 13,
-    paddingVertical: 2,
-    minHeight: 54,
-  },
-  searchField: { flex: 1 },
-  headerBody: { paddingHorizontal: 20, paddingTop: 42, gap: 14 },
-  notice: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    padding: 12,
+    height: 48,
     borderRadius: 14,
-    borderWidth: 1,
-  },
-  quickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
-  quickCard: {
-    width: '31.5%',
-    minHeight: 92,
-    borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
-    padding: 10,
-    gap: 8,
-    justifyContent: 'space-between',
+    paddingLeft: 13,
+    paddingRight: 6,
   },
-  quickIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  quickLabel: { minHeight: 28 },
-  shortcuts: { flexDirection: 'row', gap: 9 },
-  shortcut: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 10,
-    borderRadius: 15,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  shortcutIcon: {
-    width: 32,
-    height: 32,
+  searchInput: { flex: 1, paddingVertical: 0 },
+  searchDivider: { width: StyleSheet.hairlineWidth, height: 22 },
+  filterButton: {
+    width: 36,
+    height: 36,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  shortcutHint: { fontSize: 10 },
-  resultsHead: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 2 },
-  smallAction: {
+  filterBadge: {
+    position: 'absolute',
+    top: 1,
+    right: 1,
+    minWidth: 15,
+    height: 15,
+    paddingHorizontal: 3,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterBadgeText: { fontSize: 9, fontWeight: '700', lineHeight: 12 },
+  segment: {
+    flexDirection: 'row',
+    gap: 3,
+    padding: 3,
+    borderRadius: 13,
+    width: '100%',
+    maxWidth: 560,
+  },
+  segmentItem: {
+    flex: 1,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'transparent',
+  },
+  chipRow: { gap: 7, alignItems: 'center', paddingRight: 8 },
+  hScroll: { flexGrow: 0, flexShrink: 0 },
+  chip: {
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  linkRow: { flexDirection: 'row', gap: 8, width: '100%', maxWidth: 560 },
+  linkChip: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 9,
-    height: 30,
-    borderRadius: 15,
+    justifyContent: 'center',
+    gap: 6,
+    height: 36,
+    borderRadius: 11,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
   },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 20, paddingTop: 12 },
-  section: { paddingTop: 20, gap: 10 },
-  sectionHead: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 20 },
-  horizontal: { gap: 10, paddingHorizontal: 20, paddingBottom: 2 },
-  sectionEmpty: { marginHorizontal: 20, padding: 16, borderRadius: 14 },
+  resultsHead: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 6 },
+  clearChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 9,
+    height: 28,
+    borderRadius: 14,
+  },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GRID_GAP },
+  adRow: { width: '100%' },
+  section: { gap: 10, paddingTop: 8 },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  moreChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 10,
+    height: 28,
+    borderRadius: 14,
+  },
+  rail: { gap: GRID_GAP, paddingRight: 8 },
+  myCard: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  myRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 13,
+  },
+  cta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 8,
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    width: '100%',
+    maxWidth: 720,
+    alignSelf: 'center',
+  },
+  ctaIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyCard: {
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 26,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
+  },
+  emptyIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyActions: { flexDirection: 'row', gap: 8, alignSelf: 'stretch', marginTop: 4 },
+  trustRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 12,
+    paddingTop: 6,
+  },
+  trustItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  skeletonLine: { marginTop: 8, width: '85%' },
+  sheetLoading: { gap: 10 },
   savedRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 2,
     paddingVertical: 10,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  savedEmpty: { alignItems: 'center', gap: 8, paddingVertical: 24, paddingHorizontal: 20 },
+  rowIcon: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  savedEmpty: { alignItems: 'center', gap: 10, paddingVertical: 24, paddingHorizontal: 16 },
+  sheetInput: {
+    height: 48,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+  },
   notifyRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1171,50 +1368,5 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  myList: { paddingHorizontal: 20, gap: 7 },
-  myRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 12,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  cta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginHorizontal: 20,
-    marginTop: 24,
-    padding: 15,
-    borderRadius: 20,
-  },
-  ctaIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.14)',
-  },
-  ctaButton: {
-    paddingHorizontal: 12,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  ctaButtonText: { fontFamily: undefined, fontWeight: '700' },
-  loading: { marginHorizontal: 20, padding: 18, borderRadius: 14, alignItems: 'center' },
-  empty: { alignItems: 'center', gap: 8, paddingHorizontal: 24, paddingVertical: 30 },
-  emptyIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyButton: { maxWidth: 240, marginTop: 4 },
   flex: { flex: 1 },
 });

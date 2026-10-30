@@ -1,10 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppText, Button, TextField } from '@/components/ui';
 import { useExploreBootstrap } from '@/features/explore/hooks/use-explore';
+import { useKeyboardBottomInset } from '@/providers/keyboard';
 import { useTheme } from '@/theme/ThemeProvider';
 import { haptics } from '@/utils/haptics';
 
@@ -61,6 +63,7 @@ export function MarketFilterSheet({
 }: Props) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboardInset = useKeyboardBottomInset();
   const bootstrap = useExploreBootstrap();
   const [state, setState] = useState<MarketFilters>(initial);
 
@@ -84,7 +87,7 @@ export function MarketFilterSheet({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <View style={styles.root}>
+      <Animated.View style={[styles.root, keyboardInset]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Filtreyi kapat"
@@ -286,7 +289,7 @@ export function MarketFilterSheet({
             />
           </View>
         </View>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }
