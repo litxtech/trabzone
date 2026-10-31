@@ -56,6 +56,8 @@ type PushItem = {
   kind: string;
   priority: number;
   sound: boolean;
+  /** Okunmamış bildirim sayısı (push_claim hesaplar). */
+  badge?: number | null;
   data: Record<string, unknown> | null;
 };
 
@@ -75,12 +77,15 @@ type ExpoReceipt = { status: 'ok' | 'error'; message?: string; details?: { error
 const CHANNEL_BY_KIND: Record<string, string> = {
   message: 'messages',
   market_message: 'messages',
+  accommodation_message: 'messages',
   group_invite: 'messages',
   security: 'alerts',
   order: 'alerts',
   support: 'alerts',
   system: 'alerts',
   ride: 'alerts',
+  accommodation_property: 'alerts',
+  accommodation_reservation: 'alerts',
   pharmacy: 'pharmacy',
 };
 
@@ -89,6 +94,7 @@ const CHANNEL_BY_KIND: Record<string, string> = {
 const TTL_BY_KIND: Record<string, number> = {
   message: 6 * 3600,
   market_message: 6 * 3600,
+  accommodation_message: 6 * 3600,
   pharmacy: 12 * 3600,
 };
 const DEFAULT_TTL = 3600;
@@ -109,16 +115,27 @@ function expoHeaders(): Record<string, string> {
 function expoMessage(item: PushItem) {
   const isAndroid = item.platform === 'android';
   const channelId = isAndroid ? (CHANNEL_BY_KIND[item.kind] ?? 'social') : undefined;
+  // Uygulama kapalıyken de doğru rozet: sunucu okunmamış sayısını gönderir.
+  // badge=0 rozeti temizler; sayı yoksa alan tamamen atlanır (istemci kendi
+  // senkronunu yapar).
+  const badge =
+    typeof item.badge === 'number' && Number.isFinite(item.badge)
+      ? Math.max(0, Math.min(999, Math.floor(item.badge)))
+      : undefined;
   return {
     to: item.token,
     title: (item.title ?? 'Trabzone').slice(0, 160),
     body: (item.body ?? '').slice(0, 400),
-    // Expo'da null = sessiz gönderim; undefined alanlar JSON'a yazılmaz.
-    sound: item.sound ? 'default' : null,
+    // Android'de sesi kanal (`channelId`) belirler; FCM yüküne "default"
+    // yazmak expo-notifications'ın bunu özel bir ses dosyası sanıp
+    // "Custom sound 'default' not found" hatası basmasına yol açıyordu.
+    // iOS'ta ise "default" sistem sesi anlamına gelir; null = sessiz.
+    sound: isAndroid ? undefined : item.sound ? 'default' : null,
     // high = FCM yüksek öncelik / APNs priority 10: uygulama arka plandayken
     // ve cihaz uykudayken bildirim bekletilmeden gösterilir.
     priority: item.priority <= 4 ? 'high' : 'default',
     channelId,
+    badge,
     ttl: TTL_BY_KIND[item.kind] ?? DEFAULT_TTL,
     data: {
       ...(item.data ?? {}),
@@ -153,6 +170,7 @@ function chunk<T>(items: T[], size: number): T[][] {
 
 async function runPush(deadline: number) {
   const totals = { claimed: 0, sent: 0, failed: 0, invalid: 0, retry: 0, paused: false };
+  let lastError: string | null = null;
 
   while (Date.now() < deadline) {
     const claim = await rpc<{ paused: boolean; items: PushItem[] }>('push_claim', { p_limit: 400 });
@@ -171,6 +189,7 @@ async function runPush(deadline: number) {
         const payload = (await response.json().catch(() => null)) as { data?: ExpoTicket[] } | null;
         if (!response.ok || !Array.isArray(payload?.data)) {
           const retryable = response.status === 429 || response.status >= 500;
+          lastError ??= `http_${response.status}: ${JSON.stringify(payload).slice(0, 300)}`;
           reports = batch.map((item) => ({
             delivery_id: item.delivery_id,
             ok: false,
@@ -182,6 +201,7 @@ async function runPush(deadline: number) {
           reports = batch.map((item, index) => ticketToReport(item.delivery_id, payload.data?.[index]));
         }
       } catch (error) {
+        lastError ??= `network: ${String(error).slice(0, 300)}`;
         reports = batch.map((item) => ({
           delivery_id: item.delivery_id,
           ok: false,
@@ -189,6 +209,15 @@ async function runPush(deadline: number) {
           message: String(error).slice(0, 300),
           retryable: true,
         }));
+      }
+
+      // Sağlayıcı hatasını görünür tut: InvalidCredentials gibi kalıcı hatalar
+      // aksi halde yalnızca push_deliveries içinde kalıyordu.
+      if (!lastError) {
+        const failedReport = reports.find((report) => report.ok !== true);
+        if (failedReport) {
+          lastError = `${failedReport.error ?? 'unknown'}: ${String(failedReport.message ?? '').slice(0, 300)}`;
+        }
       }
 
       const result = await rpc<Record<string, number>>('push_report', { p_results: reports });
@@ -201,7 +230,7 @@ async function runPush(deadline: number) {
     if (claim.items.length < 400) break;
   }
 
-  return totals;
+  return { ...totals, last_error: lastError };
 }
 
 async function runReceipts() {
@@ -272,6 +301,12 @@ Deno.serve(async (req: Request) => {
       const receipts =
         Date.now() < deadline ? await runReceipts().catch((error) => ({ error: String(error).slice(0, 200) })) : { skipped: 'budget' };
       const pruned = Date.now() < deadline ? await rpc<number>('push_prune', { p_days: 7 }).catch(() => 0) : 0;
+      const receiptsError =
+        receipts && typeof receipts === 'object' && 'error' in receipts ? String(receipts.error) : null;
+      await rpc('push_worker_note', {
+        p_error: push.last_error ?? receiptsError,
+        p_counts: push,
+      }).catch(() => undefined);
       return json(200, { ok: true, push, receipts, pruned, ms: Date.now() - started });
     }
 

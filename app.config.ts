@@ -79,20 +79,15 @@ const NOTIFICATIONS_MODE: 'development' | 'production' =
  * alınamaz ("Default FirebaseApp is not initialized"). Token olmayınca sunucu
  * hiçbir push gönderemez — uygulama kapalıyken/arkada hiçbir bildirim gelmez.
  *
- * Dosya depoya konmaz (Firebase projesinin kimlik bilgilerini taşır); yolu
- * `GOOGLE_SERVICES_JSON` ortam değişkeniyle verilir (yerelde .env, EAS'te dosya
- * sırrı). Tanımlı değilse alan hiç eklenmez: derleme çalışır ama Android cihaz
- * push token'ı üretemez, bu yüzden yapılandırma sırasında uyarı basılır.
- * `npm run push:doctor` aynı eksiği ayrıntılı raporlar.
+ * Dosya istemci tarafı yapılandırmadır (gizli anahtar taşımaz) ve APK'nın
+ * içinde zaten bulunur; bu yüzden depoda tutulur ki EAS derleme arşivine
+ * girebilsin (.gitignore: `!assets/google-services.json`). Yol
+ * `GOOGLE_SERVICES_JSON` ile değiştirilebilir. Dosya yoksa prebuild hata verir;
+ * bu, push'suz bir APK'yı sessizce yayınlamaktan iyidir.
+ * `npm run push:doctor` eksiği ayrıntılı raporlar.
  */
-const GOOGLE_SERVICES_FILE = process.env.GOOGLE_SERVICES_JSON?.trim() || null;
-
-if (!GOOGLE_SERVICES_FILE) {
-  console.warn(
-    '[app.config] GOOGLE_SERVICES_JSON tanımlı değil: Android push (FCM) token\'ı alınamaz. ' +
-      'Bkz. .env.example / npm run push:doctor.',
-  );
-}
+const GOOGLE_SERVICES_FILE =
+  process.env.GOOGLE_SERVICES_JSON?.trim() || './assets/google-services.json';
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
@@ -131,7 +126,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   android: {
     package: BUNDLE_ID,
-    ...(GOOGLE_SERVICES_FILE ? { googleServicesFile: GOOGLE_SERVICES_FILE } : {}),
+    googleServicesFile: GOOGLE_SERVICES_FILE,
     predictiveBackGestureEnabled: true,
     // Paylaşım bağlantıları `/p/*` altında toplanır; diğer web sayfaları
     // tarayıcıda kalır. Etkinleştirmek için ortamda

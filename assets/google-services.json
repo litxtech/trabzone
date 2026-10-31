@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "310273404851",
+    "project_id": "trabzone",
+    "storage_bucket": "trabzone.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:310273404851:android:c353ca725920844734e5c6",
+        "android_client_info": {
+          "package_name": "com.litxtech.trabzone"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCDnSUf1ySPxlkmEkrl8DQuSEdTcJUNm-g"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

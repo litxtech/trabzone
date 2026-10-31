@@ -391,6 +391,36 @@ port = 54327
 # Configure one of the supported backends: `postgres`, `bigquery`.
 backend = "postgres"
 
+# ---------------------------------------------------------------------------
+# Edge Functions
+#
+# Cron (pg_cron → pg_net) bu worker'ları Authorization/apikey başlığı olmadan
+# çağırır; kimlik doğrulaması kendi `x-*-token` başlığı + vault sırrı ile
+# fonksiyon içinde yapılır. `verify_jwt = false` olmadan Gateway isteği 401
+# `UNAUTHORIZED_NO_AUTH_HEADER` ile reddeder ve push/worker hattı sessizce durur.
+# CLI ile deploy ederken de `--no-verify-jwt` kullanılmalıdır.
+# ---------------------------------------------------------------------------
+[functions.push-dispatch]
+verify_jwt = false
+
+[functions.earthquake-sync]
+verify_jwt = false
+
+[functions.sports-sync]
+verify_jwt = false
+
+[functions.pharmacy-duty-sync]
+verify_jwt = false
+
+[functions.blog-autowrite]
+verify_jwt = false
+
+[functions.news-api-worker]
+verify_jwt = false
+
+[functions.ai-news-worker]
+verify_jwt = false
+
 # Experimental features may be deprecated any time
 [experimental]
 # Configures Postgres storage engine to use OrioleDB (S3)

@@ -12,7 +12,7 @@ import {
   useNotifications,
   useUnreadNotifications,
 } from '@/features/notifications/hooks/use-notifications';
-import { clearBadge, currentPermission, registerForPush } from '@/features/notifications/push/push-registration';
+import { currentPermission, registerForPush } from '@/features/notifications/push/push-registration';
 import {
   notificationQueryKeys,
   type AppNotification,
@@ -92,10 +92,8 @@ export default function NotificationsScreen() {
   const remove = useDeleteNotifications();
   const [menuFor, setMenuFor] = useState<AppNotification | null>(null);
 
-  // Ekran açıldığında uygulama simgesindeki rozet sıfırlanır.
-  useEffect(() => {
-    void clearBadge();
-  }, []);
+  // Rozet, PushBridge tarafından okunmamış sayısıyla sürekli eşitlenir; bu
+  // ekranı açmak tek başına bildirimleri okundu yapmaz.
 
   // Bildirim izni hiç istenmediyse bu ekran doğal karşılama noktasıdır.
   const [permission, setPermission] = useState<Permission>('undetermined');

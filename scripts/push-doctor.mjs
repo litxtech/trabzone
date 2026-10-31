@@ -42,7 +42,10 @@ const warn = (v) => `\x1b[33m${v}\x1b[0m`;
 async function runSql(query) {
   const response = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=utf-8' },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json; charset=utf-8',
+    },
     body: JSON.stringify({ query }),
   });
   const text = await response.text();
@@ -95,7 +98,27 @@ select jsonb_build_object(
           join public.user_devices ud on ud.id = d.device_id
          where d.created_at > now() - interval '7 days'
          group by 1, 2, 3
-         order by 5 desc) t)
+         order by 5 desc) t),
+  'latency', (
+    select coalesce(jsonb_agg(jsonb_build_object(
+             'kind', l.kind, 'n', l.deliveries,
+             'p50_s', round(l.p50_s::numeric, 1),
+             'p90_s', round(l.p90_s::numeric, 1),
+             'max_s', round(l.max_s::numeric, 1)) order by l.p90_s desc), '[]'::jsonb)
+      from public.push_latency_15m l),
+  'latency_recent', (
+    select coalesce(jsonb_agg(jsonb_build_object(
+             'kind', t.kind,
+             'at', t.at,
+             'lag_s', round(t.lag::numeric, 2)) order by t.at desc), '[]'::jsonb)
+      from (
+        select n.kind, d.sent_at as at,
+               extract(epoch from (d.sent_at - d.created_at)) as lag
+          from public.push_deliveries d
+          join public.notifications n on n.id = d.notification_id
+         where d.sent_at is not null
+         order by d.sent_at desc
+         limit 5) t)
 ) as data;
 `;
 
@@ -143,6 +166,29 @@ async function expoCredentials() {
 const data = (await runSql(DB_QUERY))[0]?.data ?? {};
 const expo = await expoCredentials();
 
+// Sağlayıcı anahtarı yüklendikten önceki "InvalidCredentials" kayıtları
+// tarihseldir; anahtar yenilendikten sonra hata devam ediyorsa gerçek sorundur.
+const providerKeyUpdatedAt = {
+  ios:
+    (expo?.iosAppCredentials ?? [])
+      .map((c) => c.pushKey?.updatedAt)
+      .filter(Boolean)
+      .sort()
+      .at(-1) ?? null,
+  android:
+    (expo?.androidAppCredentials ?? [])
+      .map((c) => c.googleServiceAccountKeyForFcmV1?.updatedAt ?? c.androidFcm?.updatedAt)
+      .filter(Boolean)
+      .sort()
+      .at(-1) ?? null,
+};
+
+const isStaleCredentialError = (row) => {
+  const cutoff = providerKeyUpdatedAt[row.platform];
+  if (!cutoff || !row.last_at) return false;
+  return new Date(row.last_at) <= new Date(cutoff);
+};
+
 const sections = [];
 const problems = [];
 
@@ -159,7 +205,8 @@ const problems = [];
     `cron           : ${tick ? `${tick.schedule} (${tick.active ? 'aktif' : 'pasif'})` : bad('push-dispatch işi yok')}`,
   ];
   if (!s.enabled) problems.push('push_settings.enabled = false → kuyruk işlenmiyor.');
-  if (!s.worker_url) problems.push('push_settings.worker_url boş → cron hiçbir yere istek atmıyor.');
+  if (!s.worker_url)
+    problems.push('push_settings.worker_url boş → cron hiçbir yere istek atmıyor.');
   if (!tick) problems.push('push-dispatch cron işi kayıp (0205 migration yeniden çalıştırılmalı).');
   sections.push(['1) Sunucu hattı', lines]);
 }
@@ -179,8 +226,20 @@ const problems = [];
     : [bad('kayıtlı cihaz yok — uygulama hiç push token kaydetmemiş')];
 
   for (const d of devices) {
-    if (d.token && !d.notifications_enabled) problems.push(`${d.platform}: cihazda bildirimler kapalı (notifications_enabled = false).`);
-    if (d.token && !d.social_enabled) problems.push(`${d.platform}: cihaz sosyal bildirimleri kapalı (social_enabled = false).`);
+    if (d.token && !d.notifications_enabled)
+      problems.push(`${d.platform}: cihazda bildirimler kapalı (notifications_enabled = false).`);
+    if (d.token && !d.social_enabled)
+      problems.push(
+        `${d.platform}: cihaz sosyal bildirimleri kapalı (social_enabled = false) → yalnızca beğeni/yorum/takip push'ları gitmez.`,
+      );
+    if (!d.token && d.invalidated_at) {
+      problems.push(
+        `${d.platform}: cihaz token'ı geçersiz (${d.invalid_reason ?? 'bilinmiyor'}) → uygulamayı açıp yeniden kayıt olması gerekir.` +
+          (d.platform === 'android'
+            ? " Android'de google-services.json içeren yeni bir derleme (EAS rebuild) şart."
+            : ''),
+      );
+    }
   }
   sections.push(['2) Kayıtlı cihazlar', lines]);
 }
@@ -199,14 +258,55 @@ const problems = [];
 
   for (const r of rows) {
     if (r.status === 'failed' && r.error === 'InvalidCredentials') {
+      if (isStaleCredentialError(r)) {
+        lines.push(
+          `  ${warn(`not: ${r.platform} InvalidCredentials kayıtları (${r.last_at}) anahtar yüklenmeden önceye ait; güncel değil.`)}`,
+        );
+        continue;
+      }
       problems.push(
         `${r.platform}: sağlayıcı kimliği eksik (${r.error}) → Expo projesinde ${r.platform === 'ios' ? 'APNs anahtarı' : 'FCM v1 anahtarı'} yok/yanlış.`,
       );
     }
-    if (r.status === 'invalid_token') problems.push(`${r.platform}: token sağlayıcıda geçersiz (DeviceNotRegistered) → uygulama yeniden açılıp token tazelemeli.`);
-    if (r.status === 'suppressed') problems.push(`${r.platform}: bildirim bastırıldı (sessiz saatler / günlük sınır / tercih).`);
+    if (r.status === 'invalid_token')
+      problems.push(
+        `${r.platform}: token sağlayıcıda geçersiz (DeviceNotRegistered) → uygulama yeniden açılıp token tazelemeli.`,
+      );
+    if (r.status === 'suppressed')
+      problems.push(`${r.platform}: bildirim bastırıldı (sessiz saatler / günlük sınır / tercih).`);
   }
   sections.push(['3) Son 7 günün teslimatları', lines]);
+}
+
+// 3b. Gecikme: kuyruğa girmeden sağlayıcıya teslime kadar geçen süre -------
+{
+  const rows = data.latency ?? [];
+  const recent = data.latency_recent ?? [];
+  const lines = rows.length
+    ? rows.map(
+        (r) =>
+          `${String(r.kind).padEnd(22)} ${String(r.n).padStart(3)}x  p50=${r.p50_s}s  p90=${r.p90_s}s  max=${r.max_s}s`,
+      )
+    : [warn('son 5 dakikada gönderilmiş push yok — gecikme ölçülemedi')];
+
+  if (recent.length) {
+    lines.push(
+      `son gönderimler       : ${recent.map((r) => `${r.lag_s}s`).join(', ')} (en yeni önce)`,
+    );
+  }
+
+  // Yalnızca güncel örneklere bakılır: eski (15 sn'lik cron dönemi) kayıtlar
+  // 5 dakikalık pencerede zaten yoktur, ama son 5 gönderim her koşulda temsilidir.
+  const recentLags = recent.map((r) => Number(r.lag_s)).filter((v) => Number.isFinite(v));
+  const recentMedian = recentLags.length
+    ? [...recentLags].sort((a, b) => a - b)[Math.floor(recentLags.length / 2)]
+    : null;
+  if (recentMedian !== null && recentMedian > 5) {
+    problems.push(
+      `son push'lar geç gidiyor (medyan ${recentMedian}s) → anlık dispatch (0237 push_kick) veya 5 sn'lik cron turu çalışmıyor olabilir.`,
+    );
+  }
+  sections.push(['3b) Gecikme (kuyruk → gönderim, son 5 dakika)', lines]);
 }
 
 // 4. Expo sağlayıcı kimlikleri ---------------------------------------------
@@ -218,10 +318,14 @@ const problems = [];
     for (const c of expo.iosAppCredentials ?? []) {
       const bundle = c.appleAppIdentifier?.bundleIdentifier ?? '?';
       if (c.pushKey) {
-        lines.push(`iOS  ${bundle.padEnd(28)} APNs anahtarı: ${ok(`${c.pushKey.keyIdentifier} (${c.pushKey.updatedAt})`)}`);
+        lines.push(
+          `iOS  ${bundle.padEnd(28)} APNs anahtarı: ${ok(`${c.pushKey.keyIdentifier} (${c.pushKey.updatedAt})`)}`,
+        );
       } else {
         lines.push(`iOS  ${bundle.padEnd(28)} APNs anahtarı: ${bad('YOK')}`);
-        problems.push(`iOS ${bundle}: APNs anahtarı yok → Expo'dan hiçbir iOS push'u gönderilemez (uygulama açıkken de).`);
+        problems.push(
+          `iOS ${bundle}: APNs anahtarı yok → Expo'dan hiçbir iOS push'u gönderilemez (uygulama açıkken de).`,
+        );
       }
     }
     for (const c of expo.androidAppCredentials ?? []) {
@@ -245,7 +349,9 @@ const problems = [];
     config = JSON.parse(readFileSync(join(root, rel), 'utf8'));
   } catch {
     lines.push(`google-services.json: ${bad(`YOK (${rel}) — Android cihaz FCM token üretemez`)}`);
-    lines.push('  → Firebase konsolundan indirip GOOGLE_SERVICES_JSON ile build\'e verin (app.config.ts).');
+    lines.push(
+      "  → Firebase konsolundan indirip GOOGLE_SERVICES_JSON ile build'e verin (app.config.ts).",
+    );
     problems.push(
       'google-services.json yok: Android derlemesinde FirebaseApp başlatılamaz → push token alınamaz (Expo anahtarı doğru olsa bile).',
     );
@@ -253,19 +359,29 @@ const problems = [];
 
   if (config) {
     const projectId = config.project_info?.project_id ?? null;
-    const clients = Array.isArray(config.client) ? config.client : Array.isArray(config.clients) ? config.clients : [];
+    const clients = Array.isArray(config.client)
+      ? config.client
+      : Array.isArray(config.clients)
+        ? config.clients
+        : [];
     lines.push(`google-services.json: ${ok(`var (${rel})`)}`);
     lines.push(`  firebase projesi : ${projectId ?? bad('project_id yok')}`);
 
     if (clients.length === 0) {
       lines.push(`  istemci kaydı    : ${bad('yok — "client" dizisi boş')}`);
-      problems.push('google-services.json içinde "client" kaydı yok → Gradle google-services eklentisi derlemeyi durdurur.');
+      problems.push(
+        'google-services.json içinde "client" kaydı yok → Gradle google-services eklentisi derlemeyi durdurur.',
+      );
     }
 
-    const packages = clients.map((c) => c.client_info?.android_client_info?.package_name).filter(Boolean);
+    const packages = clients
+      .map((c) => c.client_info?.android_client_info?.package_name)
+      .filter(Boolean);
     const matches = packages.filter((p) => p === 'com.litxtech.trabzone');
     for (const pkg of packages) {
-      lines.push(`  paket            : ${pkg}${pkg === 'com.litxtech.trabzone' ? ` ${ok('(eşleşiyor)')}` : ` ${bad('(beklenen com.litxtech.trabzone)')}`}`);
+      lines.push(
+        `  paket            : ${pkg}${pkg === 'com.litxtech.trabzone' ? ` ${ok('(eşleşiyor)')}` : ` ${bad('(beklenen com.litxtech.trabzone)')}`}`,
+      );
     }
     if (clients.length > 0 && matches.length === 0) {
       problems.push(
@@ -301,7 +417,9 @@ for (const [title, lines] of sections) {
 console.log('\nSONUÇ');
 console.log('─'.repeat(40));
 if (problems.length === 0) {
-  console.log(`  ${ok('Engel görünmüyor.')} Test bildirimi gönderip teslimat satırının "delivered" olduğunu doğrulayın.`);
+  console.log(
+    `  ${ok('Engel görünmüyor.')} Test bildirimi gönderip teslimat satırının "delivered" olduğunu doğrulayın.`,
+  );
 } else {
   for (const p of [...new Set(problems)]) console.log(`  ${bad('•')} ${p}`);
 }
