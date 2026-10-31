@@ -99,14 +99,46 @@ export function TargetingSection() {
   return (
     <AdminSection
       title="Hedefleme"
-      subtitle="İlçe hedeflemesi kullanıcının profilde seçtiği ilçeye veya ekrandaki ilçe filtresine dayanır. Kesin konum izni, reklam kimliği (IDFA/AAID) veya ilgi alanı profili kullanılmaz."
+      subtitle="Kampanyalar şehir ve ilçe seçilerek hedeflenir. Eşleşme, kullanıcının profilindeki şehir/ilçe veya ekrandaki ilçe filtresine göre yapılır. Kesin konum izni, reklam kimliği (IDFA/AAID) veya ilgi alanı profili kullanılmaz."
     >
       {data ? (
         <>
           <StatGrid>
-            <StatCard label="İlçesi belirsiz kullanıcı" value={formatCount(data.users_without_district)} icon="help-circle-outline" hint="İlçe hedefli reklam görmez" />
-            <StatCard label="Hedefsiz kampanya" value={formatCount(data.untargeted_campaigns)} icon="globe-outline" hint="Tüm Trabzon'a gösterilir" />
+            <StatCard
+              label="Şehri belirsiz kullanıcı"
+              value={formatCount(data.users_without_city)}
+              icon="help-circle-outline"
+              hint="Trabzon varsayılır"
+            />
+            <StatCard
+              label="İlçesi belirsiz kullanıcı"
+              value={formatCount(data.users_without_district)}
+              icon="map-outline"
+              hint="İlçe hedefli reklam görmez"
+            />
+            <StatCard
+              label="Şehir seçmemiş kampanya"
+              value={formatCount(data.untargeted_city_campaigns)}
+              icon="globe-outline"
+              hint="Tüm şehirlerde gösterilir"
+            />
+            <StatCard
+              label="İlçe seçmemiş kampanya"
+              value={formatCount(data.untargeted_campaigns)}
+              icon="layers-outline"
+              hint="Şehir genelinde gösterilir"
+            />
           </StatGrid>
+          <View style={styles.twoCol}>
+            <View style={styles.col}>
+              <AppText variant="title">Kullanıcıların şehirleri</AppText>
+              <HorizontalBars data={data.profile_cities.slice(0, 12).map((item) => ({ label: item.city, value: item.users }))} />
+            </View>
+            <View style={styles.col}>
+              <AppText variant="title">Kampanyaların hedeflediği şehirler</AppText>
+              <HorizontalBars data={data.campaign_city_targets.slice(0, 12).map((item) => ({ label: item.city, value: item.campaigns }))} />
+            </View>
+          </View>
           <View style={styles.twoCol}>
             <View style={styles.col}>
               <AppText variant="title">Profillerdeki ilçeler</AppText>
@@ -117,8 +149,12 @@ export function TargetingSection() {
               <HorizontalBars data={data.campaign_targets.map((item) => ({ label: item.district, value: item.campaigns }))} />
             </View>
             <View style={styles.col}>
-              <AppText variant="title">Son 30 gün gösterim</AppText>
+              <AppText variant="title">Son 30 gün gösterim (ilçe)</AppText>
               <HorizontalBars data={data.impressions_by_district_30d.map((item) => ({ label: item.district, value: item.impressions }))} />
+            </View>
+            <View style={styles.col}>
+              <AppText variant="title">Son 30 gün gösterim (şehir)</AppText>
+              <HorizontalBars data={data.impressions_by_city_30d.map((item) => ({ label: item.city, value: item.impressions }))} />
             </View>
           </View>
         </>

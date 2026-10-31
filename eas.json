@@ -19,6 +19,7 @@
         "EXPO_PUBLIC_ENABLE_SOCIAL_AUTH": "true",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "1061976570297-apvalptv60j32tcgeelr96jo9ai8s2ie.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_NATIVE_LOGIN": "false",
+        "EXPO_PUBLIC_ENABLE_APPLE_NATIVE_LOGIN": "false",
         "EXPO_PUBLIC_R2_PUBLIC_URL": "https://media.trabzoneapp.com"
       },
       "ios": {
@@ -48,6 +49,7 @@
         "EXPO_PUBLIC_ENABLE_SOCIAL_AUTH": "true",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "1061976570297-apvalptv60j32tcgeelr96jo9ai8s2ie.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_NATIVE_LOGIN": "false",
+        "EXPO_PUBLIC_ENABLE_APPLE_NATIVE_LOGIN": "false",
         "EXPO_PUBLIC_R2_PUBLIC_URL": "https://media.trabzoneapp.com"
       },
       "ios": {
@@ -76,6 +78,7 @@
         "EXPO_PUBLIC_ENABLE_SOCIAL_AUTH": "true",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "1061976570297-apvalptv60j32tcgeelr96jo9ai8s2ie.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_NATIVE_LOGIN": "false",
+        "EXPO_PUBLIC_ENABLE_APPLE_NATIVE_LOGIN": "false",
         "EXPO_PUBLIC_R2_PUBLIC_URL": "https://media.trabzoneapp.com"
       },
       "ios": {

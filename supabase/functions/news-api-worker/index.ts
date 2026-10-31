@@ -229,6 +229,60 @@ async function selectRows<T = Json>(table: string, query: string): Promise<T[]> 
   }
 }
 
+type WorkerSettings = {
+  media_download_enabled: boolean;
+  media_gallery_enabled: boolean;
+  video_capture_enabled: boolean;
+  max_gallery_images: number;
+  max_video_mb: number;
+  strict_ai_gate: boolean;
+  strict_risk_gate: boolean;
+  strict_page_chrome_gate: boolean;
+  auto_publish_requires_permission: boolean;
+  auto_publish_requires_license: boolean;
+  allow_discovery_publish: boolean;
+};
+
+const DEFAULT_WORKER_SETTINGS: WorkerSettings = {
+  media_download_enabled: true,
+  media_gallery_enabled: true,
+  video_capture_enabled: true,
+  max_gallery_images: 10,
+  max_video_mb: 40,
+  strict_ai_gate: false,
+  strict_risk_gate: false,
+  strict_page_chrome_gate: false,
+  auto_publish_requires_permission: false,
+  auto_publish_requires_license: false,
+  allow_discovery_publish: true,
+};
+
+/**
+ * Denetim masasındaki gevşetme/sıkılaştırma anahtarlarını okur. Tablo yoksa
+ * veya alanlar henüz eklenmemişse gevşetilmiş varsayılanlar kullanılır; bu
+ * sayede worker migration uygulanmadan da çalışmaya devam eder.
+ */
+async function loadWorkerSettings(): Promise<WorkerSettings> {
+  const rows = await selectRows<Json>(
+    'news_api_settings',
+    'id=eq.true&select=media_download_enabled,media_gallery_enabled,video_capture_enabled,max_gallery_images,max_video_mb,strict_ai_gate,strict_risk_gate,strict_page_chrome_gate,auto_publish_requires_permission,auto_publish_requires_license,allow_discovery_publish&limit=1',
+  );
+  const row = rows[0] ?? {};
+  return {
+    media_download_enabled: row.media_download_enabled !== false,
+    media_gallery_enabled: row.media_gallery_enabled !== false,
+    video_capture_enabled: row.video_capture_enabled !== false,
+    max_gallery_images: Math.min(Math.max(asNumber(row.max_gallery_images, 10), 1), 10),
+    max_video_mb: Math.min(Math.max(asNumber(row.max_video_mb, 40), 1), 200),
+    strict_ai_gate: row.strict_ai_gate === true,
+    strict_risk_gate: row.strict_risk_gate === true,
+    strict_page_chrome_gate: row.strict_page_chrome_gate === true,
+    auto_publish_requires_permission: row.auto_publish_requires_permission === true,
+    auto_publish_requires_license: row.auto_publish_requires_license === true,
+    allow_discovery_publish: row.allow_discovery_publish !== false,
+  };
+}
+
 async function storageUpload(path: string, bytes: Uint8Array, contentType: string): Promise<boolean> {
   try {
     const response = await fetch(`${supabaseUrl()}/storage/v1/object/posts/${path}`, {
@@ -577,6 +631,289 @@ function firstImageUrl(html: string): string | null {
   const match = (html ?? '').match(/<img[^>]+src\s*=\s*("([^"]+)"|'([^']+)')/i);
   const src = match ? (match[2] ?? match[3] ?? '') : '';
   return /^https?:\/\//i.test(src) ? src : null;
+}
+
+// ---------------------------------------------------------------------------
+// Haber medyası: galeri görselleri ve videolar
+// ---------------------------------------------------------------------------
+type ExtractedMedia = { images: string[]; videos: string[] };
+
+// Yalnızca arayüz parçası olan görselleri ayıklar. "uploads" gibi gerçek
+// içerik yollarını yanlışlıkla elememek için kelime sınırları aranır.
+const IMAGE_JUNK_RE =
+  /(?:^|[\/_.-])(logo|logosu|icon|icons|avatar|sprite|placeholder|spacer|pixel|tracking|beacon|favicon|emoji|badge|button|banner|advert|reklam|doubleclick|googlesyndication|googletagmanager|google-analytics|scorecardresearch|share-icons?|social-icons?)(?:[\/_.-]|$)/i;
+
+const VIDEO_HOST_RE =
+  /(youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|twitch\.tv|streamable\.com|twitter\.com|x\.com|instagram\.com|tiktok\.com|facebook\.com\/[^/]+\/videos)/i;
+
+const VIDEO_FILE_RE = /\.(mp4|m4v|webm|mov)(\?|#|$)/i;
+
+function addUniqueUrl(list: string[], value: string | null | undefined): void {
+  if (!value) return;
+  const url = value.trim();
+  if (!/^https?:\/\//i.test(url)) return;
+  if (!list.includes(url)) list.push(url);
+}
+
+function isJunkImage(url: string): boolean {
+  const value = url.toLowerCase();
+  if (!/^https?:\/\//i.test(value)) return true;
+  if (/\.svg(\?|#|$)/i.test(value)) return true;
+  if (IMAGE_JUNK_RE.test(value)) return true;
+  if (/(doubleclick|googletagmanager|google-analytics|scorecardresearch|facebook\.com\/tr)/i.test(value)) {
+    return true;
+  }
+  return false;
+}
+
+/** Bir HTML etiketinin özniteliklerini güvenli biçimde okur. */
+function parseTagAttrs(tag: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  const re = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(tag)) !== null) {
+    const key = (match[1] ?? '').toLowerCase();
+    const value = match[3] ?? match[4] ?? match[5] ?? '';
+    if (key) attrs[key] = decodeEntities(value);
+  }
+  return attrs;
+}
+
+/** `srcset` içinden en büyük görseli seçer. */
+function srcsetBest(value: string): string | null {
+  let best: { url: string; score: number } | null = null;
+  for (const part of (value ?? '').split(',')) {
+    const bits = part.trim().split(/\s+/);
+    const url = bits[0] ?? '';
+    if (!url) continue;
+    const descriptor = (bits[1] ?? '').toLowerCase();
+    let score = 0;
+    if (descriptor.endsWith('w')) score = asNumber(descriptor.slice(0, -1), 0);
+    else if (descriptor.endsWith('x')) score = asNumber(descriptor.slice(0, -1), 1) * 1000;
+    if (!best || score > best.score) best = { url, score };
+  }
+  return best?.url ?? null;
+}
+
+/** JSON-LD içindeki image/video alanlarını toplar. */
+function collectJsonLdMedia(value: unknown, out: ExtractedMedia, depth = 0): void {
+  if (depth > 5 || value === null || value === undefined) return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectJsonLdMedia(item, out, depth + 1);
+    return;
+  }
+  if (typeof value !== 'object') return;
+
+  const node = value as Json;
+  const image = node.image;
+  const images = Array.isArray(image) ? image : image ? [image] : [];
+  for (const entry of images) {
+    if (typeof entry === 'string') addUniqueUrl(out.images, entry);
+    else if (entry && typeof entry === 'object') {
+      const obj = entry as Json;
+      addUniqueUrl(out.images, asString(obj.url) || asString(obj.contentUrl));
+    }
+  }
+
+  const video = node.video;
+  const videos = Array.isArray(video) ? video : video ? [video] : [];
+  for (const entry of videos) {
+    if (typeof entry === 'string') addUniqueUrl(out.videos, entry);
+    else if (entry && typeof entry === 'object') {
+      const obj = entry as Json;
+      addUniqueUrl(
+        out.videos,
+        asString(obj.contentUrl) || asString(obj.embedUrl) || asString(obj.url),
+      );
+    }
+  }
+
+  for (const [key, child] of Object.entries(node)) {
+    if (key === 'image' || key === 'video') continue;
+    if (child && typeof child === 'object') collectJsonLdMedia(child, out, depth + 1);
+  }
+}
+
+/**
+ * Bir haber sayfasının/akış gövdesinin HTML'inden yayımlanmış tüm görsel ve
+ * video adreslerini çıkarır. Sıra: JSON-LD, Open Graph/Twitter, galeri
+ * görselleri, `<picture>/<source>`, `<video>` ve gömülü oynatıcılar.
+ */
+function extractMediaFromHtml(html: string, baseUrl: string): ExtractedMedia {
+  const out: ExtractedMedia = { images: [], videos: [] };
+  const raw = html ?? '';
+  if (!raw) return out;
+
+  for (const match of raw.matchAll(
+    /<script[^>]+type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi,
+  )) {
+    try {
+      collectJsonLdMedia(JSON.parse((match[1] ?? '').trim()), out);
+    } catch {
+      // Bozuk JSON-LD yoksayılır.
+    }
+  }
+
+  const clean = decodeEntities(
+    raw
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<(script|style|noscript|template)[\s\S]*?<\/\1>/gi, ' '),
+  );
+
+  for (const tag of clean.match(/<meta\b[^>]*>/gi) ?? []) {
+    const attrs = parseTagAttrs(tag);
+    const key = (attrs.property || attrs.name || '').toLowerCase();
+    const content = attrs.content || '';
+    if (!content) continue;
+    if (
+      ['og:image', 'og:image:url', 'og:image:secure_url', 'twitter:image', 'twitter:image:src', 'image'].includes(key)
+    ) {
+      addUniqueUrl(out.images, toAbsoluteUrl(content, baseUrl));
+    } else if (
+      ['og:video', 'og:video:url', 'og:video:secure_url', 'twitter:player', 'twitter:player:stream'].includes(key)
+    ) {
+      addUniqueUrl(out.videos, toAbsoluteUrl(content, baseUrl));
+    }
+  }
+
+  for (const tag of clean.match(/<img\b[^>]*>/gi) ?? []) {
+    const attrs = parseTagAttrs(tag);
+    const width = asNumber(attrs.width, 0);
+    const height = asNumber(attrs.height, 0);
+    if ((width > 0 && width < 280) || (height > 0 && height < 160)) continue;
+    const srcset = attrs.srcset ? srcsetBest(attrs.srcset) : null;
+    const dataSrcset = attrs['data-srcset'] ? srcsetBest(attrs['data-srcset']) : null;
+    const candidate =
+      srcset ??
+      dataSrcset ??
+      attrs['data-src'] ??
+      attrs['data-original'] ??
+      attrs['data-lazy-src'] ??
+      attrs['data-url'] ??
+      attrs.src ??
+      null;
+    addUniqueUrl(out.images, toAbsoluteUrl(candidate, baseUrl));
+  }
+
+  for (const tag of clean.match(/<source\b[^>]*>/gi) ?? []) {
+    const attrs = parseTagAttrs(tag);
+    const type = (attrs.type ?? '').toLowerCase();
+    if (type.startsWith('video/')) {
+      addUniqueUrl(out.videos, toAbsoluteUrl(attrs.src, baseUrl));
+    } else if (attrs.srcset) {
+      addUniqueUrl(out.images, toAbsoluteUrl(srcsetBest(attrs.srcset), baseUrl));
+    }
+  }
+
+  for (const tag of clean.match(/<(?:video|audio)\b[^>]*>/gi) ?? []) {
+    const attrs = parseTagAttrs(tag);
+    addUniqueUrl(out.videos, toAbsoluteUrl(attrs.src, baseUrl));
+    addUniqueUrl(out.videos, toAbsoluteUrl(attrs['data-src'], baseUrl));
+    addUniqueUrl(out.images, toAbsoluteUrl(attrs.poster, baseUrl));
+  }
+
+  for (const tag of clean.match(/<iframe\b[^>]*>/gi) ?? []) {
+    const attrs = parseTagAttrs(tag);
+    const src = toAbsoluteUrl(attrs.src ?? attrs['data-src'], baseUrl);
+    if (src && (VIDEO_HOST_RE.test(src) || /\.(mp4|m3u8)(\?|#|$)/i.test(src))) {
+      addUniqueUrl(out.videos, src);
+    }
+  }
+
+  for (const tag of clean.match(/<a\b[^>]*href[^>]*>/gi) ?? []) {
+    const attrs = parseTagAttrs(tag);
+    const href = toAbsoluteUrl(attrs.href, baseUrl);
+    if (href && VIDEO_FILE_RE.test(href)) addUniqueUrl(out.videos, href);
+  }
+
+  return {
+    images: out.images.filter((url) => !isJunkImage(url)).slice(0, 24),
+    videos: out.videos.slice(0, 8),
+  };
+}
+
+/** PNG/JPEG/GIF/WebP başlığından görsel boyutunu okur (yükseklik/oran için). */
+function imageDimensions(
+  bytes: Uint8Array,
+  contentType: string,
+): { width: number | null; height: number | null } {
+  try {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (
+      contentType.includes('png') &&
+      bytes.length > 24 &&
+      bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47
+    ) {
+      return { width: view.getUint32(16), height: view.getUint32(20) };
+    }
+    if (
+      contentType.includes('gif') &&
+      bytes.length > 10 &&
+      bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46
+    ) {
+      return { width: view.getUint16(6, true), height: view.getUint16(8, true) };
+    }
+    if (bytes.length > 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+      let offset = 2;
+      while (offset + 9 < bytes.length) {
+        if (bytes[offset] !== 0xff) {
+          offset += 1;
+          continue;
+        }
+        const marker = bytes[offset + 1] ?? 0;
+        if (marker === 0xd8 || marker === 0xd9) {
+          offset += 2;
+          continue;
+        }
+        const length = view.getUint16(offset + 2, false);
+        if (
+          marker >= 0xc0 && marker <= 0xcf &&
+          marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc
+        ) {
+          return {
+            width: view.getUint16(offset + 7, false),
+            height: view.getUint16(offset + 5, false),
+          };
+        }
+        if (length < 2) break;
+        offset += 2 + length;
+      }
+    }
+    if (
+      bytes.length > 30 &&
+      String.fromCharCode(bytes[0] ?? 0, bytes[1] ?? 0, bytes[2] ?? 0, bytes[3] ?? 0) === 'RIFF' &&
+      String.fromCharCode(bytes[8] ?? 0, bytes[9] ?? 0, bytes[10] ?? 0, bytes[11] ?? 0) === 'WEBP'
+    ) {
+      const chunk = String.fromCharCode(bytes[12] ?? 0, bytes[13] ?? 0, bytes[14] ?? 0, bytes[15] ?? 0);
+      if (chunk === 'VP8X') {
+        const width = 1 + ((bytes[24] ?? 0) | ((bytes[25] ?? 0) << 8) | ((bytes[26] ?? 0) << 16));
+        const height = 1 + ((bytes[27] ?? 0) | ((bytes[28] ?? 0) << 8) | ((bytes[29] ?? 0) << 16));
+        return { width, height };
+      }
+    }
+  } catch {
+    // Boyut okunamadı; akış oranı istemcide belirlenir.
+  }
+  return { width: null, height: null };
+}
+
+/** Sınırlı eşzamanlılıkla async eşleme. */
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(Math.max(limit, 1), items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await fn(items[index] as T, index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -1672,23 +2009,241 @@ function extensionFor(contentType: string): string {
   return 'jpg';
 }
 
-async function fetchImageBinary(url: string): Promise<{ bytes: Uint8Array; contentType: string } | null> {
+async function fetchBinary(
+  url: string,
+  accept: string,
+  maxBytes: number,
+  timeoutMs = 20000,
+): Promise<{ bytes: Uint8Array; contentType: string } | null> {
   try {
     const safeUrl = await assertSafeUrl(url);
     const response = await fetch(safeUrl.toString(), {
-      headers: { 'User-Agent': USER_AGENT, Accept: 'image/*' },
+      headers: { 'User-Agent': USER_AGENT, Accept: accept },
       redirect: 'follow',
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) return null;
     const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
-    if (!contentType.startsWith('image/')) return null;
+    const declared = Number(response.headers.get('content-length') ?? '0');
+    if (declared > maxBytes) return null;
     const buffer = await response.arrayBuffer();
-    if (buffer.byteLength === 0 || buffer.byteLength > IMAGE_MAX_BYTES) return null;
+    if (buffer.byteLength === 0 || buffer.byteLength > maxBytes) return null;
     return { bytes: new Uint8Array(buffer), contentType };
   } catch {
     return null;
   }
+}
+
+async function fetchImageBinary(url: string): Promise<{ bytes: Uint8Array; contentType: string } | null> {
+  const result = await fetchBinary(url, 'image/*', IMAGE_MAX_BYTES, 15000);
+  if (!result || !result.contentType.startsWith('image/')) return null;
+  return result;
+}
+
+async function fetchVideoBinary(
+  url: string,
+  maxBytes: number,
+): Promise<{ bytes: Uint8Array; contentType: string } | null> {
+  const result = await fetchBinary(url, 'video/*,application/octet-stream;q=0.8', maxBytes, 30000);
+  if (!result) return null;
+  const contentType = result.contentType;
+  if (contentType.includes('mpegurl') || contentType.includes('application/vnd.apple')) return null;
+  if (!contentType.startsWith('video/') && !contentType.includes('octet-stream')) return null;
+  return result;
+}
+
+const PAGE_HTML_CACHE = new Map<string, { html: string; at: number }>();
+
+/** Haber sayfasının HTML'ini getirir; bot korumasına karşı ikinci deneme yapar. */
+async function fetchArticleHtml(url: string): Promise<string> {
+  if (!/^https?:\/\//i.test(url)) return '';
+  const cached = PAGE_HTML_CACHE.get(url);
+  if (cached && Date.now() - cached.at < 10 * 60_000) return cached.html;
+
+  const accept = 'text/html,application/xhtml+xml,application/xml;q=0.8,*/*;q=0.5';
+  let result = await safeFetch(url, {
+    timeoutMs: 9000,
+    maxBytes: 1_600_000,
+    headers: { Accept: accept },
+  });
+  if (!result.ok || !result.text) {
+    result = await safeFetch(url, {
+      timeoutMs: 9000,
+      maxBytes: 1_600_000,
+      headers: { Accept: accept, 'User-Agent': BROWSER_USER_AGENT },
+    });
+  }
+  if (!result.ok || !result.text) return '';
+
+  if (PAGE_HTML_CACHE.size > 60) PAGE_HTML_CACHE.clear();
+  PAGE_HTML_CACHE.set(url, { html: result.text, at: Date.now() });
+  return result.text;
+}
+
+/**
+ * Kaynakta yayımlanan tüm görselleri ve videoları indirir. Bu iş yayın
+ * kararından bağımsızdır: haber daha sonra editör kuyruğunda bekleşe bile
+ * galeri tam olarak alınır.
+ */
+async function captureItemMedia(
+  connectionId: string,
+  itemId: string,
+  item: Normalized,
+  settings: WorkerSettings,
+): Promise<{ images: number; videos: number; saved: boolean }> {
+  if (!settings.media_gallery_enabled || !settings.media_download_enabled) {
+    return { images: 0, videos: 0, saved: false };
+  }
+
+  const imageCandidates: string[] = [];
+  const videoCandidates: string[] = [];
+  const addImage = (url: string | null | undefined) => {
+    if (!url || isJunkImage(url) || imageCandidates.includes(url)) return;
+    imageCandidates.push(url);
+  };
+  const addVideo = (url: string | null | undefined) => {
+    if (!url || !/^https?:\/\//i.test(url) || videoCandidates.includes(url)) return;
+    videoCandidates.push(url);
+  };
+
+  addImage(item.image_url);
+  addVideo(item.video_url);
+
+  const feedMedia = extractMediaFromHtml(item.body ?? '', item.url);
+  for (const url of feedMedia.images) addImage(url);
+  for (const url of feedMedia.videos) addVideo(url);
+
+  // Akışta yeterli görsel yoksa veya video aranıyorsa haber sayfası açılır.
+  if (imageCandidates.length < 2 || (settings.video_capture_enabled && videoCandidates.length === 0)) {
+    const html = await fetchArticleHtml(item.url);
+    if (html) {
+      const pageMedia = extractMediaFromHtml(html, item.url);
+      for (const url of pageMedia.images) addImage(url);
+      for (const url of pageMedia.videos) addVideo(url);
+    }
+  }
+
+  const media: Json[] = [];
+  const storageBase = `news/${connectionId}/${itemId.slice(0, 8)}-${Date.now().toString(36)}`;
+  const imageLimit = Math.min(Math.max(settings.max_gallery_images, 1), 10);
+
+  const downloaded = await mapLimit(imageCandidates.slice(0, imageLimit * 3), 3, async (url) => {
+    const binary = await fetchImageBinary(url);
+    if (!binary) return null;
+    const dimensions = imageDimensions(binary.bytes, binary.contentType);
+    // İlgili haber listesi küçük resimleri ve reklam görselleri galeriye
+    // girmesin; boyutu bilinmeyen görseller (webp/avif) korunur.
+    if (
+      dimensions.width !== null && dimensions.height !== null &&
+      (dimensions.width < 400 || dimensions.height < 250)
+    ) {
+      return null;
+    }
+    return { url, binary, dimensions };
+  });
+
+  let order = 0;
+  for (const entry of downloaded) {
+    if (!entry) continue;
+    if (order >= imageLimit) break;
+    const path = `${storageBase}-${order + 1}.${extensionFor(entry.binary.contentType)}`;
+    const uploaded = await storageUpload(path, entry.binary.bytes, entry.binary.contentType);
+    if (!uploaded) continue;
+    media.push({
+      media_type: 'image',
+      type: 'image',
+      storage_path: path,
+      source_url: entry.url,
+      width: entry.dimensions.width,
+      height: entry.dimensions.height,
+      sort_order: order,
+    });
+    order += 1;
+  }
+
+  let videos = 0;
+  const maxVideoBytes = Math.min(Math.max(settings.max_video_mb, 1), 200) * 1024 * 1024;
+  if (settings.video_capture_enabled) {
+    for (const url of videoCandidates) {
+      if (videos >= 2) break;
+      if (!VIDEO_FILE_RE.test(url)) continue;
+      const binary = await fetchVideoBinary(url, maxVideoBytes);
+      if (!binary) continue;
+      const ext = binary.contentType.includes('webm')
+        ? 'webm'
+        : binary.contentType.includes('quicktime')
+          ? 'mov'
+          : 'mp4';
+      const path = `${storageBase}-v${videos + 1}.${ext}`;
+      const uploaded = await storageUpload(path, binary.bytes, binary.contentType);
+      if (!uploaded) continue;
+      media.push({
+        media_type: 'video',
+        type: 'video',
+        storage_path: path,
+        source_url: url,
+        width: null,
+        height: null,
+        duration_ms: null,
+        sort_order: order + videos,
+      });
+      videos += 1;
+    }
+  }
+
+  const saved = await svc<Json>('news_worker_item_media_save', {
+    p_id: itemId,
+    p_payload: {
+      image_urls: imageCandidates.slice(0, 24),
+      video_urls: videoCandidates.slice(0, 8),
+      media,
+    },
+  });
+
+  return { images: order, videos, saved: saved.data?.ok === true };
+}
+
+/**
+ * Daha önce eklenmiş ama galerisi alınmamış bir haberin tüm görsellerini ve
+ * videolarını tamamlar. Kuyrukta bekleyen eski haberler de yayından önce
+ * kaynaktaki tam medyayla paylaşılır.
+ */
+async function ensureItemMedia(itemId: string, settings: WorkerSettings): Promise<void> {
+  if (!settings.media_gallery_enabled || !settings.media_download_enabled) return;
+  const rows = await selectRows<Json>(
+    'news_source_items',
+    `id=eq.${itemId}&select=connection_id,canonical_url,title,summary,body,source_name,source_category,district,image_url,video_url,media,media_checked_at&limit=1`,
+  );
+  const row = rows[0];
+  if (!row) return;
+  if (Array.isArray(row.media) && row.media.length > 0) return;
+  if (row.media_checked_at) return;
+  const connectionId = asString(row.connection_id);
+  const url = asString(row.canonical_url);
+  if (!connectionId || !url) return;
+  await captureItemMedia(
+    connectionId,
+    itemId,
+    {
+      external_id: null,
+      title: asString(row.title),
+      summary: asString(row.summary) || null,
+      body: asString(row.body) || null,
+      url,
+      published_at: null,
+      updated_at: null,
+      image_url: asString(row.image_url) || null,
+      video_url: asString(row.video_url) || null,
+      author: null,
+      source_name: asString(row.source_name) || null,
+      source_category: asString(row.source_category) || null,
+      city: 'Trabzon',
+      district: asString(row.district) || null,
+      tags: [],
+      raw: {},
+    },
+    settings,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1786,8 +2341,11 @@ async function runConnection(config: ConnectionConfig, trigger: string): Promise
   const permissions = permissionRows[0] ?? {};
   const profile = profileRows[0] ?? {};
 
-  // AI yazım durumu çekim başına bir kez okunur (günlük bütçe + çalışma sınırı).
-  const editorialWriter = await loadEditorialWriter();
+  // AI yazım durumu ve gevşetme anahtarları çekim başına bir kez okunur.
+  const [editorialWriter, workerSettings] = await Promise.all([
+    loadEditorialWriter(),
+    loadWorkerSettings(),
+  ]);
 
   const secretResult = await svc<string | null>('news_worker_connection_secret', { p_id: config.id });
   const secret = typeof secretResult.data === 'string' ? secretResult.data : null;
@@ -1911,11 +2469,22 @@ async function runConnection(config: ConnectionConfig, trigger: string): Promise
       const upsertStatus = asString(upsert.data.status, 'new');
       if (upsertStatus === 'duplicate') {
         stats.duplicates += 1;
+        // Eski kayıtların galerisi eksik kalmışsa tamamlanır.
+        await ensureItemMedia(itemId, workerSettings);
         continue;
       }
       stats.inserted += 1;
 
-      if (!aiKeep) {
+      // Görsel ve video aktarımı engelleme kapılarından ÖNCE yapılır: kaynakta
+      // yayımlanan tüm medya indirilir, yayın kararı sonra verilir.
+      const captured = await captureItemMedia(config.id, itemId, normalized, workerSettings);
+      if (captured.images > 0 || captured.videos > 0) {
+        notes.push(`media_captured: ${captured.images} görsel, ${captured.videos} video`);
+      }
+
+      // Varsayılan gevşetilmiş modda AI reddi yalnızca uyarıdır; haber
+      // editör kuyruğuna düşmeye devam eder. Sıkı mod açıksa engellenir.
+      if (!aiKeep && workerSettings.strict_ai_gate) {
         await svc('news_worker_item_classify', {
           p_id: itemId,
           p_payload: { keep: false, reason: blockReason ?? 'ai_rejected', district, category_slug: categorySlug },
@@ -1923,8 +2492,13 @@ async function runConnection(config: ConnectionConfig, trigger: string): Promise
         stats.blocked += 1;
         continue;
       }
+      if (!aiKeep) {
+        notes.push(`ai_advisory: ${blockReason ?? 'ai_rejected'}`);
+      }
 
-      if (risk === 'C') {
+      // Risk C (ölüm/yaralanma/soruşturma vb.) sıkı modda engellenir; gevşek
+      // modda yayınlanabilir ama kayıt risk bilgisini taşır.
+      if (risk === 'C' && workerSettings.strict_risk_gate) {
         await svc('news_worker_item_classify', {
           p_id: itemId,
           p_payload: { keep: false, reason: 'high_risk', district, category_slug: categorySlug },
@@ -1932,29 +2506,12 @@ async function runConnection(config: ConnectionConfig, trigger: string): Promise
         stats.blocked += 1;
         continue;
       }
+      if (risk === 'C') notes.push('risk_c_allowed');
 
       await svc('news_worker_item_classify', {
         p_id: itemId,
         p_payload: { keep: true, district, category_slug: categorySlug },
       });
-
-      // Görsel yalnızca lisans izni varsa indirilir.
-      const mediaAllowed = permissions.can_use_images === true;
-
-      if (mediaAllowed && normalized.image_url) {
-        const binary = await fetchImageBinary(normalized.image_url);
-        if (binary) {
-          const path = `news/${config.id}/${itemId.slice(0, 8)}-${Date.now().toString(36)}.${extensionFor(binary.contentType)}`;
-          const uploaded = await storageUpload(path, binary.bytes, binary.contentType);
-          if (uploaded) {
-            await svc('news_worker_item_attach_media', {
-              p_id: itemId,
-              p_storage_path: path,
-              p_image_url: normalized.image_url,
-            });
-          }
-        }
-      }
 
       // Kaynak akışı yalnızca özet taşıyorsa yayından önce özgün, çok
       // paragraflı bir gövde yazılır. Kaynak tam metni lisansla gösterilebilir
@@ -1980,9 +2537,9 @@ async function runConnection(config: ConnectionConfig, trigger: string): Promise
         if (draft && (await saveEditorialDraft(itemId, draft))) {
           stats.ai_calls += 1;
           editorialWriter.remaining -= 1;
-        } else if (diagnostics.reason?.startsWith('page_chrome')) {
+        } else if (diagnostics.reason?.startsWith('page_chrome') && workerSettings.strict_page_chrome_gate) {
           // Kaynak sayfa haber değil, arayüz metni taşıyor (menü, çerez,
-          // künye, ilan sayfası düğmeleri). Böyle kayıtlar yayımlanmaz.
+          // künye, ilan sayfası düğmeleri). Sıkı modda yayımlanmaz.
           await svc('news_worker_item_classify', {
             p_id: itemId,
             p_payload: {
@@ -1994,19 +2551,32 @@ async function runConnection(config: ConnectionConfig, trigger: string): Promise
           });
           stats.blocked += 1;
           continue;
+        } else if (diagnostics.reason?.startsWith('page_chrome')) {
+          notes.push('page_chrome_kept');
         }
       }
 
-      // Otomatik yayın kapıları
-      const autoPublish =
-        config.auto_publish_enabled &&
-        config.publish_mode !== 'discovery' &&
-        config.publish_mode !== 'editor_approval' &&
-        config.license_status === 'permitted' &&
-        risk === 'A' &&
+      // Otomatik yayın kapıları. Varsayılan gevşek modda yayın yalnızca
+      // "prohibited" lisansla durdurulur; izin bayrakları ve risk sınıfı
+      // yönetici tarafından sıkılaştırılabilir.
+      const modePublishable =
+        config.publish_mode !== 'discovery' ||
+        workerSettings.allow_discovery_publish;
+      const licensePublishable =
+        config.license_status !== 'prohibited' &&
+        (!workerSettings.auto_publish_requires_license || config.license_status === 'permitted');
+      const permissionPublishable =
+        !workerSettings.auto_publish_requires_permission ||
         (config.publish_mode === 'source_profile'
           ? permissions.can_republish_text === true
           : permissions.can_republish_summary === true || permissions.can_republish_text === true);
+      const riskPublishable = !workerSettings.strict_risk_gate || risk === 'A';
+      const autoPublish =
+        config.auto_publish_enabled &&
+        modePublishable &&
+        licensePublishable &&
+        permissionPublishable &&
+        riskPublishable;
 
       if (autoPublish) {
         const publish = await svc<Json>('news_publish_item', { p_item_id: itemId, p_actor: null });
@@ -2400,9 +2970,14 @@ async function drainPublishQueue(limit: number): Promise<Json> {
   const queue = await svc<Json[]>('news_worker_publish_queue', { p_limit: limit });
   const results: Json[] = [];
   const writer = await loadEditorialWriter();
+  const settings = await loadWorkerSettings();
   for (const row of (queue.data ?? []) as Json[]) {
     const itemId = asString(row.item_id);
     if (!itemId) continue;
+
+    // Yayından önce haberin kaynakta yayımlanan tüm görselleri ve videoları
+    // tamamlanır; eski kuyruk kayıtları da tam galeriyle paylaşılır.
+    await ensureItemMedia(itemId, settings);
 
     // Kuyruğa eski akıştan düşmüş, gövdesi özetten ibaret haberler de
     // yayından önce doyurucu metne çevrilir.

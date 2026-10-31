@@ -14,6 +14,12 @@
 import { execFileSync } from 'node:child_process';
 
 const socialAuthEnabled = process.env.EXPO_PUBLIC_ENABLE_SOCIAL_AUTH === 'true';
+/**
+ * Apple girişi varsayılan olarak tarayıcı (PKCE) akışıyla yapılır ve yetki
+ * gerektirmez. Native akış yalnızca bu bayrak açıkken beklenir.
+ */
+const appleNativeEnabled =
+  socialAuthEnabled && process.env.EXPO_PUBLIC_ENABLE_APPLE_NATIVE_LOGIN === 'true';
 
 /** Expo CLI bazı ortamlarda JSON'un önüne/sonuna uyarı yazabilir; güvenli ayrıştır. */
 function parseJsonOutput(output) {
@@ -41,25 +47,25 @@ const config = parseJsonOutput(raw);
 const entitlements = config?.mods?.ios?.entitlements ?? config?._internal?.modResults?.ios?.entitlements ?? {};
 const hasAppleSignIn = Object.prototype.hasOwnProperty.call(entitlements, 'com.apple.developer.applesignin');
 
-if (hasAppleSignIn && !socialAuthEnabled) {
+if (hasAppleSignIn && !appleNativeEnabled) {
   console.error(
     'HATA: Apple ile giriş yetkisi (com.apple.developer.applesignin) üretilmiş ama ' +
-      'EXPO_PUBLIC_ENABLE_SOCIAL_AUTH kapalı. Bu durumda Ad Hoc/App Store profili ' +
-      'yetkiyi içermediği için iOS arşivi başarısız olur.',
+      'native Apple girişi kapalı. Bu durumda Ad Hoc/App Store profili yetkiyi ' +
+      'içermediği için iOS arşivi başarısız olur.',
   );
   console.error(
-    'Çözüm: package.json > expo.autolinking.ios.exclude içinde expo-apple-authentication ' +
-      'kalsın veya Apple Developer portalında App ID için "Sign In with Apple" açıp ' +
-      'provisioning profile yeniden üretin.',
+    'Çözüm: app.config.ts içinde plugin yalnızca APPLE_NATIVE_SIGNIN_ENABLED iken ' +
+      'eklenmeli; native akış isteniyorsa EXPO_PUBLIC_ENABLE_APPLE_NATIVE_LOGIN=true ' +
+      'yapıp App ID\'de "Sign in with Apple" capability açılmalı ve profil yenilenmeli.',
   );
   process.exit(1);
 }
 
-if (socialAuthEnabled && !hasAppleSignIn) {
+if (appleNativeEnabled && !hasAppleSignIn) {
   console.error(
-    'HATA: EXPO_PUBLIC_ENABLE_SOCIAL_AUTH açık ama Apple ile giriş yetkisi üretilmemiş. ' +
-      'Apple girişi çalışmaz; package.json > expo.autolinking.ios.exclude listesinden ' +
-      'expo-apple-authentication çıkarılmalı ve profil yeniden üretilmeli.',
+    'HATA: EXPO_PUBLIC_ENABLE_APPLE_NATIVE_LOGIN açık ama Apple ile giriş yetkisi ' +
+      'üretilmemiş. Native Apple girişi çalışmaz; package.json > expo.autolinking.ios.exclude ' +
+      'listesinden expo-apple-authentication çıkarılmalı ve profil yeniden üretilmeli.',
   );
   process.exit(1);
 }
@@ -90,7 +96,7 @@ if ((profile === 'production' || profile === 'preview') && apsEnvironment !== 'p
 
 console.log(
   hasAppleSignIn
-    ? 'OK: Apple ile giriş yetkisi üretildi (sosyal giriş açık). Profilin yetkiyi içerdiğinden emin olun.'
-    : 'OK: Apple ile giriş yetkisi üretilmedi (sosyal giriş kapalı) — mevcut imzalama profiliyle uyumlu.',
+    ? 'OK: Apple ile giriş yetkisi üretildi (native akış açık). Profilin yetkiyi içerdiğinden emin olun.'
+    : 'OK: Apple ile giriş yetkisi üretilmedi (tarayıcı PKCE akışı) — mevcut imzalama profiliyle uyumlu.',
 );
 console.log(`OK: push yetkisi üretildi (aps-environment: ${apsEnvironment}).`);

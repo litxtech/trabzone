@@ -14,6 +14,7 @@ const rawEnv = {
   EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
   EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
   EXPO_PUBLIC_GOOGLE_NATIVE_LOGIN: process.env.EXPO_PUBLIC_GOOGLE_NATIVE_LOGIN,
+  EXPO_PUBLIC_APPLE_NATIVE_LOGIN: process.env.EXPO_PUBLIC_APPLE_NATIVE_LOGIN,
   EXPO_PUBLIC_R2_PUBLIC_URL: process.env.EXPO_PUBLIC_R2_PUBLIC_URL,
   EXPO_PUBLIC_PLACE_SEARCH_URL: process.env.EXPO_PUBLIC_PLACE_SEARCH_URL,
 };
@@ -59,6 +60,22 @@ const envSchema = z.object({
    * "Skip nonce check" açılmalıdır (Google native SDK nonce göndermez).
    */
   EXPO_PUBLIC_GOOGLE_NATIVE_LOGIN: booleanFlag,
+  /**
+   * iOS'ta Apple girişinin **native** (tarayıcısız) akışla yapılmasını açar.
+   *
+   * Kapalıyken (varsayılan) Apple girişi tarayıcı tabanlı PKCE akışıyla yapılır:
+   * Apple Developer'da yalnızca Services ID ve dönüş adresi gerekir, App ID'de
+   * `Sign in with Apple` yetkisi ve yeniden üretilmiş bir provisioning profile
+   * şart değildir. Açmak için:
+   *   1. Apple Developer > Identifiers > App IDs > com.litxtech.trabzone
+   *      > Capabilities > "Sign in with Apple" işaretlenir.
+   *   2. Provisioning profile yeniden üretilir (EAS eski profili kullanırsa
+   *      `eas credentials` ile kaldırılır).
+   *   3. `EXPO_PUBLIC_ENABLE_APPLE_NATIVE_LOGIN=true` ile yeni derleme alınır.
+   * Aksi halde arşiv adımı "provisioning profile does not support the Sign In
+   * with Apple capability" hatasıyla durur (bkz. scripts/check-entitlements.mjs).
+   */
+  EXPO_PUBLIC_APPLE_NATIVE_LOGIN: booleanFlag,
   /**
    * Cloudflare R2 public taban adresi (örn. `https://media.trabzoneapp.com`).
    * Tanımlıysa herkese açık kovalardaki bütün fotoğraf ve videolar R2'ye
@@ -106,6 +123,12 @@ export const env = {
   googleIosClientId: parsed.data.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? null,
   /** Native Google hesap seçicisi (varsayılan: kapalı, tarayıcı PKCE akışı). */
   enableNativeGoogleLogin: parsed.data.EXPO_PUBLIC_GOOGLE_NATIVE_LOGIN,
+  /**
+   * iOS'ta native Apple girişi (varsayılan: kapalı). Kapalıyken Apple girişi
+   * tarayıcı (PKCE) akışıyla yapılır ve derleme `Sign in with Apple` yetkisi
+   * gerektirmez.
+   */
+  enableNativeAppleLogin: parsed.data.EXPO_PUBLIC_APPLE_NATIVE_LOGIN,
   /**
    * R2 public taban adresi. Tanımlıysa bütün medya R2'ye yüklenir ve herkese
    * açık kovalar bu adresten sunulur; gizli sohbet medyası private bucket'ta

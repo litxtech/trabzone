@@ -386,6 +386,24 @@ export type NewsSettings = {
   dispatch_interval_minutes: number;
   ai_daily_budget: number;
   media_download_enabled: boolean;
+  /** Gönderiye kaynakta yayımlanan tüm görsellerin galerisi eklenir. */
+  media_gallery_enabled: boolean;
+  /** Haber sayfasındaki doğrudan video dosyaları indirilir. */
+  video_capture_enabled: boolean;
+  max_gallery_images: number;
+  max_video_mb: number;
+  /** Açıkken AI reddi haberleri engeller; kapalıyken yalnızca uyarı olur. */
+  strict_ai_gate: boolean;
+  /** Açıkken risk C haberleri engellenir. */
+  strict_risk_gate: boolean;
+  /** Açıkken kaynak sayfa arayüzü tespit edilen haberler engellenir. */
+  strict_page_chrome_gate: boolean;
+  auto_pause_failures: number;
+  media_publish_requires_permission: boolean;
+  video_publish_requires_permission: boolean;
+  auto_publish_requires_permission: boolean;
+  auto_publish_requires_license: boolean;
+  allow_discovery_publish: boolean;
   worker_secret: boolean;
   last_tick_at: string | null;
   next_run_at: string | null;

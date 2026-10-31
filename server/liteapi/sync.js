@@ -37,11 +37,13 @@ function mergeHotel(listHotel, detailHotel) {
 
 function scanQuery(scan, offset, limit) {
   if (scan === 'radius') {
+    // LiteAPI yarıçap aramasını metre cinsinden `distance` ile bekler;
+    // `radius` parametresi 400 döndürür ve ilçe otelleri hiç gelmez.
     return {
       countryCode: config.trabzon.countryCode,
       latitude: config.trabzon.centerLat,
       longitude: config.trabzon.centerLng,
-      radius: config.trabzon.radiusKm,
+      distance: config.trabzon.radiusKm * 1000,
       limit,
       offset,
     };
@@ -121,30 +123,39 @@ async function processHotel({ hotel, mode, runId, fetchDetail }) {
     };
   }
 
-  try {
-    const result = await serviceRpc('acc_liteapi_upsert_property', {
-      p_external_id: hotel.id,
-      p_payload: buildPayload(merged, location),
-      p_run_id: runId,
-    });
-    return {
-      action: result?.action || 'updated',
-      propertyId: result?.property_id || null,
-      externalId: hotel.id,
-      name: hotel.name,
-      district: location.district,
-      detailError,
-    };
-  } catch (cause) {
-    return {
-      action: 'failed',
-      externalId: hotel.id,
-      name: hotel.name,
-      reason: 'upsert_failed',
-      message: cause instanceof Error ? cause.message : 'Tesis kaydedilemedi.',
-      detailError,
-    };
+  const attempts = 2;
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const result = await serviceRpc('acc_liteapi_upsert_property', {
+        p_external_id: hotel.id,
+        p_payload: buildPayload(merged, location),
+        p_run_id: runId,
+      });
+      return {
+        action: result?.action || 'updated',
+        propertyId: result?.property_id || null,
+        externalId: hotel.id,
+        name: hotel.name,
+        district: location.district,
+        detailError,
+      };
+    } catch (cause) {
+      lastError = cause;
+      if (attempt < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+    }
   }
+
+  return {
+    action: 'failed',
+    externalId: hotel.id,
+    name: hotel.name,
+    reason: 'upsert_failed',
+    message: lastError instanceof Error ? lastError.message : 'Tesis kaydedilemedi.',
+    detailError,
+  };
 }
 
 async function recordError(runId, result) {
@@ -167,8 +178,12 @@ async function recordError(runId, result) {
       p_message: message,
       p_payload: result.detailError ? { detail_error: result.detailError } : {},
     });
-  } catch {
-    // Hata kaydı yazılamaması senkronu durdurmaz.
+  } catch (cause) {
+    // Hata kaydı yazılamaması senkronu durdurmaz; operatör görebilsin diye loglanır.
+    console.warn(
+      '[liteapi] senkron hatası kaydedilemedi:',
+      cause instanceof Error ? cause.message : cause,
+    );
   }
 }
 
@@ -329,20 +344,32 @@ async function runSyncBatch(input = {}) {
       hotels = hotels.slice(0, limit);
       nextPhase = 'done';
     } else if (phase === 'radius' && config.radiusScan) {
-      const page = await fetchScanPage('radius', cursor, limit);
-      details.scans.push({
-        scan: 'radius',
-        offset: cursor,
-        returned: page.hotels.length,
-        total: page.total,
-      });
-      hotels = page.hotels.slice(0, limit);
-      const consumed = cursor + hotels.length;
-      if (hotels.length >= limit && (page.total === 0 || consumed < page.total)) {
-        nextPhase = 'radius';
-        nextCursor = consumed;
-      } else {
+      // Yarıçap taraması başarısız olursa şehir taramasıyla toplanan tesisler
+      // korunur; senkronu tamamen düşürmek yerine nedeni kaydedip bitiririz.
+      let page = null;
+      try {
+        page = await fetchScanPage('radius', cursor, limit);
+      } catch (cause) {
+        details.radius_scan_error =
+          cause instanceof Error ? cause.message : 'Yarıçap taraması başarısız.';
         nextPhase = 'done';
+        nextCursor = 0;
+      }
+      if (page) {
+        details.scans.push({
+          scan: 'radius',
+          offset: cursor,
+          returned: page.hotels.length,
+          total: page.total,
+        });
+        hotels = page.hotels.slice(0, limit);
+        const consumed = cursor + hotels.length;
+        if (hotels.length >= limit && (page.total === 0 || consumed < page.total)) {
+          nextPhase = 'radius';
+          nextCursor = consumed;
+        } else {
+          nextPhase = 'done';
+        }
       }
     } else {
       const page = await fetchScanPage('city', cursor, limit);

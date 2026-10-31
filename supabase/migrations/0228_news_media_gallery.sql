@@ -25,7 +25,7 @@
 alter table public.news_api_settings
   add column if not exists media_gallery_enabled boolean not null default true,
   add column if not exists video_capture_enabled boolean not null default true,
-  add column if not exists max_gallery_images integer not null default 8
+  add column if not exists max_gallery_images integer not null default 10
     check (max_gallery_images between 1 and 10),
   add column if not exists max_video_mb integer not null default 40
     check (max_video_mb between 1 and 200),
@@ -37,6 +37,7 @@ alter table public.news_api_settings
   add column if not exists media_publish_requires_permission boolean not null default false,
   add column if not exists video_publish_requires_permission boolean not null default false,
   add column if not exists auto_publish_requires_permission boolean not null default false,
+  add column if not exists auto_publish_requires_license boolean not null default false,
   add column if not exists allow_discovery_publish boolean not null default true;
 
 -- 2) Kaynak haber medyası -------------------------------------------------
@@ -82,6 +83,7 @@ begin
          media_publish_requires_permission = coalesce((p_payload->>'media_publish_requires_permission')::boolean, media_publish_requires_permission),
          video_publish_requires_permission = coalesce((p_payload->>'video_publish_requires_permission')::boolean, video_publish_requires_permission),
          auto_publish_requires_permission = coalesce((p_payload->>'auto_publish_requires_permission')::boolean, auto_publish_requires_permission),
+         auto_publish_requires_license = coalesce((p_payload->>'auto_publish_requires_license')::boolean, auto_publish_requires_license),
          allow_discovery_publish = coalesce((p_payload->>'allow_discovery_publish')::boolean, allow_discovery_publish),
          updated_by = v_admin,
          updated_at = now()
@@ -189,6 +191,7 @@ declare
   v_type text;
   v_slot smallint := 0;
   v_video_links text[];
+  v_video_section text;
 begin
   select * into v_item from public.news_source_items where id = p_item_id for update;
   if not found then
@@ -324,12 +327,17 @@ begin
       );
 
     if coalesce(array_length(v_video_links, 1), 0) > 0 then
-      v_body := v_body || E'\n\n## Video\n' || array_to_string(
+      v_video_section := E'\n\n## Video\n' || array_to_string(
         array(select '🎬 [Videoyu izle](' || u || ')' from unnest(v_video_links) as u),
         E'\n'
       );
     end if;
   end if;
+
+  -- `posts.body` üst sınırı 2000 karakterdir. Video bağlantıları kesilmesin
+  -- diye önce onlara yer ayrılır, ana metin kalan alana sığdırılır.
+  v_body := left(v_body, greatest(0, 2000 - char_length(coalesce(v_video_section, ''))))
+    || coalesce(v_video_section, '');
 
   insert into public.posts (author_id, body, visibility, city)
   values (v_publisher.id, v_body, 'public', 'Trabzon')

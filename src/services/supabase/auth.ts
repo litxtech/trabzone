@@ -443,19 +443,28 @@ type AppleCredential = {
 };
 
 /**
- * iOS'un native Apple oturum modülünün **bu derlemede** gerçekten bulunup
- * bulunmadığını söyler.
+ * iOS'un native Apple oturum modülünün **bu derlemede** gerçekten kullanılıp
+ * kullanılamayacağını söyler.
+ *
+ * İki koşul birden gerekir:
+ *  1. `EXPO_PUBLIC_ENABLE_APPLE_NATIVE_LOGIN=true` (yani derleme
+ *     `com.apple.developer.applesignin` yetkisiyle ve yetkiyi içeren bir
+ *     provisioning profile ile imzalanmış olmalı),
+ *  2. `ExpoAppleAuthentication` native modülü ikili dosyada bulunmalı.
  *
  * `expo-apple-authentication` bağımlılıkta olsa bile native modül
- * `autolinking` listesinden çıkarılmış eski bir derlemede yer almaz. Bu durumda
- * paket hata fırlatmaz: sahte bir modül döndürür ve `isAvailableAsync()`
- * sessizce `false` olur (bkz. expo-apple-authentication/ExpoAppleAuthentication).
- * Bu `false` değeri "cihaz desteklemiyor" demek değildir; yalnızca modülün
- * ikili dosyada olmadığını gösterir. Çağıranlar bu ayrımı kullanarak tarayıcı
- * (PKCE) akışına düşer.
+ * `autolinking` listesinden çıkarılmış ya da config plugin hiç eklenmemiş bir
+ * derlemede yer almaz. Bu durumda paket hata fırlatmaz: sahte bir modül
+ * döndürür ve `isAvailableAsync()` sessizce `false` olur (bkz.
+ * expo-apple-authentication/ExpoAppleAuthentication). Bu `false` değeri "cihaz
+ * desteklemiyor" demek değildir; yalnızca modülün ikili dosyada olmadığını
+ * gösterir. Çağıranlar bu ayrımı kullanarak tarayıcı (PKCE) akışına düşer.
  */
 async function isAppleNativeAvailable(): Promise<boolean> {
-  if (Platform.OS !== 'ios') {
+  // Native akış kapalıyken (varsayılan) Apple girişi tarayıcı akışındadır:
+  // bu derlemede `com.apple.developer.applesignin` yetkisi yok, bu yüzden
+  // `signInAsync` çağrılırsa hata verir. Doğrudan false dönülür.
+  if (Platform.OS !== 'ios' || !env.enableNativeAppleLogin) {
     return false;
   }
   const AppleAuthentication = await loadNativeModule<AppleAuthenticationModule>(() =>

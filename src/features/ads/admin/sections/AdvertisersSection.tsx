@@ -20,9 +20,14 @@ const STATUS = {
 } as const;
 
 function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  return `${parts[0][0] ?? ''}${parts.length > 1 ? (parts[parts.length - 1][0] ?? '') : ''}`.toLocaleUpperCase('tr-TR');
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter((part) => part.length > 0);
+  const first = parts[0] ?? '';
+  const last = parts.length > 1 ? (parts[parts.length - 1] ?? '') : '';
+  const letters = `${first.charAt(0)}${last.charAt(0)}`;
+  return (letters || '?').toLocaleUpperCase('tr-TR');
 }
 
 export function AdvertisersSection({ canManage }: { canManage: boolean }) {
@@ -124,15 +129,37 @@ export function AdvertisersSection({ canManage }: { canManage: boolean }) {
           />
         </View>
       </AdminToolbar>
+      <FilterChips
+        options={[
+          { key: 'all', label: 'Tümü' },
+          { key: 'active', label: 'Aktif' },
+          { key: 'suspended', label: 'Askıda' },
+          { key: 'archived', label: 'Arşiv' },
+        ]}
+        value={statusFilter}
+        onChange={(value) => setStatusFilter(value as typeof statusFilter)}
+      />
       <DataTable
         columns={columns}
-        rows={advertisers.data?.items ?? []}
+        rows={rows}
         keyExtractor={(row) => row.id}
         loading={advertisers.isLoading}
         empty={
-          <AppText variant="body" color="textSecondary">
-            Henüz reklamveren yok.
-          </AppText>
+          <View style={styles.empty}>
+            <Ionicons name="storefront-outline" size={22} color={theme.colors.textTertiary} />
+            <AppText variant="body" color="textSecondary">
+              {statusFilter === 'all' ? 'Henüz reklamveren yok.' : 'Bu durumda reklamveren yok.'}
+            </AppText>
+            {canManage && statusFilter === 'all' ? (
+              <Button
+                label="İlk reklamverenini ekle"
+                size="sm"
+                fullWidth={false}
+                leftIcon={<Ionicons name="add" size={15} color={theme.colors.onPrimary} />}
+                onPress={() => setEditing('new')}
+              />
+            ) : null}
+          </View>
         }
       />
       {advertisers.data ? (
@@ -188,7 +215,15 @@ function AdvertiserEditor({
             <IconButton accessibilityLabel="Kapat" name="close" size={18} onPress={onClose} />
           </View>
           <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
-            <TextField label="Görünen ad" value={form.name ?? ''} onChangeText={(v) => set('name', v)} maxLength={120} />
+            <AppText variant="label">Künye</AppText>
+            <TextField
+              label="Görünen ad"
+              value={form.name ?? ''}
+              onChangeText={(v) => set('name', v)}
+              maxLength={120}
+              placeholder="Örn. Karadeniz Kahve"
+              hint="Reklamlarda ve raporlarda görünen ad."
+            />
             <View style={styles.row}>
               <View style={styles.cell}>
                 <TextField label="Ticari unvan" value={form.legal_name ?? ''} onChangeText={(v) => set('legal_name', v)} />
@@ -197,6 +232,16 @@ function AdvertiserEditor({
                 <TextField label="Vergi no" value={form.tax_number ?? ''} onChangeText={(v) => set('tax_number', v)} />
               </View>
             </View>
+            <TextField label="Web sitesi (https)" value={form.website ?? ''} onChangeText={(v) => set('website', v)} autoCapitalize="none" />
+            <TextField
+              label="Bağlı işletme kimliği (UUID, opsiyonel)"
+              value={form.place_id ?? ''}
+              onChangeText={(v) => set('place_id', v)}
+              autoCapitalize="none"
+              hint="Doluysa kampanya oluştururken işletme profili otomatik önerilir."
+            />
+
+            <AppText variant="label">İletişim</AppText>
             <View style={styles.row}>
               <View style={styles.cell}>
                 <TextField label="Yetkili" value={form.contact_name ?? ''} onChangeText={(v) => set('contact_name', v)} />
@@ -208,11 +253,8 @@ function AdvertiserEditor({
                 <TextField label="Telefon" value={form.contact_phone ?? ''} onChangeText={(v) => set('contact_phone', v)} keyboardType="phone-pad" />
               </View>
             </View>
-            <TextField label="Web sitesi (https)" value={form.website ?? ''} onChangeText={(v) => set('website', v)} autoCapitalize="none" />
-            <TextField label="Bağlı işletme kimliği (UUID, opsiyonel)" value={form.place_id ?? ''} onChangeText={(v) => set('place_id', v)} autoCapitalize="none" />
-            <AppText variant="caption" color="textTertiary">
-              Durum
-            </AppText>
+
+            <AppText variant="label">Durum ve notlar</AppText>
             <ChipSelect
               options={[
                 { value: 'active', label: 'Aktif' },
@@ -222,13 +264,28 @@ function AdvertiserEditor({
               value={form.status ?? 'active'}
               onChange={(v) => set('status', v)}
             />
-            <TextField label="İç notlar" value={form.notes ?? ''} onChangeText={(v) => set('notes', v)} multiline />
+            <TextField
+              label="İç notlar"
+              value={form.notes ?? ''}
+              onChangeText={(v) => set('notes', v)}
+              multiline
+              placeholder="Yalnızca yöneticiler görür."
+            />
             <Button
               label="Kaydet"
               size="sm"
               fullWidth={false}
               loading={save.isPending}
+              disabled={!form.name || form.name.trim().length < 2}
               onPress={async () => {
+                if (!form.name || form.name.trim().length < 2) {
+                  toast.error('Görünen ad en az 2 karakter olmalı.');
+                  return;
+                }
+                if (form.contact_email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.contact_email.trim())) {
+                  toast.error('E-posta adresi geçersiz.');
+                  return;
+                }
                 try {
                   await save.mutateAsync({ id: advertiser?.id ?? null, payload: form });
                   toast.success('Reklamveren kaydedildi.');
@@ -297,6 +354,9 @@ function AdvertiserEditor({
 const styles = StyleSheet.create({
   flex: { flex: 1, minWidth: 0 },
   bold: { fontWeight: '700' },
+  nameCell: { flexDirection: 'row', alignItems: 'center', gap: 9, minWidth: 0 },
+  avatar: { width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  empty: { alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 30 },
   searchWrap: {
     flexGrow: 1,
     flexBasis: 260,

@@ -3,18 +3,38 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
 const APP_SCHEME = 'trabzone';
 const BUNDLE_ID = 'com.litxtech.trabzone';
 
+/** Sosyal giriş ana anahtarı; kapalıyken hiçbir sağlayıcı butonu gösterilmez. */
+const SOCIAL_AUTH_ENABLED = process.env.EXPO_PUBLIC_ENABLE_SOCIAL_AUTH === 'true';
+
 /**
- * Apple ile giriş yalnızca sosyal giriş açıkken derlemeye dahil edilir.
+ * iOS'ta Apple girişinin native (tarayıcısız) akışı.
  *
  * `com.apple.developer.applesignin` yetkisi, Apple Developer portalındaki
- * App ID'de "Sign In with Apple" açılmadan ve provisioning profile yeniden
- * üretilmeden imzalanamaz; profile yetkiyi içermezse arşiv adımı başarısız
- * olur. Sosyal giriş kapalıyken (EXPO_PUBLIC_ENABLE_SOCIAL_AUTH=false)
- * yetki ve config plugin hiç eklenmez, böylece imzalama mevcut profille uyumlu
- * kalır. Uygulama tarafında da Apple girişi aynı bayrakla kapatılmıştır
- * (src/config/env.ts, src/services/supabase/auth.ts).
+ * App ID'de "Sign in with Apple" açılmadan ve provisioning profile yeniden
+ * üretilmeden **imzalanamaz**; profile yetkiyi içermezse arşiv adımı
+ * başarısız olur:
+ *   "Provisioning profile ... doesn't include the Sign In with Apple capability"
+ *
+ * Bu yüzden varsayılan **kapalı**. Kapalıyken Apple girişi tarayıcı tabanlı
+ * PKCE akışıyla yapılır (Apple Developer'da yalnızca Services ID + Return URL
+ * gerekir) ve yetki/config plugin hiç eklenmez, böylece mevcut profille
+ * derleme uyumlu kalır. Uygulama tarafındaki karşılığı:
+ * src/config/env.ts > enableNativeAppleLogin.
+ *
+ * ÖNEMLİ: `expo-apple-authentication` paketi kurulu olduğu sürece Expo onun
+ * config plugin'ini **otomatik** uygular ve yetkiyi koşulsuz ekler (bkz.
+ * @expo/prebuild-config > withVersionedExpoSDKPlugins). Tek geçerli çıkış
+ * paketi autolinking'den dışlamaktır; `shouldSkipAutoPlugin` hem native modülü
+ * hem de otomatik plugin'i atlar (package.json > expo.autolinking.ios.exclude).
+ *
+ * Native akışa geçmek için üçü birlikte yapılır:
+ *   1. App ID'de "Sign in with Apple" capability açılır,
+ *   2. package.json > expo.autolinking.ios.exclude listesinden bu paket çıkarılır
+ *      ve provisioning profile yenilenir,
+ *   3. `EXPO_PUBLIC_ENABLE_APPLE_NATIVE_LOGIN=true` ile derleme alınır.
  */
-const SOCIAL_AUTH_ENABLED = process.env.EXPO_PUBLIC_ENABLE_SOCIAL_AUTH === 'true';
+const APPLE_NATIVE_SIGNIN_ENABLED =
+  SOCIAL_AUTH_ENABLED && process.env.EXPO_PUBLIC_ENABLE_APPLE_NATIVE_LOGIN === 'true';
 
 /**
  * Google ile native giriş iOS'ta ters çevrilmiş istemci kimliğini URL şeması
@@ -88,7 +108,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     bundleIdentifier: BUNDLE_ID,
     supportsTablet: false,
-    usesAppleSignIn: SOCIAL_AUTH_ENABLED,
+    usesAppleSignIn: APPLE_NATIVE_SIGNIN_ENABLED,
     // Yalnızca ilgili yetki hazır olduğunda eklenir (yukarıdaki nota bakın).
     ...(UNIVERSAL_LINKS_ENABLED
       ? { associatedDomains: LINK_HOSTS.map((host) => `applinks:${host}`) }
@@ -164,8 +184,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // Görsel işlem hattı: disk önbelleği ve animated/cross-fade desteği için
     // config plugin gerekli (expo-image 58.0.18+).
     'expo-image',
-    // Yetki (entitlement) eklediği için yalnızca sosyal giriş açıkken eklenir.
-    ...(SOCIAL_AUTH_ENABLED ? ['expo-apple-authentication' as const] : []),
+    // Yetki (entitlement) eklediği için yalnızca native Apple girişi açıkken
+    // eklenir; aksi halde arşiv imzalanamaz (bkz. yukarıdaki nota).
+    ...(APPLE_NATIVE_SIGNIN_ENABLED ? ['expo-apple-authentication' as const] : []),
     // Google native giriş: tarayıcı yerine sistemin hesap seçicisi açılır.
     ...(SOCIAL_AUTH_ENABLED && GOOGLE_IOS_URL_SCHEME
       ? [

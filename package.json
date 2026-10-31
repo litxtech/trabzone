@@ -48,7 +48,9 @@
   "expo": {
     "autolinking": {
       "ios": {
-        "exclude": []
+        "exclude": [
+          "expo-apple-authentication"
+        ]
       }
     }
   },
