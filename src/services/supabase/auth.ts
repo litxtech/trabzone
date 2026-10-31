@@ -2,6 +2,7 @@ import type { AuthError, Session } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
 
 import { env } from '@/config/env';
+import { isApplePrivateRelayEmail, usernameFromEmail } from '@/features/auth/account-email';
 import { appError, mapAuthError, type AppError } from '@/services/errors';
 import { fail, ok, type Result } from '@/utils/result';
 
@@ -784,9 +785,16 @@ export async function getCurrentSession(): Promise<Session | null> {
 }
 
 export type SignUpMetadata = {
+  /** Kayıt sırasında formda seçilen kullanıcı adı (yalnızca e-posta kaydında). */
   username: string | null;
+  /** Profil tamamlama formunu ön dolduracak öneri (ör. e-postadan türetilir). */
+  suggestedUsername: string | null;
   firstName: string | null;
   lastName: string | null;
+  /** Hesabın gerçek e-posta adresi (Apple'da gizli relay adresi olabilir). */
+  email: string | null;
+  /** Apple "E-postamı Gizle" seçildi mi? O zaman gerçek adres elde edilemez. */
+  emailIsAppleRelay: boolean;
 };
 
 /**
@@ -802,14 +810,17 @@ export async function getSignUpMetadata(): Promise<SignUpMetadata> {
   // gereksiz bir gidiş-dönüş kadar geciktiriyordu. Metadata zaten oturum
   // jetonuyla birlikte gelir.
   let metadata: Record<string, unknown> = {};
+  let email: string | null = null;
   const { data: sessionData } = await supabase.auth.getSession();
   const localUser = sessionData.session?.user;
   if (localUser) {
     metadata = (localUser.user_metadata ?? {}) as Record<string, unknown>;
+    email = localUser.email ?? null;
   } else {
     const { data, error } = await supabase.auth.getUser();
-    if (!error && data.user?.user_metadata) {
-      metadata = data.user.user_metadata as Record<string, unknown>;
+    if (!error && data.user) {
+      metadata = (data.user.user_metadata ?? {}) as Record<string, unknown>;
+      email = data.user.email ?? null;
     }
   }
 
@@ -823,10 +834,20 @@ export async function getSignUpMetadata(): Promise<SignUpMetadata> {
   const fallbackFirst = fullNameParts.length > 0 ? fullNameParts[0] : null;
   const fallbackLast = fullNameParts.length > 1 ? fullNameParts.slice(1).join(' ') : null;
 
+  // Apple ad-soyadı yalnızca ilk yetkilendirmede `user` alanında döndürür ve
+  // Supabase bunu metadata'ya yazmaz; bu yüzden kullanıcı adı da boş kalıyordu.
+  // Adres gerçekse (relay değilse) yerel kısımdan bir öneri üretilir: form
+  // boş gelmez, kullanıcı yalnızca onaylar. Öneri otomatik kayıt için
+  // kullanılmaz; kullanıcı adını kullanıcı onaylar.
+  const metadataUsername = read('username')?.toLowerCase() ?? null;
+
   return {
-    username: read('username')?.toLowerCase() ?? null,
+    username: metadataUsername,
+    suggestedUsername: metadataUsername ?? usernameFromEmail(email),
     firstName: read('first_name') ?? read('given_name') ?? fallbackFirst ?? null,
     lastName: read('last_name') ?? read('family_name') ?? fallbackLast ?? null,
+    email,
+    emailIsAppleRelay: isApplePrivateRelayEmail(email),
   };
 }
 

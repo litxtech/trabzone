@@ -2,6 +2,7 @@ import type { AuthError } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
 
 import { env } from '@/config/env';
+import { isApplePrivateRelayEmail } from '@/features/auth/account-email';
 import { mapAuthError, appError } from '@/services/errors';
 import { supabase } from '@/services/supabase/client';
 import { fail, ok, type Result } from '@/utils/result';
@@ -13,6 +14,8 @@ export type LinkedProvider = 'email' | 'apple' | 'google' | 'phone';
 export type AccountOverview = {
   id: string;
   email: string | null;
+  /** Apple "E-postamı Gizle" adresi mi? Gerçek adres Apple tarafından verilmez. */
+  emailIsAppleRelay: boolean;
   emailVerified: boolean;
   phone: string | null;
   providers: LinkedProvider[];
@@ -57,6 +60,7 @@ export async function fetchAccountOverview(): Promise<Result<AccountOverview>> {
   return ok({
     id: user.id,
     email: user.email ?? null,
+    emailIsAppleRelay: isApplePrivateRelayEmail(user.email),
     emailVerified: Boolean(user.email_confirmed_at),
     phone: user.phone ?? null,
     providers: Array.from(new Set<LinkedProvider>(providers)),

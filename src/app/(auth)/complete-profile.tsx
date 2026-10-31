@@ -31,6 +31,9 @@ export default function CompleteProfileScreen() {
   const [loading, setLoading] = useState(true);
   // Profilde kayıtlı ad: kendi kullanıcı adı "alınmış" görünmemeli.
   const [savedUsername, setSavedUsername] = useState<string | null>(null);
+  // Hesabın e-postası: Apple/Google girişinde otomatik doldurulur, düzenlenemez.
+  const [accountEmail, setAccountEmail] = useState<string | null>(null);
+  const [emailIsAppleRelay, setEmailIsAppleRelay] = useState(false);
 
   const { control, handleSubmit, reset, formState } = useForm<CompleteProfileValues>({
     resolver: zodResolver(completeProfileSchema),
@@ -53,7 +56,9 @@ export default function CompleteProfileScreen() {
 
       const profile = result.ok ? result.data : null;
       const savedUsername = profile?.username ?? '';
-      const username = savedUsername.startsWith('u_') ? (metadata.username ?? '') : savedUsername;
+      const username = savedUsername.startsWith('u_')
+        ? (metadata.suggestedUsername ?? '')
+        : savedUsername;
       const firstName =
         metadata.firstName ??
         (profile?.first_name && profile.first_name !== 'Trabzone' ? profile.first_name : '');
@@ -63,6 +68,8 @@ export default function CompleteProfileScreen() {
 
       reset({ username, firstName, lastName });
       setSavedUsername(profile?.username ?? null);
+      setAccountEmail(metadata.email);
+      setEmailIsAppleRelay(metadata.emailIsAppleRelay);
       setLoading(false);
     });
 
@@ -139,6 +146,20 @@ export default function CompleteProfileScreen() {
       <FormError message={formError} />
 
       <View style={styles.form}>
+        <TextField
+          label="E-posta"
+          value={accountEmail ?? ''}
+          placeholder="E-posta bağlı değil"
+          editable={false}
+          leftIcon="mail-outline"
+          autoCapitalize="none"
+          hint={
+            emailIsAppleRelay
+              ? 'Apple gizli e-posta kullandı. Gerçek adresini sonra Ayarlar → Hesap bölümünden ekleyebilirsin.'
+              : undefined
+          }
+        />
+
         <View style={styles.row}>
           <View style={styles.half}>
             <Controller

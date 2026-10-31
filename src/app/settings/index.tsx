@@ -3,6 +3,7 @@ import { useRouter } from '@/utils/router';
 import { Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText, Avatar, Card, IconButton, Screen } from '@/components/ui';
+import { accountEmailDisplay } from '@/features/auth/account-email';
 import { useIncomingFriendRequestCount } from '@/features/profile/hooks/use-friend-requests';
 import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
@@ -31,7 +32,7 @@ export default function SettingsScreen() {
   const identityApproved = isIdentityVerified(rideProfile.data);
 
   const fullName = profile ? `${profile.first_name} ${profile.last_name}`.trim() : 'Trabzone üyesi';
-  const email = session?.user.email ?? '—';
+  const emailDisplay = accountEmailDisplay(session?.user.email);
   const avatarUrl = mediaPublicUrl('avatar', profile?.avatar_path);
 
   const confirmSignOut = () => {
@@ -69,8 +70,13 @@ export default function SettingsScreen() {
             {profile ? `@${profile.username}` : 'Profil yükleniyor'}
           </AppText>
           <AppText variant="caption" color="textTertiary" numberOfLines={1}>
-            {email}
+            {emailDisplay.email ?? '—'}
           </AppText>
+          {emailDisplay.isAppleRelay ? (
+            <AppText variant="caption" color="textTertiary" numberOfLines={2}>
+              Apple gizli e-posta
+            </AppText>
+          ) : null}
         </View>
       </Card>
 

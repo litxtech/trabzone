@@ -193,7 +193,7 @@ export default function AccountScreen() {
             </View>
             <View style={styles.flex}>
               <AppText variant="caption" color="textTertiary">
-                Profilde görünen e-posta
+                {account.data.emailIsAppleRelay ? 'Apple gizli e-posta adresi' : 'Profilde görünen e-posta'}
               </AppText>
               <AppText variant="bodyStrong" numberOfLines={1}>
                 {account.data.email ?? 'E-posta bağlı değil'}
@@ -222,6 +222,16 @@ export default function AccountScreen() {
               </AppText>
             </View>
           </Card>
+
+          {account.data.emailIsAppleRelay ? (
+            <View style={styles.relayNote}>
+              <AppText variant="caption" color="textTertiary" style={styles.flex}>
+                Apple girişinde “E-postamı Gizle” seçildiği için gerçek adresin paylaşılmadı. Bu
+                adres çalışır (bildirimler buraya gelir) ama tanıdık görünmez. Aşağıdan gerçek
+                e-postanı ekleyebilirsin.
+              </AppText>
+            </View>
+          ) : null}
 
           {!account.data.emailVerified ? (
             <Pressable
@@ -407,6 +417,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   stateCard: { alignItems: 'center', gap: 10 },
   emailCard: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  relayNote: { paddingHorizontal: 4, marginTop: -4 },
   emailIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   verifiedPill: {
     flexDirection: 'row',
