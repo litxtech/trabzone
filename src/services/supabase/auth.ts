@@ -245,8 +245,17 @@ async function completeOAuthCallback(
     if (__DEV__) {
       console.warn('[auth] saglayici hatasi:', providerError, callbackUrl);
     }
-    const code = readUrlParam(callbackUrl, 'error');
-    if (code === 'invalid_client' || code === 'invalid_grant') {
+    const code =
+      readUrlParam(callbackUrl, 'error_code') ?? readUrlParam(callbackUrl, 'error');
+    // Supabase, Apple'ın kimlik bilgisi hatasını `error=server_error` +
+    // `error_code=unexpected_failure` olarak sarar ve gerçek nedeni yalnızca
+    // `error_description` içinde ("Unable to exchange external code") taşır.
+    // Bu yüzden açıklama da kontrol edilir.
+    if (
+      code === 'invalid_client' ||
+      code === 'invalid_grant' ||
+      /invalid_client|exchange external code/i.test(providerError)
+    ) {
       return fail(appError('oauth_unavailable', APPLE_NOT_CONFIGURED_MESSAGE));
     }
     return fail(appError('oauth_unavailable', OAUTH_SESSION_MESSAGE));
