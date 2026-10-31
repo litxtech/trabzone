@@ -157,6 +157,23 @@ function readAppleConfig(clientId?: string): AppleConfig | null {
   return { teamId, keyId, privateKey, clientId: resolvedClientId };
 }
 
+/**
+ * Yetki kodunun verildigi istemci kimligi adaylari.
+ *
+ * iOS native girisinde kod uygulamanin bundle ID'si icin, Android'deki web
+ * akisinda ise Services ID icin uretilir. Apple yetki kodu yalnizca kendisini
+ * veren istemciyle degistirilebildigi icin adaylar sirayla denenir.
+ */
+function clientIdCandidates(preferred?: string): string[] {
+  return [
+    preferred,
+    env('APPLE_CLIENT_ID'),
+    DEFAULT_CLIENT_ID,
+    env('APPLE_WEB_CLIENT_ID'),
+    env('APPLE_IOS_CLIENT_ID'),
+  ].filter((value): value is string => Boolean(value && value.trim()));
+}
+
 /** Apple istemci sirri (ES256 ile imzalanmis kisa omurlu JWT). */
 async function buildClientSecret(config: AppleConfig): Promise<string> {
   const key = await crypto.subtle.importKey(
@@ -386,26 +403,34 @@ Deno.serve(async (request) => {
       return json({ ok: false, error: 'invalid_code' }, 400);
     }
 
-    const config = readAppleConfig(payload.clientId);
-    if (!config) {
+    const candidates = clientIdCandidates(payload.clientId)
+      .map((clientId) => readAppleConfig(clientId))
+      .filter((config): config is AppleConfig => config !== null);
+    if (candidates.length === 0) {
       // Sirlar tanimli degilse giris akisi bozulmaz; yalnizca jeton saklanmaz.
       return json({ ok: false, linked: false, skipped: 'not_configured' });
     }
 
-    try {
-      const exchanged = await exchangeAuthorizationCode(config, code);
-      if (!exchanged.refreshToken) {
-        return json({ ok: false, linked: false, error: exchanged.error ?? 'exchange_failed' });
+    let lastError = 'exchange_failed';
+    for (const config of candidates) {
+      try {
+        const exchanged = await exchangeAuthorizationCode(config, code);
+        if (!exchanged.refreshToken) {
+          // Kod baska bir istemci icin uretilmis olabilir; sonraki aday denenir.
+          lastError = exchanged.error ?? 'exchange_failed';
+          continue;
+        }
+        const stored = await storeToken({
+          user_id: uid,
+          refresh_token: exchanged.refreshToken,
+          client_id: config.clientId,
+        });
+        return json({ ok: stored, linked: stored });
+      } catch {
+        lastError = 'apple_unreachable';
       }
-      const stored = await storeToken({
-        user_id: uid,
-        refresh_token: exchanged.refreshToken,
-        client_id: config.clientId,
-      });
-      return json({ ok: stored, linked: stored });
-    } catch {
-      return json({ ok: false, linked: false, error: 'apple_unreachable' });
     }
+    return json({ ok: false, linked: false, error: lastError });
   }
 
   const target = typeof payload.targetUserId === 'string' && payload.targetUserId

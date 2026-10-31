@@ -6,15 +6,18 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Modal,
   Pressable,
   StyleSheet,
   TextInput,
   View,
 } from 'react-native';
 
-import { AppText, Avatar, Badge, Button, Card } from '@/components/ui';
+import { AppImage, AppText, Avatar, Badge, Button, Card } from '@/components/ui';
 import { Screen } from '@/components/ui/Screen';
 import { shareRideSummary } from '@/features/documents';
+import { MarketMediaViewer, type MarketMediaViewerItem } from '@/features/marketplace/components/MarketMediaViewer';
+import { ProfilePreviewSheet } from '@/features/profile/components/ProfilePreviewSheet';
 import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { liveLocationShareLink } from '@/features/share/links';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -42,7 +45,10 @@ import {
   useTrackPosition,
   useTracking,
   useTripDetail,
+  useRideOffersRealtime,
 } from '@/features/ride/hooks/use-ride';
+import { errorMessage } from '@/services/errors';
+import { rideVehiclePhotoUrl } from '@/features/ride/services/ride-service';
 import {
   formatDate,
   formatDateTime,
@@ -53,6 +59,7 @@ import {
   RESERVATION_STATUS_LABEL,
   SCOPE_LABEL,
 } from '@/features/ride/utils/format';
+import { getStartAvailability, startRideErrorMessage } from '@/features/ride/utils/start';
 import { NEEDS_DEV_BUILD, loadLocation } from '@/features/ride/utils/native';
 
 type DisputeCategory =
@@ -80,6 +87,9 @@ export default function RideTripDetailScreen() {
     trip.data?.reservation.offer_id ?? null,
     trip.data?.reservation.offer_status === 'started',
   );
+  // İlan başladığında/tamamlandığında rezervasyon durumu sayfa yenilenmeden
+  // güncellenir; aynı kanal açık diğer ekranlarla paylaşılır.
+  useRideOffersRealtime(Boolean(reservationId));
 
   const respond = useRespondReservation();
   const cancel = useCancelReservation();
@@ -105,6 +115,20 @@ export default function RideTripDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
+  const isDriverView = trip.data?.is_driver === true;
+  const offerStatus = trip.data?.reservation.offer_status;
+  useEffect(() => {
+    if (!isDriverView || (offerStatus !== 'published' && offerStatus !== 'full')) {
+      return;
+    }
+    const timer = setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [isDriverView, offerStatus]);
 
   useEffect(() => {
     if (!broadcasting || !trip.data?.reservation.id) {
@@ -212,6 +236,45 @@ export default function RideTripDetailScreen() {
     tracking.data?.lat != null && tracking.data?.lng != null
       ? { lat: tracking.data.lat, lng: tracking.data.lng }
       : null;
+  const vehiclePhotos = (offerData?.vehicle.photo_paths ?? [])
+    .map((path) => rideVehiclePhotoUrl(path))
+    .filter((url): url is string => Boolean(url));
+  const viewerItems: MarketMediaViewerItem[] = vehiclePhotos.map((uri, index) => ({
+    id: `${reservation.id}-vehicle-${index}`,
+    kind: 'image',
+    uri,
+  }));
+  const mapWaypoints = (offerData?.stops ?? [])
+    .filter(
+      (stop) =>
+        stop.kind === 'waypoint' &&
+        stop.lat != null &&
+        stop.lng != null &&
+        Number.isFinite(stop.lat) &&
+        Number.isFinite(stop.lng),
+    )
+    .map((stop) => ({ lat: stop.lat as number, lng: stop.lng as number }));
+  const startAvailability = getStartAvailability(reservation.depart_at, nowTick);
+
+  const handleStartRide = async () => {
+    setError(null);
+    if (!startAvailability.canStart) {
+      setError(startAvailability.label);
+      return;
+    }
+    try {
+      await startOffer.mutateAsync(reservation.offer_id);
+      setBroadcasting(true);
+      setNotice('Yolculuk başladı. Yolculara bildirim gönderildi ve canlı takip açıldı.');
+    } catch (cause) {
+      setError(
+        startRideErrorMessage(
+          errorMessage(cause, 'Yolculuk başlatılamadı.'),
+          'Yolculuk başlatılamadı.',
+        ),
+      );
+    }
+  };
 
   const handleSos = () => {
     Alert.alert(
@@ -309,12 +372,14 @@ export default function RideTripDetailScreen() {
         <RideMapPreview
           origin={trackingPoint ?? { lat: offerData.origin_lat, lng: offerData.origin_lng }}
           dest={{ lat: offerData.dest_lat, lng: offerData.dest_lng }}
+          waypoints={mapWaypoints}
           geometry={
             trackingPoint
               ? [trackingPoint, { lat: offerData.dest_lat, lng: offerData.dest_lng }]
               : undefined
           }
           distanceMeters={tracking.data?.remaining_meters ?? offerData.distance_meters}
+          durationMinutes={tracking.data?.eta_minutes ?? offerData.duration_minutes}
           height={210}
           label={
             tracking.data?.eta_minutes != null
@@ -326,7 +391,9 @@ export default function RideTripDetailScreen() {
         <RideMapPreview
           origin={{ lat: offerData.origin_lat, lng: offerData.origin_lng }}
           dest={{ lat: offerData.dest_lat, lng: offerData.dest_lng }}
+          waypoints={mapWaypoints}
           distanceMeters={offerData.distance_meters}
+          durationMinutes={offerData.duration_minutes}
           height={180}
           label={`${reservation.origin_label} → ${reservation.dest_label}`}
         />
@@ -334,28 +401,35 @@ export default function RideTripDetailScreen() {
 
       <Card padding={15} style={styles.summary}>
         <View style={styles.partnerRow}>
-          <Avatar uri={partnerAvatar} name={partnerName} size={46} />
-          <View style={styles.flex}>
-            <View style={styles.nameRow}>
-              <AppText variant="bodyStrong" numberOfLines={1}>
-                {partnerName}
-              </AppText>
-              {partnerIdentityVerified ? <VerifiedTick size={15} /> : null}
-              <Badge label={isDriver ? 'Yolcu' : 'Sürücü'} tone="neutral" />
-            </View>
-            <AppText variant="caption" color="textSecondary">
-              {isDriver
-                ? `${reservation.seats} koltuk · ${reservation.passenger_username}`
-                : `${reservation.driver_trips ?? 0} yolculuk · ${reservation.driver_rating?.toFixed(1) ?? '—'} ★`}
-            </AppText>
-            {partnerIdentityVerified ? (
-              <View style={styles.verifiedRow}>
-                <AppText variant="caption" color={VERIFIED_BLUE}>
-                  Kimlik doğrulandı · Yola çık
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${partnerName} profilini aç`}
+            onPress={() => setProfileOpen(true)}
+            style={({ pressed }) => [styles.partnerIdentity, { opacity: pressed ? 0.72 : 1 }]}
+          >
+            <Avatar uri={partnerAvatar} name={partnerName} size={46} />
+            <View style={styles.flex}>
+              <View style={styles.nameRow}>
+                <AppText variant="bodyStrong" numberOfLines={1}>
+                  {partnerName}
                 </AppText>
+                {partnerIdentityVerified ? <VerifiedTick size={15} /> : null}
+                <Badge label={isDriver ? 'Yolcu' : 'Sürücü'} tone="neutral" />
               </View>
-            ) : null}
-          </View>
+              <AppText variant="caption" color="textSecondary">
+                {isDriver
+                  ? `${reservation.seats} koltuk · ${reservation.passenger_username}`
+                  : `${reservation.driver_trips ?? 0} yolculuk · ${reservation.driver_rating?.toFixed(1) ?? '—'} ★`}
+              </AppText>
+              {partnerIdentityVerified ? (
+                <View style={styles.verifiedRow}>
+                  <AppText variant="caption" color={VERIFIED_BLUE}>
+                    Kimlik doğrulandı · Yola çık
+                  </AppText>
+                </View>
+              ) : null}
+            </View>
+          </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Mesaj gönder"
@@ -377,6 +451,39 @@ export default function RideTripDetailScreen() {
             <AppText variant="caption" color="textTertiary">
               Araç
             </AppText>
+            {viewerItems.length ? (
+              <Pressable
+                accessibilityRole="imagebutton"
+                accessibilityLabel="Araç fotoğrafını tam ekran aç"
+                onPress={() => {
+                  setViewerIndex(0);
+                  setViewerOpen(true);
+                }}
+                style={({ pressed }) => [
+                  styles.vehiclePhoto,
+                  {
+                    borderColor: theme.colors.border,
+                    backgroundColor: theme.colors.surfaceMuted,
+                    opacity: pressed ? 0.82 : 1,
+                  },
+                ]}
+              >
+                <AppImage
+                  source={{ uri: viewerItems[0]?.uri }}
+                  style={StyleSheet.absoluteFill}
+                  contentFit="cover"
+                  recycleKey={`${reservation.id}:vehicle`}
+                />
+                <View style={styles.vehiclePhotoBadge}>
+                  <Ionicons name="expand-outline" size={10} color="#FFFFFF" />
+                  {viewerItems.length > 1 ? (
+                    <AppText variant="caption" style={styles.vehiclePhotoBadgeText}>
+                      {viewerItems.length}
+                    </AppText>
+                  ) : null}
+                </View>
+              </Pressable>
+            ) : null}
             <AppText variant="label" numberOfLines={1}>
               {reservation.vehicle.make} {reservation.vehicle.model}
             </AppText>
@@ -616,14 +723,14 @@ export default function RideTripDetailScreen() {
             <View style={styles.actionRow}>
               {reservation.offer_status === 'published' || reservation.offer_status === 'full' ? (
                 <Button
-                  label="Yolculuğu başlat"
-                  loading={startOffer.isPending}
-                  onPress={() =>
-                    startOffer.mutate(reservation.offer_id, {
-                      onSuccess: () => setBroadcasting(true),
-                      onError: (cause) => setError(cause.message),
-                    })
+                  label={
+                    startAvailability.canStart
+                      ? 'Yolculuğu başlat'
+                      : `Yolculuğu başlat · ${startAvailability.minutesUntilOpen} dk`
                   }
+                  loading={startOffer.isPending}
+                  disabled={!startAvailability.canStart}
+                  onPress={() => void handleStartRide()}
                   style={styles.flex}
                 />
               ) : null}
@@ -647,6 +754,13 @@ export default function RideTripDetailScreen() {
                 style={styles.flex}
               />
             </View>
+            {reservation.offer_status === 'published' || reservation.offer_status === 'full' ? (
+              <AppText variant="caption" color="textTertiary">
+                {startAvailability.canStart
+                  ? 'Başlatınca yolculara bildirim gider, canlı takip oturumu açılır.'
+                  : startAvailability.label}
+              </AppText>
+            ) : null}
             {broadcasting ? (
               <View style={[styles.liveBox, { backgroundColor: theme.colors.successSoft }]}>
                 <Ionicons name="radio" size={16} color={theme.colors.success} />
@@ -952,6 +1066,46 @@ export default function RideTripDetailScreen() {
         {offerData?.duration_minutes ? ` · ${formatDuration(offerData.duration_minutes)}` : ''}
         {offerData?.distance_meters ? ` · ${formatDistance(offerData.distance_meters)}` : ''}
       </AppText>
+
+      {profileOpen ? (
+        <Modal
+          transparent
+          visible
+          animationType="fade"
+          statusBarTranslucent
+          onRequestClose={() => setProfileOpen(false)}
+        >
+          <View style={StyleSheet.absoluteFill}>
+            <ProfilePreviewSheet
+              key={partnerId}
+              visible
+              userId={partnerId}
+              username={
+                isDriver ? reservation.passenger_username : reservation.driver_username
+              }
+              onClose={() => setProfileOpen(false)}
+              onViewProfile={(username) => {
+                setProfileOpen(false);
+                router.push(`/profile/${username}` as never);
+              }}
+              onOpenChat={(conversationId) => {
+                setProfileOpen(false);
+                router.push(`/chat/${conversationId}` as never);
+              }}
+            />
+          </View>
+        </Modal>
+      ) : null}
+
+      {viewerOpen && viewerItems.length ? (
+        <MarketMediaViewer
+          visible
+          items={viewerItems}
+          initialIndex={viewerIndex}
+          onClose={() => setViewerOpen(false)}
+          onIndexChange={setViewerIndex}
+        />
+      ) : null}
     </Screen>
   );
 }
@@ -962,6 +1116,7 @@ const styles = StyleSheet.create({
   center: { paddingVertical: 60, alignItems: 'center', gap: 8 },
   summary: { gap: 12 },
   partnerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  partnerIdentity: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   verifiedRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 7 },
@@ -982,6 +1137,27 @@ const styles = StyleSheet.create({
   },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   gridItem: { flexBasis: '46%', gap: 1 },
+  vehiclePhoto: {
+    width: '100%',
+    height: 72,
+    borderRadius: 11,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+    marginBottom: 3,
+  },
+  vehiclePhotoBadge: {
+    position: 'absolute',
+    right: 5,
+    bottom: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    borderRadius: 999,
+    backgroundColor: 'rgba(4,8,18,0.56)',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  vehiclePhotoBadgeText: { color: '#FFFFFF', fontSize: 9 },
   badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   codeCard: { gap: 10 },
   codeBox: {

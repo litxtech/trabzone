@@ -226,6 +226,19 @@ const PAGES = [
     noscriptBody:
       'Araç ilanlarında kilometre, hasar kaydı, belge ve güvenlik bilgilerinin doğruluğu.',
   },
+  {
+    path: '/policy/accommodation-guest-rights',
+    slug: 'accommodation-guest-rights',
+    title: 'Misafir Hakları ve Eşit Konaklama Politikası · Trabzone',
+    description:
+      'Konaklama işletmelerinin misafir haklarına, eşit hizmete ve zorunlu işletmeci kabul beyanına ilişkin yükümlülükleri.',
+    type: 'article',
+    priority: '0.4',
+    changefreq: 'yearly',
+    noscriptTitle: 'Trabzone Misafir Hakları ve Eşit Konaklama Politikası',
+    noscriptBody:
+      'Ayrımcılık yasağı, bekâr ve evli olmayan misafirlerin konaklama hakkı, kimlik kontrolü, fiyat şeffaflığı ve işletmeci yaptırımları.',
+  },
 ];
 
 function escapeHtml(value) {

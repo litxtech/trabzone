@@ -470,7 +470,7 @@ export function ManualBookingModal({
 }
 
 function nextDay(iso: string): string {
-  const [year, month, day] = iso.split('-').map(Number);
+  const [year, month, day] = iso.slice(0, 10).split('-').map(Number);
   const date = new Date(year ?? 1970, (month ?? 1) - 1, (day ?? 1) + 1);
   return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}`;
 }

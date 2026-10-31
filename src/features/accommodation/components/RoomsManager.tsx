@@ -2,16 +2,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { AppText, Button, TextField } from '@/components/ui';
+import { AppImage, AppText, Button, TextField } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 
 import {
+  useAccommodationMedia,
   useArchiveRoom,
   useArchiveRoomType,
   usePropertyInventory,
   useSaveRoom,
   useSaveRoomType,
 } from '../hooks/use-accommodation';
+import { accommodationMediaUrl } from '../services/accommodation-media-service';
 import type { ManagedRoom, ManagedRoomType } from '../types';
 import {
   ROOM_STATUS_OPTIONS,
@@ -85,6 +87,7 @@ const EMPTY_ROOM: RoomForm = {
 export function RoomsManager({ propertyId }: { propertyId: string }) {
   const { theme } = useTheme();
   const inventory = usePropertyInventory(propertyId);
+  const media = useAccommodationMedia(propertyId);
   const saveType = useSaveRoomType(propertyId);
   const saveRoom = useSaveRoom(propertyId);
   const archiveType = useArchiveRoomType();
@@ -103,6 +106,24 @@ export function RoomsManager({ propertyId }: { propertyId: string }) {
 
   const types = inventory.data?.room_types ?? [];
   const rooms = inventory.data?.rooms ?? [];
+
+  /**
+   * Oda tipi kartındaki görsel önizlemesi. Önce oda tipine bağlanmış kapak
+   * görseli, yoksa ilk fotoğraf kullanılır; oda tipi kapağı boş kaldığında
+   * yönetim ekranı görselsiz görünmesin.
+   */
+  const previewByType = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of media.data?.items ?? []) {
+      if (item.kind !== 'image' || !item.room_type_id) continue;
+      const uri = accommodationMediaUrl(item.storage_path);
+      if (!uri) continue;
+      if (!map.has(item.room_type_id) || item.cover) {
+        map.set(item.room_type_id, uri);
+      }
+    }
+    return map;
+  }, [media.data?.items]);
 
   const roomsByType = useMemo(() => {
     const map = new Map<string, ManagedRoom[]>();
@@ -282,11 +303,21 @@ export function RoomsManager({ propertyId }: { propertyId: string }) {
           <View style={styles.grid}>
             {types.map((type) => {
               const typeRooms = roomsByType.get(type.id) ?? [];
+              const preview = previewByType.get(type.id) ?? accommodationMediaUrl(type.cover_path);
               return (
                 <AccCard key={type.id} padding={12} style={styles.typeCard}>
                   <View style={styles.typeTop}>
                     <View style={[styles.typeIcon, { backgroundColor: theme.colors.primarySoft }]}>
-                      <Ionicons name="bed-outline" size={17} color={theme.colors.primary} />
+                      {preview ? (
+                        <AppImage
+                          source={{ uri: preview }}
+                          style={StyleSheet.absoluteFill}
+                          contentFit="cover"
+                          transition={140}
+                        />
+                      ) : (
+                        <Ionicons name="bed-outline" size={17} color={theme.colors.primary} />
+                      )}
                     </View>
                     <View style={styles.flex}>
                       <AppText variant="bodyStrong" numberOfLines={1}>{type.name}</AppText>
@@ -585,7 +616,7 @@ const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   typeCard: { width: '32%', minWidth: 270, flexGrow: 1, gap: 6 },
   typeTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  typeIcon: { width: 32, height: 32, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  typeIcon: { width: 32, height: 32, borderRadius: 9, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   priceRow: { flexDirection: 'row', alignItems: 'baseline', gap: 5 },
   features: { flexDirection: 'row', gap: 4, flexWrap: 'wrap' },
   feature: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },

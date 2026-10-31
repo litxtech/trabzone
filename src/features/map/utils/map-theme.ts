@@ -65,6 +65,19 @@ export const MAPBOX_STYLE = {
   dark: 'mapbox://styles/mapbox/dark-v11',
 } as const;
 
+/**
+ * Premium işaret paleti (otel/tesis). Tema rengine bağlı değildir: haritada
+ * hem açık hem koyu zeminde aynı altın-çerçeveli görünümü korur.
+ */
+export const PREMIUM_MARKER = {
+  background: '#101A2E',
+  border: '#F5B301',
+  text: '#FFFFFF',
+  iconBackground: 'rgba(245, 179, 1, 0.18)',
+  iconColor: '#F5B301',
+  selectedBorder: '#8057F4',
+} as const;
+
 /** Statik harita (web / geri dönüş) için stil adı. */
 export const MAPBOX_STATIC_STYLE = {
   light: 'mapbox/light-v11',

@@ -20,6 +20,7 @@ export type PmsTabKey =
   | 'belgeler'
   | 'raporlar'
   | 'mesajlar'
+  | 'sikayetler'
   | 'yorumlar'
   | 'medya'
   | 'tesis-bilgileri'
@@ -40,7 +41,7 @@ export type PmsTab = {
 export const PMS_TABS: PmsTab[] = [
   { key: 'genel-bakis', label: 'Genel Bakış', short: 'Genel', icon: 'speedometer-outline', group: 'Operasyon', description: 'Günlük gelir ve doluluk özeti' },
   { key: 'rezervasyonlar', label: 'Rezervasyonlar', short: 'Rezervasyon', icon: 'calendar-outline', group: 'Operasyon', description: 'Tüm rezervasyon kayıtları' },
-  { key: 'oda-takvimi', label: 'Oda Takvimi', short: 'Takvim', icon: 'grid-outline', group: 'Operasyon', description: 'Oda ve rezervasyon zaman çizelgesi' },
+  { key: 'oda-takvimi', label: 'Oda Takvimi', short: 'Takvim', icon: 'grid-outline', group: 'Operasyon', description: 'Fiyat, müsaitlik ve rezervasyon ızgarası' },
   { key: 'rezervasyon-takvimi', label: 'Rezervasyon Takvimi', short: 'Rez. Takvim', icon: 'albums-outline', group: 'Operasyon', description: 'Geniş rezervasyon görünümü' },
   { key: 'fiyat-musaitlik', label: 'Fiyat ve Müsaitlik Takvimi', short: 'Fiyat', icon: 'pricetags-outline', group: 'Operasyon', description: 'Günlük fiyat ve stok yönetimi' },
   { key: 'on-buro', label: 'Ön Büro', short: 'Ön Büro', icon: 'desktop-outline', group: 'Operasyon', description: 'Giriş, çıkış ve oda durumu' },
@@ -54,6 +55,7 @@ export const PMS_TABS: PmsTab[] = [
 
   { key: 'misafirler', label: 'Misafirler', short: 'Misafir', icon: 'people-outline', group: 'Misafir', description: 'Misafir kayıtları ve geçmişi' },
   { key: 'mesajlar', label: 'Mesajlar', short: 'Mesaj', icon: 'chatbubbles-outline', group: 'Misafir', description: 'Misafir görüşmeleri' },
+  { key: 'sikayetler', label: 'Şikayet ve Destek', short: 'Şikayet', icon: 'shield-checkmark-outline', group: 'Misafir', description: 'Talepler, SLA takibi ve çözüm kayıtları' },
   { key: 'yorumlar', label: 'Yorum ve Değerlendirmeler', short: 'Yorum', icon: 'star-outline', group: 'Misafir', description: 'Puanlar ve otel yanıtları' },
   { key: 'bildirimler', label: 'Bildirimler', short: 'Bildirim', icon: 'notifications-outline', group: 'Misafir', description: 'Tesis hareketleri ve tercihler' },
 

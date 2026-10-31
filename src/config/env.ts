@@ -13,6 +13,7 @@ const rawEnv = {
   EXPO_PUBLIC_ENABLE_SOCIAL_AUTH: process.env.EXPO_PUBLIC_ENABLE_SOCIAL_AUTH,
   EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
   EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+  EXPO_PUBLIC_GOOGLE_NATIVE_LOGIN: process.env.EXPO_PUBLIC_GOOGLE_NATIVE_LOGIN,
   EXPO_PUBLIC_R2_PUBLIC_URL: process.env.EXPO_PUBLIC_R2_PUBLIC_URL,
   EXPO_PUBLIC_PLACE_SEARCH_URL: process.env.EXPO_PUBLIC_PLACE_SEARCH_URL,
 };
@@ -50,6 +51,14 @@ const envSchema = z.object({
    */
   EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: optionalClientId,
   EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: optionalClientId,
+  /**
+   * Native Google hesap seçicisini açar. Kapalıyken (varsayılan) Google girişi
+   * PKCE tarayıcı akışıyla yapılır: Android'de imza parmak izine bağlı OAuth
+   * istemcisi, iOS'ta ayrı istemci kimliği gerekmez. Native akış için ayrıca
+   * Supabase Google sağlayıcısına platform istemci kimlikleri eklenmeli ve
+   * "Skip nonce check" açılmalıdır (Google native SDK nonce göndermez).
+   */
+  EXPO_PUBLIC_GOOGLE_NATIVE_LOGIN: booleanFlag,
   /**
    * Cloudflare R2 public taban adresi (örn. `https://media.trabzoneapp.com`).
    * Tanımlıysa herkese açık kovalardaki bütün fotoğraf ve videolar R2'ye
@@ -92,9 +101,11 @@ export const env = {
   livekitUrl: parsed.data.EXPO_PUBLIC_LIVEKIT_URL ?? null,
   mapboxToken: parsed.data.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN ?? null,
   enableSocialAuth: parsed.data.EXPO_PUBLIC_ENABLE_SOCIAL_AUTH,
-  /** Google native giriş istemci kimlikleri (tanımsızsa buton gizlenir). */
+  /** Google native giriş istemci kimlikleri (yalnızca native akış için). */
   googleWebClientId: parsed.data.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? null,
   googleIosClientId: parsed.data.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? null,
+  /** Native Google hesap seçicisi (varsayılan: kapalı, tarayıcı PKCE akışı). */
+  enableNativeGoogleLogin: parsed.data.EXPO_PUBLIC_GOOGLE_NATIVE_LOGIN,
   /**
    * R2 public taban adresi. Tanımlıysa bütün medya R2'ye yüklenir ve herkese
    * açık kovalar bu adresten sunulur; gizli sohbet medyası private bucket'ta

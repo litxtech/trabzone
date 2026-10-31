@@ -4,9 +4,10 @@ import { useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Linking, Pressable, Share, StyleSheet, View } from 'react-native';
 
-import { AppImage, AppText, Button, Screen } from '@/components/ui';
+import { AppImage, AppText, Button, Screen, TextField } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useRouter } from '@/utils/router';
+import { useAuthStore } from '@/stores/auth-store';
 
 import {
   EmptyState,
@@ -17,6 +18,8 @@ import {
 import { BookingQuoteSheet } from '@/features/accommodation/components/BookingQuoteSheet';
 import { DatePickerModal } from '@/features/accommodation/components/DatePickerModal';
 import { FullScreenGallery } from '@/features/accommodation/components/FullScreenGallery';
+import { LiteApiBookingSheet } from '@/features/accommodation/components/LiteApiBookingSheet';
+import { LiteApiRatesPanel } from '@/features/accommodation/components/LiteApiRatesPanel';
 import {
   AURORA,
   AccDivider,
@@ -28,10 +31,13 @@ import {
   amenityIcon,
   ratingLabel,
 } from '@/features/accommodation/components/PremiumUI';
-import { usePublicProperty } from '@/features/accommodation/hooks/use-accommodation';
+import { useClaimExternalProperty, usePublicProperty } from '@/features/accommodation/hooks/use-accommodation';
 import { useAccommodationLayout } from '@/features/accommodation/hooks/use-accommodation-layout';
+import { MapCanvas } from '@/features/map/components/MapCanvas';
+import type { MapPoint } from '@/features/map/types';
+import { inAppDirectionsHref } from '@/features/map/utils/directions';
 import { accommodationMediaUrl } from '@/features/accommodation/services/accommodation-media-service';
-import type { PublicProperty, PublicRoomType } from '@/features/accommodation/types';
+import type { LiteApiRateOffer, PublicProperty, PublicRoomType } from '@/features/accommodation/types';
 import {
   PROPERTY_TYPE_LABELS,
   formatDate,
@@ -72,9 +78,11 @@ function policyValue(value: unknown): string {
 export default function PropertyDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { theme } = useTheme();
+  const { theme, scheme } = useTheme();
   const layout = useAccommodationLayout();
   const property = usePublicProperty(id);
+  const session = useAuthStore((state) => state.session);
+  const claim = useClaimExternalProperty();
 
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState(0);
@@ -86,6 +94,11 @@ export default function PropertyDetailScreen() {
   const [children, setChildren] = useState(0);
   const [selected, setSelected] = useState<{ roomType: PublicRoomType; ratePlanId: string } | null>(null);
   const [bookingOpen, setBookingOpen] = useState(false);
+  const [liteApiOffer, setLiteApiOffer] = useState<LiteApiRateOffer | null>(null);
+  const [liteApiBookingOpen, setLiteApiBookingOpen] = useState(false);
+  const [claimOpen, setClaimOpen] = useState(false);
+  const [claimNote, setClaimNote] = useState('');
+  const [claimError, setClaimError] = useState<string | null>(null);
   const [showAllReviews, setShowAllReviews] = useState(false);
   const [showAllAmenities, setShowAllAmenities] = useState(false);
 
@@ -97,27 +110,61 @@ export default function PropertyDetailScreen() {
     return selected.roomType.rate_plans.find((plan) => plan.id === selected.ratePlanId) ?? null;
   }, [selected]);
 
-  const images = useMemo(
-    () =>
-      (data?.media ?? [])
-        .filter((item) => item.kind === 'image')
-        .map((item) => ({
-          id: item.id,
-          storage_path: item.storage_path,
-          caption: item.caption,
-          uri: accommodationMediaUrl(item.storage_path),
-        }))
-        .filter((item): item is typeof item & { uri: string } => Boolean(item.uri)),
-    [data?.media],
-  );
+  const mediaItems = useMemo(() => {
+    type DetailMedia = {
+      id: string;
+      storage_path: string;
+      kind: 'image' | 'video';
+      thumbUri: string | null;
+      caption: string | null;
+      uri: string;
+      room_type_id: string | null;
+    };
+    const result: DetailMedia[] = [];
+    for (const item of data?.media ?? []) {
+      const uri = accommodationMediaUrl(item.storage_path);
+      if (!uri) continue;
+      result.push({
+        id: item.id,
+        storage_path: item.storage_path,
+        kind: item.kind,
+        thumbUri: accommodationMediaUrl(item.thumbnail_path),
+        caption: item.caption,
+        uri,
+        room_type_id: item.room_type_id,
+      });
+    }
+    return result;
+  }, [data?.media]);
 
   const minPrice = useMemo(() => {
     const prices = (data?.room_types ?? []).map((room) => room.base_price_cents).filter((price) => price > 0);
     return prices.length > 0 ? Math.min(...prices) : 0;
   }, [data?.room_types]);
 
+  // Tesisin uygulama içi haritadaki iğnesi. Koordinat yoksa iğne de olmaz;
+  // dış harita bağlantısına düşülmez.
+  const mapPoint = useMemo<MapPoint | null>(() => {
+    const lat = data?.lat;
+    const lng = data?.lng;
+    if (lat == null || lng == null || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return null;
+    }
+    return {
+      id: `property:${data?.id ?? id}`,
+      kind: 'place',
+      lat,
+      lng,
+      title: data?.name ?? 'Tesis',
+      subtitle: [data?.neighborhood, data?.district].filter(Boolean).join(', ') || null,
+      icon: 'bed-outline',
+      tone: 'primary',
+      meta: { propertyId: data?.id ?? id },
+    };
+  }, [data?.district, data?.id, data?.lat, data?.lng, data?.name, data?.neighborhood, id]);
+
   const openGallery = (storagePath?: string | null) => {
-    const index = images.findIndex((item) => item.storage_path === storagePath);
+    const index = mediaItems.findIndex((item) => item.storage_path === storagePath);
     setGalleryIndex(index >= 0 ? index : 0);
     setGalleryOpen(true);
   };
@@ -129,9 +176,30 @@ export default function PropertyDetailScreen() {
     setBookingOpen(true);
   };
 
+  const openClaim = () => {
+    if (!session) {
+      router.push('/login' as never);
+      return;
+    }
+    setClaimError(null);
+    setClaimOpen(true);
+  };
+
+  const submitClaim = async () => {
+    setClaimError(null);
+    try {
+      await claim.mutateAsync({ propertyId: id, note: claimNote.trim() || null });
+      setClaimOpen(false);
+      setClaimNote('');
+      void property.refetch();
+    } catch (cause) {
+      setClaimError(cause instanceof Error ? cause.message : 'Sahiplik talebi gönderilemedi.');
+    }
+  };
+
   if (property.isLoading) {
     return (
-      <Screen edges={['top']} padded={false}>
+      <Screen edges={['left', 'right']} padded={false}>
         <View style={styles.loadingMosaic} />
         <View style={styles.loadingBody}>
           <LoadingBlock height={64} />
@@ -165,23 +233,52 @@ export default function PropertyDetailScreen() {
     );
   }
 
-  const location = [data.neighborhood, data.district].filter(Boolean).join(', ') || 'Trabzon';
+  const location =
+    [data.neighborhood, data.district].filter(Boolean).join(', ') ||
+    [data.external_district, 'Trabzon'].filter(Boolean).join(', ') ||
+    'Trabzon';
+  const isExternal = data.source === 'liteapi';
+  const propertyAddress = data.address || data.external_address;
   const reviews = showAllReviews ? data.reviews : data.reviews.slice(0, 3);
   const amenities = showAllAmenities ? data.amenities : data.amenities.slice(0, 8);
   const policies = Object.entries(data.policies ?? {});
   const horizontalPadding = layout.isDesktop ? 32 : theme.layout.screenPadding;
-  const bookLabel =
-    data.room_types[0]?.rate_plans[0]?.booking_mode === 'manual' ? 'Rezervasyon talebi' : 'Rezervasyon yap';
+  const bookLabel = isExternal
+    ? 'Canlı fiyat ve müsaitlik'
+    : data.room_types[0]?.rate_plans[0]?.booking_mode === 'manual'
+      ? 'Rezervasyon talebi'
+      : 'Rezervasyon yap';
 
   const share = () =>
     void Share.share({
-      message: `${data.name} — Trabzone Konaklama\n${location}\nGecelik ${formatMoneyCents(minPrice)}`,
+      message: `${data.name} — Trabzone Konaklama\n${location}${
+        minPrice > 0 ? `\nGecelik ${formatMoneyCents(minPrice)}` : ''
+      }`,
     });
 
+  // Harita her zaman uygulama içinde açılır: dış harita uygulamasına
+  // yönlendirme yapılmaz, iğne Trabzone haritasında odaklanır.
+  const openInAppMap = () => {
+    if (!mapPoint) {
+      return;
+    }
+    router.push({
+      pathname: '/map',
+      params: {
+        lat: String(mapPoint.lat),
+        lng: String(mapPoint.lng),
+        zoom: '16',
+        label: data.name,
+      },
+    } as never);
+  };
+
+  const directionsHref = inAppDirectionsHref({ lat: data.lat, lng: data.lng, label: data.name, zoom: 16 });
+
   return (
-    <Screen scroll padded={false} edges={['top', 'left', 'right']}>
+    <Screen scroll padded={false} edges={['left', 'right']}>
       <PhotoMosaic
-        images={images}
+        media={mediaItems}
         onPress={(index) => {
           setGalleryIndex(index);
           setGalleryOpen(true);
@@ -205,11 +302,26 @@ export default function PropertyDetailScreen() {
                     {PROPERTY_TYPE_LABELS[data.property_type]}
                   </AppText>
                 </View>
-                {data.room_types.some((room) => room.rate_plans.some((plan) => plan.booking_mode === 'instant')) ? (
+                {isExternal ? (
+                  <View style={[styles.typeBadge, { backgroundColor: theme.colors.primarySoft }]}>
+                    <Ionicons name="cloud-download-outline" size={11} color={theme.colors.primaryDeep} />
+                    <AppText variant="caption" color="primaryDeep" style={styles.typeBadgeText}>
+                      LiteAPI · sağlayıcı verisi
+                    </AppText>
+                  </View>
+                ) : data.room_types.some((room) => room.rate_plans.some((plan) => plan.booking_mode === 'instant')) ? (
                   <View style={[styles.typeBadge, { backgroundColor: theme.colors.successSoft }]}>
                     <Ionicons name="flash" size={11} color={theme.colors.success} />
                     <AppText variant="caption" color="success" style={styles.typeBadgeText}>
                       Anında onay
+                    </AppText>
+                  </View>
+                ) : null}
+                {isExternal && data.payment_at_property ? (
+                  <View style={[styles.typeBadge, { backgroundColor: theme.colors.successSoft }]}>
+                    <Ionicons name="cash-outline" size={11} color={theme.colors.success} />
+                    <AppText variant="caption" color="success" style={styles.typeBadgeText}>
+                      Tesiste ödeme
                     </AppText>
                   </View>
                 ) : null}
@@ -233,19 +345,61 @@ export default function PropertyDetailScreen() {
                   {location}
                 </AppText>
                 <View style={styles.metaDot} />
-                <StarRating rating={data.rating_avg} size={12} />
+                <StarRating rating={isExternal ? data.provider_rating ?? data.rating_avg : data.rating_avg} size={12} />
                 <AppText variant="caption" color="text" style={styles.metaScore}>
-                  {data.rating_count > 0 ? `${data.rating_avg.toFixed(1)} (${data.rating_count})` : 'Yeni tesis'}
+                  {isExternal
+                    ? data.provider_rating
+                      ? `${data.provider_rating.toFixed(1)}${
+                          data.provider_review_count ? ` (${data.provider_review_count})` : ''
+                        } · sağlayıcı`
+                      : 'Sağlayıcı puanı yok'
+                    : data.rating_count > 0
+                      ? `${data.rating_avg.toFixed(1)} (${data.rating_count})`
+                      : 'Yeni tesis'}
                 </AppText>
               </View>
 
-              {data.address ? (
+              {propertyAddress ? (
                 <View style={styles.addressRow}>
                   <Ionicons name="map-outline" size={13} color={theme.colors.textTertiary} />
                   <AppText variant="caption" color="textTertiary" style={styles.flex}>
-                    {data.address}
+                    {propertyAddress}
                   </AppText>
                 </View>
+              ) : null}
+
+              {isExternal ? (
+                data.claim_status === 'unclaimed' || data.claim_status === 'rejected' ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Bu tesisi sahiplen"
+                    onPress={openClaim}
+                    style={({ pressed }) => [
+                      styles.claimCta,
+                      { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft, opacity: pressed ? 0.75 : 1 },
+                    ]}
+                  >
+                    <Ionicons name="business-outline" size={13} color={theme.colors.primaryDeep} />
+                    <AppText variant="caption" color="primaryDeep" style={styles.flex}>
+                      Bu tesis sizin mi? İşletmeci olarak sahiplenin
+                    </AppText>
+                    <Ionicons name="chevron-forward" size={12} color={theme.colors.primaryDeep} />
+                  </Pressable>
+                ) : data.claim_status === 'pending' ? (
+                  <View style={[styles.claimCta, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }]}>
+                    <Ionicons name="hourglass-outline" size={13} color={theme.colors.warning} />
+                    <AppText variant="caption" color="textSecondary" style={styles.flex}>
+                      Sahiplenme talebiniz yönetici onayı bekliyor.
+                    </AppText>
+                  </View>
+                ) : data.claim_status === 'verified' ? (
+                  <View style={[styles.claimCta, { borderColor: theme.colors.border, backgroundColor: theme.colors.successSoft }]}>
+                    <Ionicons name="shield-checkmark-outline" size={13} color={theme.colors.success} />
+                    <AppText variant="caption" color="success" style={styles.flex}>
+                      Tesis işletmeci tarafından doğrulandı.
+                    </AppText>
+                  </View>
+                ) : null
               ) : null}
             </View>
 
@@ -421,15 +575,37 @@ export default function PropertyDetailScreen() {
                 icon="bed"
                 subtitle={nights > 0 ? `${nights} gece için uygun odalar` : 'Tarih seçerek müsaitliği kontrol et'}
               />
-              {data.room_types.length === 0 ? (
+              {isExternal ? (
+                <LiteApiRatesPanel
+                  property={data}
+                  checkIn={checkIn}
+                  checkOut={checkOut}
+                  adults={adults}
+                  childGuests={children}
+                  onPickDates={() => setDateOpen(true)}
+                  onSelectOffer={(offer) => {
+                    if (!session) {
+                      router.push('/login' as never);
+                      return;
+                    }
+                    setLiteApiOffer(offer);
+                    setLiteApiBookingOpen(true);
+                  }}
+                />
+              ) : data.room_types.length === 0 ? (
                 <EmptyState icon="bed-outline" title="Oda tipi bulunamadı" message="Tesis henüz oda tipi eklememiş." />
               ) : (
                 <View style={styles.roomList}>
                   {data.room_types.map((room) => {
-                    const roomPhotos = room.photos
-                      .map((path) => accommodationMediaUrl(path))
-                      .filter((uri): uri is string => Boolean(uri));
-                    const roomCover = roomPhotos[0] ?? accommodationMediaUrl(room.cover_path);
+                    const roomMedia = mediaItems.filter((item) => item.room_type_id === room.id);
+                    const roomImages = roomMedia.filter((item) => item.kind === 'image');
+                    const coverMedia =
+                      roomImages[0] ??
+                      roomMedia[0] ??
+                      mediaItems.find((item) => item.storage_path === room.cover_path) ??
+                      mediaItems[0];
+                    const roomCover =
+                      coverMedia?.kind === 'video' ? coverMedia.thumbUri ?? null : coverMedia?.uri ?? null;
                     const total = nights > 0 ? room.base_price_cents * nights : null;
                     return (
                       <View
@@ -442,7 +618,7 @@ export default function PropertyDetailScreen() {
                         <Pressable
                           accessibilityRole="button"
                           accessibilityLabel={`${room.name} fotoğrafları`}
-                          onPress={() => openGallery(room.cover_path ?? room.photos[0])}
+                          onPress={() => openGallery(coverMedia?.storage_path ?? room.cover_path ?? room.photos[0])}
                           style={layout.isDesktop ? styles.roomImageDesktop : styles.roomImage}
                         >
                           {roomCover ? (
@@ -455,11 +631,16 @@ export default function PropertyDetailScreen() {
                               <Ionicons name="bed-outline" size={26} color={theme.colors.primaryDeep} />
                             </LinearGradient>
                           )}
-                          {roomPhotos.length > 1 ? (
+                          {coverMedia?.kind === 'video' ? (
+                            <View style={styles.roomPlayBadge}>
+                              <Ionicons name="play" size={16} color="#FFFFFF" />
+                            </View>
+                          ) : null}
+                          {roomMedia.length > 1 ? (
                             <View style={styles.roomPhotoCount}>
                               <Ionicons name="images-outline" size={10} color="#FFFFFF" />
                               <AppText variant="caption" style={styles.roomPhotoCountText}>
-                                {roomPhotos.length}
+                                {roomMedia.length}
                               </AppText>
                             </View>
                           ) : null}
@@ -578,24 +759,50 @@ export default function PropertyDetailScreen() {
                 overline="DEĞERLENDİRMELER"
                 title="Misafir deneyimi"
                 icon="star"
-                subtitle={data.rating_count > 0 ? `${data.rating_count} doğrulanmış konaklama yorumu` : 'Henüz değerlendirme yok'}
+                subtitle={
+                  isExternal
+                    ? data.provider_review_count
+                      ? `${data.provider_review_count} sağlayıcı değerlendirmesi`
+                      : 'Sağlayıcı değerlendirmesi'
+                    : data.rating_count > 0
+                      ? `${data.rating_count} doğrulanmış konaklama yorumu`
+                      : 'Henüz değerlendirme yok'
+                }
               />
-              <ScorePanel
-                rating={data.rating_avg}
-                count={data.rating_count}
-                breakdown={[
-                  { key: 'cleanliness', label: 'Temizlik', value: data.rating_breakdown.cleanliness ?? 0 },
-                  { key: 'staff', label: 'Personel', value: data.rating_breakdown.staff ?? 0 },
-                  { key: 'location', label: 'Konum', value: data.rating_breakdown.location ?? 0 },
-                  { key: 'value', label: 'Fiyat / performans', value: data.rating_breakdown.value ?? 0 },
-                ]}
-              />
+              {isExternal ? (
+                <View style={[styles.bookingCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                  <View style={styles.rowBetween}>
+                    <AppText variant="bodyStrong">Sağlayıcı puanı</AppText>
+                    <AppText variant="h3" color="primaryDeep">
+                      {data.provider_rating ? `${data.provider_rating.toFixed(1)} / 10` : '—'}
+                    </AppText>
+                  </View>
+                  <AppText variant="caption" color="textTertiary">
+                    Bu tesis LiteAPI üzerinden listelenir. Puan ve yorumlar sağlayıcıdan gelir; Trabzone yorumları henüz yoktur.
+                  </AppText>
+                </View>
+              ) : (
+                <ScorePanel
+                  rating={data.rating_avg}
+                  count={data.rating_count}
+                  breakdown={[
+                    { key: 'cleanliness', label: 'Temizlik', value: data.rating_breakdown.cleanliness ?? 0 },
+                    { key: 'staff', label: 'Personel', value: data.rating_breakdown.staff ?? 0 },
+                    { key: 'location', label: 'Konum', value: data.rating_breakdown.location ?? 0 },
+                    { key: 'value', label: 'Fiyat / performans', value: data.rating_breakdown.value ?? 0 },
+                  ]}
+                />
+              )}
 
               {reviews.length === 0 ? (
                 <EmptyState
                   icon="chatbubble-ellipses-outline"
                   title="Henüz yorum yok"
-                  message="İlk değerlendirmeyi konaklayan misafirler yapacak."
+                  message={
+                    isExternal
+                      ? 'Bu tesis için Trabzone misafir yorumu bulunmuyor. Sağlayıcı puanı yukarıda gösterilir.'
+                      : 'İlk değerlendirmeyi konaklayan misafirler yapacak.'
+                  }
                   compact
                 />
               ) : (
@@ -700,10 +907,49 @@ export default function PropertyDetailScreen() {
                   <View style={styles.flex}>
                     <AppText variant="bodyStrong">{location}</AppText>
                     <AppText variant="caption" color="textTertiary">
-                      {data.address ?? 'Adres bilgisi belirtilmemiş'}
+                      {propertyAddress ?? 'Adres bilgisi belirtilmemiş'}
                     </AppText>
                   </View>
                 </View>
+
+                {mapPoint ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${data.name} konumunu uygulama içi haritada aç`}
+                    onPress={openInAppMap}
+                    style={[
+                      styles.mapCard,
+                      { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted },
+                    ]}
+                  >
+                    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                      <MapCanvas
+                        initialCamera={{ lat: mapPoint.lat, lng: mapPoint.lng, zoom: 15.5 }}
+                        markers={[mapPoint]}
+                        dark={scheme === 'dark'}
+                        preview
+                        onMarkerPress={() => undefined}
+                        onCameraChange={() => undefined}
+                      />
+                    </View>
+                    <View style={styles.mapTop} pointerEvents="none">
+                      <View style={[styles.mapPlaceBadge, { backgroundColor: theme.colors.surface }]}>
+                        <Ionicons name="location" size={12} color={theme.colors.primaryDeep} />
+                        <AppText variant="caption" color="textSecondary" numberOfLines={1} style={styles.mapPlaceText}>
+                          {location}
+                        </AppText>
+                      </View>
+                    </View>
+                    <View style={styles.mapBottom} pointerEvents="none">
+                      <View style={[styles.mapOpenPill, { backgroundColor: theme.colors.primaryDeep }]}>
+                        <Ionicons name="expand-outline" size={12} color={theme.colors.onPrimary} />
+                        <AppText variant="caption" style={[styles.mapOpenText, { color: theme.colors.onPrimary }]}>
+                          Uygulama içi haritada aç
+                        </AppText>
+                      </View>
+                    </View>
+                  </Pressable>
+                ) : null}
 
                 <View style={styles.contactRow}>
                   {data.phone ? (
@@ -729,16 +975,29 @@ export default function PropertyDetailScreen() {
                   ) : null}
                 </View>
 
-                {data.lat && data.lng ? (
-                  <Button
-                    label="Haritada göster"
-                    variant="outline"
-                    size="sm"
-                    leftIcon={<Ionicons name="map-outline" size={16} color={theme.colors.text} />}
-                    onPress={() =>
-                      void Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${data.lat},${data.lng}`)
-                    }
-                  />
+                {mapPoint ? (
+                  <View style={styles.mapActions}>
+                    <Button
+                      label="Haritada göster"
+                      variant="outline"
+                      size="sm"
+                      fullWidth={false}
+                      style={styles.flex}
+                      leftIcon={<Ionicons name="map-outline" size={15} color={theme.colors.text} />}
+                      onPress={openInAppMap}
+                    />
+                    {directionsHref ? (
+                      <Button
+                        label="Yol tarifi"
+                        variant="secondary"
+                        size="sm"
+                        fullWidth={false}
+                        style={styles.flex}
+                        leftIcon={<Ionicons name="navigate-outline" size={15} color={theme.colors.primaryDeep} />}
+                        onPress={() => router.push(directionsHref as never)}
+                      />
+                    ) : null}
+                  </View>
                 ) : null}
               </View>
             </View>
@@ -748,23 +1007,37 @@ export default function PropertyDetailScreen() {
 
           {layout.isDesktop ? (
             <View style={styles.side}>
-              <BookingPanel
-                data={data}
-                checkIn={checkIn}
-                checkOut={checkOut}
-                adults={adults}
-                childGuests={children}
-                nights={nights}
-                minPrice={minPrice}
-                onPickDates={() => setDateOpen(true)}
-                onBook={() => {
-                  const first = data.room_types[0];
-                  if (first) startBooking(first);
-                  else setDateOpen(true);
-                }}
-                disabled={data.room_types.length === 0}
-                label={bookLabel}
-              />
+              {isExternal ? (
+                <LiteApiSidePanel
+                  checkIn={checkIn}
+                  checkOut={checkOut}
+                  adults={adults}
+                  childGuests={children}
+                  nights={nights}
+                  bookingEnabled={data.booking_enabled}
+                  paymentAtProperty={data.payment_at_property}
+                  onPickDates={() => setDateOpen(true)}
+                  onPickGuests={() => setGuestOpen(true)}
+                />
+              ) : (
+                <BookingPanel
+                  data={data}
+                  checkIn={checkIn}
+                  checkOut={checkOut}
+                  adults={adults}
+                  childGuests={children}
+                  nights={nights}
+                  minPrice={minPrice}
+                  onPickDates={() => setDateOpen(true)}
+                  onBook={() => {
+                    const first = data.room_types[0];
+                    if (first) startBooking(first);
+                    else setDateOpen(true);
+                  }}
+                  disabled={data.room_types.length === 0}
+                  label={bookLabel}
+                />
+              )}
             </View>
           ) : null}
         </View>
@@ -784,20 +1057,26 @@ export default function PropertyDetailScreen() {
         >
           <View style={styles.flex}>
             <AppText variant="caption" color="textTertiary" style={styles.bookBarCaption}>
-              {nights > 0 ? `${nights} gece toplam` : 'gecelik başlangıç'}
+              {isExternal ? 'canlı fiyat' : nights > 0 ? `${nights} gece toplam` : 'gecelik başlangıç'}
             </AppText>
             <AppText variant="h3" color="primaryDeep">
-              {formatMoneyCents(nights > 0 ? minPrice * nights : minPrice)}
+              {isExternal
+                ? 'Sağlayıcıdan sorgula'
+                : formatMoneyCents(nights > 0 ? minPrice * nights : minPrice)}
             </AppText>
           </View>
           <Button
-            label={bookLabel}
+            label={isExternal ? 'Tarih ve fiyat' : bookLabel}
             onPress={() => {
+              if (isExternal) {
+                setDateOpen(true);
+                return;
+              }
               const first = data.room_types[0];
               if (first) startBooking(first);
               else setDateOpen(true);
             }}
-            disabled={data.room_types.length === 0}
+            disabled={!isExternal && data.room_types.length === 0}
             style={styles.bookBarCta}
           />
         </View>
@@ -827,6 +1106,50 @@ export default function PropertyDetailScreen() {
         <GuestStepper label="Yeti?kin" hint="13 ya? ve ?zeri" value={adults} min={1} max={12} onChange={setAdults} />
         <GuestStepper label="?ocuk" hint="0 - 12 ya?" value={children} min={0} max={8} onChange={setChildren} />
       </ModalSheet>
+
+      <ModalSheet
+        visible={claimOpen}
+        onClose={() => setClaimOpen(false)}
+        title="Tesisi sahiplen"
+        subtitle="Talep yönetici tarafından incelenir. Onaylanınca tesis PMS paneline bağlanır."
+        maxWidth={480}
+        footer={
+          <Button
+            label="Sahiplik talebi gönder"
+            loading={claim.isPending}
+            onPress={() => void submitClaim()}
+          />
+        }
+      >
+        <View style={styles.claimForm}>
+          <AppText variant="body" color="textSecondary">
+            Bu tesis LiteAPI sağlayıcısından listeleniyor. Tesisin işletmecisiyseniz doğrulama için talep
+            oluşturun. Onay öncesi tesis verileri sağlayıcıdan gelmeye devam eder.
+          </AppText>
+          <TextField
+            label="Not (opsiyonel)"
+            value={claimNote}
+            onChangeText={setClaimNote}
+            placeholder="İşletme bilgisi, iletişim veya doğrulama notu"
+            multiline
+          />
+          {claimError ? <AppText variant="caption" color="danger">{claimError}</AppText> : null}
+          <AppText variant="caption" color="textTertiary">
+            Manuel oda envanteri, fiyatlar ve PMS kayıtları bu talep sırasında değiştirilmez.
+          </AppText>
+        </View>
+      </ModalSheet>
+
+      <LiteApiBookingSheet
+        visible={liteApiBookingOpen}
+        onClose={() => setLiteApiBookingOpen(false)}
+        property={data}
+        offer={liteApiOffer}
+        checkIn={checkIn}
+        checkOut={checkOut}
+        adults={adults}
+        childGuests={children}
+      />
 
       <FullScreenGallery
         visible={galleryOpen}
@@ -998,6 +1321,109 @@ function ContactChip({
         {label}
       </AppText>
     </Pressable>
+  );
+}
+
+function LiteApiSidePanel({
+  checkIn,
+  checkOut,
+  adults,
+  childGuests,
+  nights,
+  bookingEnabled,
+  paymentAtProperty,
+  onPickDates,
+  onPickGuests,
+}: {
+  checkIn: string;
+  checkOut: string;
+  adults: number;
+  childGuests: number;
+  nights: number;
+  bookingEnabled: boolean;
+  paymentAtProperty: boolean;
+  onPickDates: () => void;
+  onPickGuests: () => void;
+}) {
+  const { theme } = useTheme();
+  const hasDates = Boolean(checkOut && checkOut > checkIn);
+  return (
+    <View
+      style={[
+        styles.bookingCard,
+        { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+      ]}
+    >
+      <View style={styles.bookingHead}>
+        <View style={styles.flex}>
+          <AppText variant="caption" color="textTertiary">
+            Sağlayıcıdan canlı fiyat
+          </AppText>
+          <AppText variant="h2" color="primaryDeep">
+            {hasDates ? `${nights} gece` : 'Tarih seç'}
+          </AppText>
+        </View>
+        <View style={[styles.liveDot, { backgroundColor: theme.colors.success }]} />
+      </View>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Giriş ve çıkış tarihlerini seç"
+        onPress={onPickDates}
+        style={[styles.dateMiniRow, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }]}
+      >
+        <View style={styles.flex}>
+          <AppText variant="caption" color="textTertiary">
+            Giriş
+          </AppText>
+          <AppText variant="bodyStrong">{formatDate(checkIn)}</AppText>
+        </View>
+        <Ionicons name="arrow-forward" size={14} color={theme.colors.textTertiary} />
+        <View style={styles.flex}>
+          <AppText variant="caption" color="textTertiary">
+            Çıkış
+          </AppText>
+          <AppText variant="bodyStrong">{checkOut ? formatDate(checkOut) : 'Seç'}</AppText>
+        </View>
+      </Pressable>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Misafir sayısını değiştir"
+        onPress={onPickGuests}
+        style={[styles.dateMiniRow, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }]}
+      >
+        <View style={styles.flex}>
+          <AppText variant="caption" color="textTertiary">
+            Misafir
+          </AppText>
+          <AppText variant="bodyStrong">
+            {adults} yetişkin{childGuests > 0 ? ` · ${childGuests} çocuk` : ''}
+          </AppText>
+        </View>
+        <Ionicons name="chevron-down" size={14} color={theme.colors.textTertiary} />
+      </Pressable>
+
+      <Button label={hasDates ? 'Fiyatları güncelle' : 'Tarih seç'} onPress={onPickDates} />
+
+      <View style={[styles.bookingTrust, { borderTopColor: theme.colors.divider, borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 10 }]}>
+        <Ionicons
+          name={paymentAtProperty ? 'cash-outline' : 'card-outline'}
+          size={14}
+          color={paymentAtProperty ? theme.colors.success : theme.colors.warning}
+        />
+        <AppText variant="caption" color="textSecondary" style={styles.flex}>
+          {paymentAtProperty
+            ? 'Tesiste ödeme destekleniyor. Kesin tutar teklif seçiminde gösterilir.'
+            : 'Bu tesis için tesiste ödeme bilgisi yok. Uygun teklifler listede işaretlenir.'}
+        </AppText>
+      </View>
+      <AppText variant="caption" color="textTertiary">
+        {bookingEnabled
+          ? 'Rezervasyon yalnızca sağlayıcı onayından sonra kesinleşir.'
+          : 'Canlı rezervasyon henüz etkin değil; yalnızca fiyat ve koşullar gösterilir.'}
+      </AppText>
+    </View>
   );
 }
 
@@ -1190,6 +1616,17 @@ const styles = StyleSheet.create({
   roomImage: { width: '100%', height: 168 },
   roomImageDesktop: { width: 236, height: '100%', minHeight: 210, position: 'absolute', left: 0, top: 0, bottom: 0 },
   roomImageFallback: { alignItems: 'center', justifyContent: 'center' },
+  roomPlayBadge: {
+    position: 'absolute',
+    left: 10,
+    top: 10,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(8,13,26,0.62)',
+  },
   roomPhotoCount: {
     position: 'absolute',
     bottom: 8,
@@ -1251,6 +1688,43 @@ const styles = StyleSheet.create({
 
   locationBlock: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 4 },
   locationIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+
+  mapCard: {
+    height: 190,
+    borderRadius: 14,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    marginTop: 4,
+  },
+  mapTop: { position: 'absolute', top: 8, left: 8, right: 8, flexDirection: 'row' },
+  mapPlaceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+    maxWidth: '92%',
+  },
+  mapPlaceText: { fontSize: 10, flexShrink: 1 },
+  mapBottom: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    bottom: 8,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  mapOpenPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 999,
+  },
+  mapOpenText: { fontSize: 10 },
+  mapActions: { flexDirection: 'row', gap: 8, paddingTop: 4 },
   contactRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, paddingVertical: 6 },
   contactChip: {
     flexDirection: 'row',
@@ -1264,6 +1738,28 @@ const styles = StyleSheet.create({
 
   sideInner: { gap: 10 },
   bookingCard: { borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, padding: 16, gap: 12 },
+  dateMiniRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  liveDot: { width: 8, height: 8, borderRadius: 4 },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  claimCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginTop: 4,
+  },
+  claimForm: { gap: 10 },
   bookingHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   bookingCaption: { fontSize: 10 },
   bookingScore: { minWidth: 44, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 11, alignItems: 'center' },

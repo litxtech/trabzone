@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { setStatusBarStyle } from 'expo-status-bar';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Animated,
-  Easing,
+  BackHandler,
   Keyboard,
   Platform,
   Pressable,
@@ -12,12 +12,24 @@ import {
   StyleSheet,
   TextInput,
   View,
+  type ViewStyle,
 } from 'react-native';
-import Reanimated from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Reanimated, {
+  Easing as ReanimatedEasing,
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+  type SharedValue,
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppImage, AppText, Button, Screen, TextField } from '@/components/ui';
 import { useKeyboardBottomInset } from '@/providers/keyboard';
 import { useTheme } from '@/theme/ThemeProvider';
+import { haptics } from '@/utils/haptics';
 
 import {
   Chip,
@@ -31,6 +43,7 @@ import {
 } from '@/features/accommodation/components/AccommodationUI';
 import { CampaignManager } from '@/features/accommodation/components/CampaignManager';
 import { CashFolioCenter } from '@/features/accommodation/components/CashFolioCenter';
+import { ComplaintsCenter } from '@/features/accommodation/components/ComplaintsCenter';
 import { DashboardCards } from '@/features/accommodation/components/DashboardCards';
 import { DocumentsCenter } from '@/features/accommodation/components/DocumentsCenter';
 import { FinanceReportCenter } from '@/features/accommodation/components/FinanceReportCenter';
@@ -132,10 +145,31 @@ const MOBILE_QUICK_TABS: PmsTabKey[] = [
   'raporlar',
 ];
 
+/**
+ * Ağır sekme içerikleri memo ile korunur. Menü açılıp kapanırken takvim gibi
+ * ekranlar yeniden çizilmez; geçiş animasyonu takılmaz.
+ */
+const MemoTabContent = memo(TabContent);
+
+/** Kısa ve hafif yaylı geçiş: uzunu ağır, kısası zıplama hissi veriyor. */
+const DRAWER_OPEN = {
+  duration: 205,
+  easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
+} as const;
+const DRAWER_CLOSE = {
+  duration: 175,
+  easing: ReanimatedEasing.in(ReanimatedEasing.cubic),
+} as const;
+
+/** X/Twitter'daki panel ölçüleri: dar ekranda %86, geniş ekranda en fazla 380 px. */
+const PANEL_MAX_WIDTH = 380;
+const PANEL_WIDTH_RATIO = 0.86;
+
 export default function PmsTabScreen() {
   const params = useLocalSearchParams<{ tab?: string; property?: string }>();
   const router = useRouter();
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
   const layout = useAccommodationLayout();
   const context = useAccommodationContext();
 
@@ -147,24 +181,98 @@ export default function PmsTabScreen() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [propertyPickerOpen, setPropertyPickerOpen] = useState(false);
 
-  // Mobil menü soldan kayarak açılır; hamburger simgesi aynı animasyonla X'e döner.
-  const drawerProgress = useRef(new Animated.Value(0)).current;
-  const drawerWidth = Math.min(Math.max(layout.width * 0.86, 276), 344);
+  /**
+   * X (Twitter) deseni: menü tam ekranı kaplamaz. Panel soldan içeri kayar ve
+   * sayfa (başlık dahil) panel genişliği kadar sağa itilir. Tek bir `drawer`
+   * değeri hem paneli hem içeriği sürdüğü için ikisi hiç ayrışmaz.
+   */
+  const panelWidth = Math.round(Math.min(layout.width * PANEL_WIDTH_RATIO, PANEL_MAX_WIDTH));
 
-  useEffect(() => {
-    Animated.timing(drawerProgress, {
-      toValue: menuOpen ? 1 : 0,
-      duration: menuOpen ? 280 : 210,
-      easing: menuOpen ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
-      useNativeDriver: Platform.OS !== 'web',
-    }).start();
-  }, [menuOpen, drawerProgress]);
+  /**
+   * Tek bir 0→1 değeri menüyü sürer. Tüm dönüşümler Reanimated ile UI
+   * thread'de hesaplanır; JS thread'i meşgul olsa bile açılıp kapanma takılmaz.
+   */
+  const drawer = useSharedValue(0);
+  const dragOrigin = useSharedValue(0);
 
+  const closeMenu = useCallback(() => {
+    setMenuOpen(false);
+    drawer.set(withTiming(0, DRAWER_CLOSE));
+  }, [drawer]);
+
+  const openMenu = useCallback(() => {
+    haptics.tap();
+    setMenuOpen(true);
+    drawer.set(withTiming(1, DRAWER_OPEN));
+  }, [drawer]);
+
+  // Masaüstüne geçildiğinde (pencere genişlediğinde) menü kendiliğinden
+  // kapanır: durum effect içinde değiştirilmez, görünürlük türetilir.
+  const menuVisible = menuOpen && !layout.isDesktop;
+
+  // Açık menüyü Android geri tuşu ve web'de Escape ile kapat.
   useEffect(() => {
-    // Masaüstüne geçildiğinde (pencere genişlediğinde) menü açık kalmasın.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (layout.isDesktop && menuOpen) setMenuOpen(false);
-  }, [layout.isDesktop, menuOpen]);
+    if (!menuVisible) return;
+    if (Platform.OS === 'android') {
+      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+        closeMenu();
+        return true;
+      });
+      return () => subscription.remove();
+    }
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') closeMenu();
+      };
+      document.addEventListener('keydown', onKeyDown);
+      return () => document.removeEventListener('keydown', onKeyDown);
+    }
+    return;
+  }, [closeMenu, menuVisible]);
+
+  // Açıkken parmakla sola çekince menü kapanır; eşik geçilmezse geri oturur.
+  const closeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-14, 14])
+        .failOffsetY([-18, 18])
+        .onBegin(() => {
+          dragOrigin.set(drawer.get());
+        })
+        .onUpdate((event) => {
+          const next = dragOrigin.get() + event.translationX / panelWidth;
+          drawer.set(next < 0 ? 0 : next > 1 ? 1 : next);
+        })
+        .onEnd((event) => {
+          if (drawer.get() < 0.72 || event.velocityX < -520) {
+            runOnJS(closeMenu)();
+          } else {
+            drawer.set(withTiming(1, DRAWER_OPEN));
+          }
+        }),
+    [closeMenu, dragOrigin, drawer, panelWidth],
+  );
+
+  // Panel soldan kayar, sayfa aynı değerle sağa itilir: iki dönüşüm de UI thread'de.
+  const contentStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: drawer.value * panelWidth }],
+  }));
+
+  const panelStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: (drawer.value - 1) * panelWidth }],
+  }));
+
+  const scrimStyle = useAnimatedStyle(() => ({
+    opacity: drawer.value * 0.34,
+  }));
+
+  // Koyu Aurora başlık durum çubuğunun altına uzandığı için ikonlar açık renk olur.
+  useEffect(() => {
+    setStatusBarStyle('light');
+    return () => setStatusBarStyle(theme.scheme === 'dark' ? 'light' : 'dark');
+  }, [theme.scheme]);
+
+  const headerPadding = layout.isDesktop ? 28 : 12;
 
   const [bookingDefaults, setBookingDefaults] = useState<BookingDefaults | null>(null);
   const [reservationDetailId, setReservationDetailId] = useState<string | null>(null);
@@ -181,6 +289,7 @@ export default function PmsTabScreen() {
   const contentOffset = useRef(0);
   const keyboardTop = useRef<number | null>(null);
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /**
    * Odaklanan alanı klavyenin üstüne kaydırır.
@@ -210,17 +319,23 @@ export default function PmsTabScreen() {
     const show = Keyboard.addListener(showEvent, (event) => {
       keyboardTop.current = event.endCoordinates.screenY;
       if (revealTimer.current) clearTimeout(revealTimer.current);
+      if (settleTimer.current) clearTimeout(settleTimer.current);
       // Klavye payı yerleştikten sonra ölçmek için bir sonraki kareyi bekle.
       revealTimer.current = setTimeout(revealFocusedField, 32);
+      // Pay animasyonu bitince kaydırma sınırı büyür; kısa içerikte ilk deneme
+      // sınıra takılabildiği için yerleşim oturduktan sonra bir kez daha dene.
+      settleTimer.current = setTimeout(revealFocusedField, 280);
     });
     const hide = Keyboard.addListener(hideEvent, () => {
       keyboardTop.current = null;
       if (revealTimer.current) clearTimeout(revealTimer.current);
+      if (settleTimer.current) clearTimeout(settleTimer.current);
     });
     return () => {
       show.remove();
       hide.remove();
       if (revealTimer.current) clearTimeout(revealTimer.current);
+      if (settleTimer.current) clearTimeout(settleTimer.current);
     };
   }, [revealFocusedField]);
 
@@ -236,6 +351,71 @@ export default function PmsTabScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.tab]);
+
+  /**
+   * Menü açılıp kapanırken takvim gibi ağır sekmelerin yeniden çizilmesini
+   * engellemek için işleyiciler sabit tutulur. Aksi halde her açılışta tüm
+   * içerik yeniden render ediliyor ve animasyon takılıyordu.
+   */
+  const selectTab = useCallback(
+    (key: PmsTabKey) => {
+      setTab(key);
+      closeMenu();
+    },
+    [closeMenu],
+  );
+
+  const openMessagesFor = useCallback((reservationId: string) => {
+    setMessageReservationId(reservationId);
+    setReservationDetailId(null);
+    setTab('mesajlar');
+  }, []);
+
+  const changeProperty = useCallback(
+    (id: string) => {
+      setSelectedPropertyId(id);
+      setPropertyPickerOpen(false);
+      closeMenu();
+    },
+    [closeMenu],
+  );
+
+  const pendingFor = useCallback(
+    (key: PmsTabKey) => {
+      if (!property) return 0;
+      if (key === 'rezervasyonlar') return property.pending_reservations;
+      if (key === 'mesajlar') return property.unread_messages;
+      if (key === 'kat-hizmetleri') return property.pending_tasks;
+      if (key === 'sikayetler') return property.pending_complaints ?? 0;
+      return 0;
+    },
+    [property],
+  );
+
+  const handleReservationPress = useCallback((id: string) => {
+    setReservationDetailId(id);
+  }, []);
+
+  const handleRoomPress = useCallback((room: RoomTarget) => {
+    setRoomTarget(room);
+  }, []);
+
+  const handleBlockPress = useCallback((block: CalendarBlock) => {
+    setBlockTarget(block);
+  }, []);
+
+  const handleEmptyCellPress = useCallback((cell: EmptyCalendarCell) => {
+    setBookingDefaults({ date: cell.date, roomId: cell.roomId, roomTypeId: cell.roomTypeId });
+  }, []);
+
+  const openPropertyPicker = useCallback(() => {
+    closeMenu();
+    setPropertyPickerOpen(true);
+  }, [closeMenu]);
+  const openManagementHub = useCallback(() => {
+    closeMenu();
+    router.push('/konaklama/yonetim' as never);
+  }, [closeMenu, router]);
 
   if (context.isLoading) {
     return (
@@ -283,399 +463,69 @@ export default function PmsTabScreen() {
     MOBILE_QUICK_TABS.includes(tab) ? MOBILE_QUICK_TABS : [tab, ...MOBILE_QUICK_TABS]
   ).map((key) => pmsTab(key));
 
-  const selectTab = (key: PmsTabKey) => {
-    setTab(key);
-    setMenuOpen(false);
-  };
-
-  const openMessagesFor = (reservationId: string) => {
-    setMessageReservationId(reservationId);
-    setReservationDetailId(null);
-    setTab('mesajlar');
-  };
-
-  const changeProperty = (id: string) => {
-    setSelectedPropertyId(id);
-    setPropertyPickerOpen(false);
-    setMenuOpen(false);
-  };
-
-  const pendingFor = (key: PmsTabKey) => {
-    if (key === 'rezervasyonlar') return property.pending_reservations;
-    if (key === 'mesajlar') return property.unread_messages;
-    if (key === 'kat-hizmetleri') return property.pending_tasks;
-    return 0;
-  };
-
   return (
-    <Screen padded={false} edges={['top', 'left', 'right']}>
-      <View
-        style={[
-          styles.header,
-          { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.divider },
-          theme.shadows.xs,
-        ]}
-      >
-        {layout.isDesktop ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Yönetim merkezine dön"
-            onPress={() => router.push('/konaklama/yonetim' as never)}
-            style={({ pressed }) => [
-              styles.headerButton,
-              { backgroundColor: theme.colors.surfaceMuted, opacity: pressed ? 0.75 : 1 },
-            ]}
+    // Üst kenar boşluğu başlığın kendisinde: Aurora bloğu durum çubuğunun
+    // altına kadar uzansın, ekranın tepesinde ayrı bir şerit kalmasın.
+    <Screen padded={false} edges={['left', 'right']}>
+      <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
+        {/* İçerik katmanı: menü açılınca panel genişliği kadar sağa kayar. */}
+        <Reanimated.View
+          style={[styles.flex, contentStyle]}
+          pointerEvents={menuVisible ? 'none' : 'auto'}
+          accessibilityElementsHidden={menuVisible}
+          importantForAccessibility={menuVisible ? 'no-hide-descendants' : 'auto'}
+        >
+          <AuroraBackdrop
+            colors={[AURORA.night, AURORA.indigo, '#2A2660']}
+            style={[styles.header, { paddingTop: insets.top }]}
           >
-            <Ionicons name="chevron-back" size={19} color={theme.colors.text} />
-          </Pressable>
-        ) : (
-          <MenuToggleButton
-            open={menuOpen}
-            progress={drawerProgress}
-            onPress={() => setMenuOpen((current) => !current)}
-          />
-        )}
-
-        {layout.isDesktop ? (
-          <LinearGradient
-            colors={[theme.colors.primary, theme.colors.accent]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.headerLogo}
-          >
-            <Ionicons name="business" size={16} color="#FFFFFF" />
-          </LinearGradient>
-        ) : null}
-
-        <View style={styles.headerTitle}>
-          <View style={styles.headerTitleRow}>
-            <View style={[styles.headerGroupDot, { backgroundColor: theme.colors.primary }]} />
-            <AppText
-              variant="overline"
-              color="textTertiary"
-              style={styles.headerOverline}
-              numberOfLines={1}
-            >
-              {active.group.toUpperCase()}
-            </AppText>
-            {!layout.isMobile ? (
-              <>
-                <AppText variant="caption" color="textTertiary" style={styles.headerDivider}>
-                  ·
-                </AppText>
-                <AppText
-                  variant="caption"
-                  color="textTertiary"
-                  style={styles.headerBrandMini}
-                  numberOfLines={1}
-                >
-                  OTEL YÖNETİMİM
-                </AppText>
-              </>
-            ) : null}
-          </View>
-          <AppText variant="bodyStrong" numberOfLines={1}>
-            {active.label}
-          </AppText>
-        </View>
-
-        <View style={styles.headerRight}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Tesis seç"
-            onPress={() => setPropertyPickerOpen(true)}
-            style={({ pressed }) => [
-              styles.propertyPicker,
-              {
-                backgroundColor: theme.colors.surfaceMuted,
-                borderColor: theme.colors.border,
-                maxWidth: layout.isMobile ? 118 : 232,
-                opacity: pressed ? 0.8 : 1,
-              },
-            ]}
-          >
-            <View
-              style={[
-                styles.propertyDot,
-                {
-                  backgroundColor:
-                    property.status === 'published' ? theme.colors.success : theme.colors.warning,
-                },
-              ]}
-            />
-            <AppText
-              variant="caption"
-              color="text"
-              numberOfLines={1}
-              style={[styles.propertyName, { maxWidth: layout.isMobile ? 62 : 164 }]}
-            >
-              {property.name}
-            </AppText>
-            <Ionicons name="chevron-down" size={13} color={theme.colors.textTertiary} />
-          </Pressable>
-
-          {layout.isDesktop ? (
-            <Button
-              label="Yeni rezervasyon"
-              size="sm"
-              fullWidth={false}
-              leftIcon={<Ionicons name="add" size={15} color={theme.colors.onPrimary} />}
-              onPress={() =>
-                setBookingDefaults({ date: todayIso(), roomId: null, roomTypeId: null })
-              }
-            />
-          ) : (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Yeni rezervasyon"
-              onPress={() =>
-                setBookingDefaults({ date: todayIso(), roomId: null, roomTypeId: null })
-              }
-              style={({ pressed }) => [
-                styles.headerAddButton,
-                { backgroundColor: theme.colors.primary, opacity: pressed ? 0.82 : 1 },
-              ]}
-            >
-              <Ionicons name="add" size={20} color={theme.colors.onPrimary} />
-            </Pressable>
-          )}
-        </View>
-      </View>
-
-      <View style={styles.body}>
-        {layout.isDesktop ? (
-          <View
-            style={[
-              styles.sidebar,
-              { borderRightColor: theme.colors.divider, backgroundColor: theme.colors.surface },
-            ]}
-          >
-            <AuroraBackdrop
-              colors={[AURORA.night, AURORA.indigo, '#2A2660']}
-              style={styles.sidebarBrand}
-            >
-              <View style={styles.sidebarBrandRow}>
-                <LinearGradient
-                  colors={[theme.colors.primary, theme.colors.accent]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.sidebarLogo}
-                >
-                  <Ionicons name="business" size={16} color="#FFFFFF" />
-                </LinearGradient>
-                <View style={styles.flex}>
-                  <AppText variant="overline" style={styles.sidebarOverline}>
-                    TRABZONE
-                  </AppText>
-                  <AppText variant="caption" style={styles.sidebarBrandText}>
-                    Otel Yönetimim
-                  </AppText>
-                </View>
-              </View>
-
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Tesis değiştir"
-                onPress={() => setPropertyPickerOpen(true)}
-                style={({ pressed }) => [styles.sidebarProperty, { opacity: pressed ? 0.82 : 1 }]}
-              >
-                <PropertyAvatar property={property} size={34} />
-                <View style={styles.flex}>
-                  <AppText variant="caption" numberOfLines={1} style={styles.sidebarPropertyName}>
-                    {property.name}
-                  </AppText>
-                  <AppText variant="caption" numberOfLines={1} style={styles.sidebarPropertyMeta}>
-                    {PROPERTY_TYPE_LABELS[property.property_type]}
-                    {property.district ? ` · ${property.district}` : ''}
-                  </AppText>
-                </View>
-                <Ionicons name="swap-horizontal" size={14} color="rgba(255,255,255,0.7)" />
-              </Pressable>
-            </AuroraBackdrop>
-
-            <ScrollView
-              contentContainerStyle={styles.sidebarContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {PMS_GROUPS.map((group) => (
-                <View key={group} style={styles.sidebarGroup}>
-                  <View style={styles.groupHead}>
-                    <Ionicons
-                      name={GROUP_ICONS[group] ?? 'ellipse'}
-                      size={11}
-                      color={theme.colors.textTertiary}
-                    />
-                    <AppText variant="overline" color="textTertiary" style={styles.groupLabel}>
-                      {group.toUpperCase()}
-                    </AppText>
-                  </View>
-                  {PMS_TABS.filter((entry) => entry.group === group).map((entry) => {
-                    const isActive = entry.key === tab;
-                    const pending = pendingFor(entry.key);
-                    return (
-                      <Pressable
-                        key={entry.key}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: isActive }}
-                        onPress={() => selectTab(entry.key)}
-                        style={({ pressed }) => [
-                          styles.navItem,
-                          {
-                            backgroundColor: isActive ? theme.colors.primarySoft : 'transparent',
-                            opacity: pressed ? 0.78 : 1,
-                          },
-                        ]}
-                      >
-                        {isActive ? (
-                          <View
-                            style={[styles.navActiveBar, { backgroundColor: theme.colors.primary }]}
-                          />
-                        ) : null}
-                        <Ionicons
-                          name={entry.icon}
-                          size={16}
-                          color={isActive ? theme.colors.primary : theme.colors.textTertiary}
-                        />
-                        <AppText
-                          variant="caption"
-                          color={isActive ? 'primary' : 'textSecondary'}
-                          numberOfLines={1}
-                          style={styles.navLabel}
-                        >
-                          {entry.label}
-                        </AppText>
-                        {pending > 0 ? <Badge value={pending} /> : null}
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              ))}
-
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Tesis yönetim merkezi"
-                onPress={() => router.push('/konaklama/yonetim' as never)}
-                style={({ pressed }) => [
-                  styles.sidebarFooter,
-                  { borderColor: theme.colors.border, opacity: pressed ? 0.75 : 1 },
-                ]}
-              >
-                <Ionicons name="apps-outline" size={14} color={theme.colors.textSecondary} />
-                <AppText variant="caption" color="textSecondary" style={styles.flex}>
-                  Tesis yönetim merkezi
-                </AppText>
-                <Ionicons name="chevron-forward" size={12} color={theme.colors.textTertiary} />
-              </Pressable>
-            </ScrollView>
-          </View>
-        ) : null}
-
-        <View style={[styles.main, { backgroundColor: theme.colors.background }]}>
-          {!layout.isDesktop ? (
-            <View
-              style={[
-                styles.mobileTabs,
-                { borderBottomColor: theme.colors.divider, backgroundColor: theme.colors.surface },
-              ]}
-            >
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.mobileTabsRow}
-              >
-                {quickTabs.map((entry) => {
-                  const isActive = entry.key === tab;
-                  const pending = pendingFor(entry.key);
-                  return (
-                    <Pressable
-                      key={entry.key}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: isActive }}
-                      onPress={() => selectTab(entry.key)}
-                      style={({ pressed }) => [
-                        styles.mobileTab,
-                        {
-                          backgroundColor: isActive ? theme.colors.primary : theme.colors.surface,
-                          borderColor: isActive ? theme.colors.primary : theme.colors.border,
-                          opacity: pressed ? 0.82 : 1,
-                        },
-                      ]}
-                    >
-                      <Ionicons
-                        name={entry.icon}
-                        size={13}
-                        color={isActive ? theme.colors.onPrimary : theme.colors.textTertiary}
-                      />
-                      <AppText
-                        variant="caption"
-                        color={isActive ? theme.colors.onPrimary : 'textSecondary'}
-                        style={styles.mobileTabText}
-                      >
-                        {entry.short}
-                      </AppText>
-                      {pending > 0 ? (
-                        <View
-                          style={[
-                            styles.mobileTabDot,
-                            {
-                              backgroundColor: isActive
-                                ? theme.colors.onPrimary
-                                : theme.colors.primary,
-                            },
-                          ]}
-                        />
-                      ) : null}
-                    </Pressable>
-                  );
-                })}
+            <View style={[styles.headerRow, { paddingHorizontal: headerPadding }]}>
+              {layout.isDesktop ? (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Tüm menüyü aç"
-                  onPress={() => setMenuOpen(true)}
+                  accessibilityLabel="Yönetim merkezine dön"
+                  onPress={() => router.push('/konaklama/yonetim' as never)}
                   style={({ pressed }) => [
-                    styles.mobileTab,
-                    {
-                      backgroundColor: theme.colors.surfaceMuted,
-                      borderColor: theme.colors.border,
-                      opacity: pressed ? 0.82 : 1,
-                    },
+                    styles.headerGhostButton,
+                    { opacity: pressed ? 0.7 : 1 },
                   ]}
                 >
-                  <Ionicons name="grid-outline" size={13} color={theme.colors.textSecondary} />
-                  <AppText variant="caption" color="textSecondary" style={styles.mobileTabText}>
-                    Tümü
-                  </AppText>
+                  <Ionicons name="chevron-back" size={19} color="#FFFFFF" />
                 </Pressable>
-              </ScrollView>
-            </View>
-          ) : null}
+              ) : (
+                <MenuToggleButton
+                  open={menuVisible}
+                  progress={drawer}
+                  onPress={menuOpen ? closeMenu : openMenu}
+                />
+              )}
 
-          <Reanimated.View style={[styles.flex, Platform.OS === 'android' ? keyboardInset : null]}>
-            <ScrollView
-              ref={contentRef}
-              style={styles.flex}
-              contentContainerStyle={styles.content}
-              keyboardShouldPersistTaps="handled"
-              automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
-              onScroll={(event) => {
-                contentOffset.current = event.nativeEvent.contentOffset.y;
-              }}
-              scrollEventThrottle={16}
-              showsVerticalScrollIndicator={false}
-            >
-              <View style={styles.contentHead}>
-                <View style={styles.flex}>
-                  <AppText variant="overline" color="primaryDeep" style={styles.contentOverline}>
-                    {active.group.toUpperCase()}
-                  </AppText>
-                  <AppText variant="caption" color="textTertiary" numberOfLines={2}>
-                    {active.description}
-                  </AppText>
-                </View>
-                <View
-                  style={[
-                    styles.tabStatus,
-                    { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+              <LinearGradient
+                colors={[theme.colors.primary, theme.colors.accent]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.headerLogo}
+              >
+                <Ionicons name="business" size={16} color="#FFFFFF" />
+              </LinearGradient>
+
+              <View style={styles.headerTitle}>
+                <AppText variant="overline" numberOfLines={1} style={styles.headerOverline}>
+                  OTEL YÖNETİMİM
+                </AppText>
+                <AppText variant="bodyStrong" numberOfLines={1} style={styles.headerTitleText}>
+                  {active.label}
+                </AppText>
+              </View>
+
+              <View style={styles.headerRight}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Tesis seç: ${property.name}`}
+                  onPress={() => setPropertyPickerOpen(true)}
+                  style={({ pressed }) => [
+                    styles.propertyPicker,
+                    { maxWidth: layout.isMobile ? 138 : 240, opacity: pressed ? 0.8 : 1 },
                   ]}
                 >
                   <View
@@ -689,57 +539,404 @@ export default function PmsTabScreen() {
                       },
                     ]}
                   />
-                  <AppText variant="caption" color="textSecondary" style={styles.tabStatusText}>
-                    {PROPERTY_STATUS_LABELS[property.status]}
+                  <AppText
+                    variant="caption"
+                    numberOfLines={1}
+                    style={[styles.propertyName, { maxWidth: layout.isMobile ? 78 : 168 }]}
+                  >
+                    {property.name}
                   </AppText>
-                </View>
-              </View>
+                  <Ionicons name="chevron-down" size={13} color="rgba(255,255,255,0.62)" />
+                </Pressable>
 
-              <TabContent
-                tab={tab}
-                propertyId={property.id}
-                propertyName={property.name}
-                messageReservationId={messageReservationId}
-                onOpenTab={selectTab}
-                onOpenMessages={openMessagesFor}
-                onReservationPress={(id) => setReservationDetailId(id)}
-                onRoomPress={(room) => setRoomTarget(room)}
-                onBlockPress={(block) => setBlockTarget(block)}
-                onEmptyCellPress={(cell) =>
-                  setBookingDefaults({
-                    date: cell.date,
-                    roomId: cell.roomId,
-                    roomTypeId: cell.roomTypeId,
-                  })
-                }
-              />
-            </ScrollView>
+                {layout.isDesktop ? (
+                  <Button
+                    label="Yeni rezervasyon"
+                    size="sm"
+                    fullWidth={false}
+                    leftIcon={<Ionicons name="add" size={15} color={theme.colors.onPrimary} />}
+                    onPress={() =>
+                      setBookingDefaults({ date: todayIso(), roomId: null, roomTypeId: null })
+                    }
+                  />
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Yeni rezervasyon"
+                    onPress={() =>
+                      setBookingDefaults({ date: todayIso(), roomId: null, roomTypeId: null })
+                    }
+                    style={({ pressed }) => [
+                      styles.headerAddButton,
+                      { opacity: pressed ? 0.82 : 1 },
+                    ]}
+                  >
+                    <LinearGradient
+                      colors={[theme.colors.primary, theme.colors.accent]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={StyleSheet.absoluteFill}
+                    />
+                    <Ionicons name="add" size={20} color="#FFFFFF" />
+                  </Pressable>
+                )}
+              </View>
+            </View>
+
+            {/* Başlığın ikinci satırı: grup, açıklama ve yayın durumu tek şeritte. */}
+            <View style={[styles.headerMeta, { paddingHorizontal: headerPadding }]}>
+              <View style={styles.headerMetaBadge}>
+                <Ionicons
+                  name={GROUP_ICONS[active.group] ?? 'pulse'}
+                  size={11}
+                  color="rgba(255,255,255,0.72)"
+                />
+                <AppText variant="overline" numberOfLines={1} style={styles.headerMetaGroup}>
+                  {active.group.toUpperCase()}
+                </AppText>
+              </View>
+              <View style={styles.headerMetaDot} />
+              <AppText variant="caption" numberOfLines={1} style={styles.headerMetaText}>
+                {active.description}
+              </AppText>
+              <View
+                style={[
+                  styles.headerStatus,
+                  {
+                    borderColor:
+                      property.status === 'published'
+                        ? 'rgba(61,214,140,0.45)'
+                        : 'rgba(251,191,36,0.45)',
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.headerStatusDot,
+                    {
+                      backgroundColor:
+                        property.status === 'published'
+                          ? theme.colors.success
+                          : theme.colors.warning,
+                    },
+                  ]}
+                />
+                <AppText variant="caption" numberOfLines={1} style={styles.headerStatusText}>
+                  {PROPERTY_STATUS_LABELS[property.status]}
+                </AppText>
+              </View>
+            </View>
+          </AuroraBackdrop>
+
+          <View style={styles.body}>
+            {layout.isDesktop ? (
+              <View
+                style={[
+                  styles.sidebar,
+                  { borderRightColor: theme.colors.divider, backgroundColor: theme.colors.surface },
+                ]}
+              >
+                <AuroraBackdrop
+                  colors={[AURORA.night, AURORA.indigo, '#2A2660']}
+                  style={styles.sidebarBrand}
+                >
+                  <View style={styles.sidebarBrandRow}>
+                    <LinearGradient
+                      colors={[theme.colors.primary, theme.colors.accent]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.sidebarLogo}
+                    >
+                      <Ionicons name="business" size={16} color="#FFFFFF" />
+                    </LinearGradient>
+                    <View style={styles.flex}>
+                      <AppText variant="overline" style={styles.sidebarOverline}>
+                        TRABZONE
+                      </AppText>
+                      <AppText variant="caption" style={styles.sidebarBrandText}>
+                        Otel Yönetimim
+                      </AppText>
+                    </View>
+                  </View>
+
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Tesis değiştir"
+                    onPress={() => setPropertyPickerOpen(true)}
+                    style={({ pressed }) => [
+                      styles.sidebarProperty,
+                      { opacity: pressed ? 0.82 : 1 },
+                    ]}
+                  >
+                    <PropertyAvatar property={property} size={34} />
+                    <View style={styles.flex}>
+                      <AppText
+                        variant="caption"
+                        numberOfLines={1}
+                        style={styles.sidebarPropertyName}
+                      >
+                        {property.name}
+                      </AppText>
+                      <AppText
+                        variant="caption"
+                        numberOfLines={1}
+                        style={styles.sidebarPropertyMeta}
+                      >
+                        {PROPERTY_TYPE_LABELS[property.property_type]}
+                        {property.district ? ` · ${property.district}` : ''}
+                      </AppText>
+                    </View>
+                    <Ionicons name="swap-horizontal" size={14} color="rgba(255,255,255,0.7)" />
+                  </Pressable>
+                </AuroraBackdrop>
+
+                <ScrollView
+                  contentContainerStyle={styles.sidebarContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {PMS_GROUPS.map((group) => (
+                    <View key={group} style={styles.sidebarGroup}>
+                      <View style={styles.groupHead}>
+                        <Ionicons
+                          name={GROUP_ICONS[group] ?? 'ellipse'}
+                          size={11}
+                          color={theme.colors.textTertiary}
+                        />
+                        <AppText variant="overline" color="textTertiary" style={styles.groupLabel}>
+                          {group.toUpperCase()}
+                        </AppText>
+                      </View>
+                      {PMS_TABS.filter((entry) => entry.group === group).map((entry) => {
+                        const isActive = entry.key === tab;
+                        const pending = pendingFor(entry.key);
+                        return (
+                          <Pressable
+                            key={entry.key}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: isActive }}
+                            onPress={() => selectTab(entry.key)}
+                            style={({ pressed }) => [
+                              styles.navItem,
+                              {
+                                backgroundColor: isActive
+                                  ? theme.colors.primarySoft
+                                  : 'transparent',
+                                opacity: pressed ? 0.78 : 1,
+                              },
+                            ]}
+                          >
+                            {isActive ? (
+                              <View
+                                style={[
+                                  styles.navActiveBar,
+                                  { backgroundColor: theme.colors.primary },
+                                ]}
+                              />
+                            ) : null}
+                            <Ionicons
+                              name={entry.icon}
+                              size={16}
+                              color={isActive ? theme.colors.primary : theme.colors.textTertiary}
+                            />
+                            <AppText
+                              variant="caption"
+                              color={isActive ? 'primary' : 'textSecondary'}
+                              numberOfLines={1}
+                              style={styles.navLabel}
+                            >
+                              {entry.label}
+                            </AppText>
+                            {pending > 0 ? <Badge value={pending} /> : null}
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ))}
+
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Tesis yönetim merkezi"
+                    onPress={() => router.push('/konaklama/yonetim' as never)}
+                    style={({ pressed }) => [
+                      styles.sidebarFooter,
+                      { borderColor: theme.colors.border, opacity: pressed ? 0.75 : 1 },
+                    ]}
+                  >
+                    <Ionicons name="apps-outline" size={14} color={theme.colors.textSecondary} />
+                    <AppText variant="caption" color="textSecondary" style={styles.flex}>
+                      Tesis yönetim merkezi
+                    </AppText>
+                    <Ionicons name="chevron-forward" size={12} color={theme.colors.textTertiary} />
+                  </Pressable>
+                </ScrollView>
+              </View>
+            ) : null}
+
+            <View style={[styles.main, { backgroundColor: theme.colors.background }]}>
+              {!layout.isDesktop ? (
+                <View
+                  style={[
+                    styles.mobileTabs,
+                    {
+                      borderBottomColor: theme.colors.divider,
+                      backgroundColor: theme.colors.surface,
+                    },
+                  ]}
+                >
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.mobileTabsRow}
+                  >
+                    {quickTabs.map((entry) => {
+                      const isActive = entry.key === tab;
+                      const pending = pendingFor(entry.key);
+                      return (
+                        <Pressable
+                          key={entry.key}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: isActive }}
+                          onPress={() => selectTab(entry.key)}
+                          style={({ pressed }) => [
+                            styles.mobileTab,
+                            {
+                              backgroundColor: isActive
+                                ? theme.colors.primary
+                                : theme.colors.surface,
+                              borderColor: isActive ? theme.colors.primary : theme.colors.border,
+                              opacity: pressed ? 0.82 : 1,
+                            },
+                          ]}
+                        >
+                          <Ionicons
+                            name={entry.icon}
+                            size={13}
+                            color={isActive ? theme.colors.onPrimary : theme.colors.textTertiary}
+                          />
+                          <AppText
+                            variant="caption"
+                            color={isActive ? theme.colors.onPrimary : 'textSecondary'}
+                            style={styles.mobileTabText}
+                          >
+                            {entry.short}
+                          </AppText>
+                          {pending > 0 ? (
+                            <View
+                              style={[
+                                styles.mobileTabDot,
+                                {
+                                  backgroundColor: isActive
+                                    ? theme.colors.onPrimary
+                                    : theme.colors.primary,
+                                },
+                              ]}
+                            />
+                          ) : null}
+                        </Pressable>
+                      );
+                    })}
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Tüm menüyü aç"
+                      onPress={openMenu}
+                      style={({ pressed }) => [
+                        styles.mobileTab,
+                        {
+                          backgroundColor: theme.colors.surfaceMuted,
+                          borderColor: theme.colors.border,
+                          opacity: pressed ? 0.82 : 1,
+                        },
+                      ]}
+                    >
+                      <Ionicons name="grid-outline" size={13} color={theme.colors.textSecondary} />
+                      <AppText variant="caption" color="textSecondary" style={styles.mobileTabText}>
+                        Tümü
+                      </AppText>
+                    </Pressable>
+                  </ScrollView>
+                </View>
+              ) : null}
+
+              <Reanimated.View
+                style={[styles.flex, Platform.OS === 'android' ? keyboardInset : null]}
+              >
+                <ScrollView
+                  ref={contentRef}
+                  style={styles.flex}
+                  contentContainerStyle={[
+                    styles.content,
+                    layout.isDesktop && styles.contentDesktop,
+                  ]}
+                  keyboardShouldPersistTaps="handled"
+                  automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+                  onScroll={(event) => {
+                    contentOffset.current = event.nativeEvent.contentOffset.y;
+                  }}
+                  scrollEventThrottle={16}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <MemoTabContent
+                    tab={tab}
+                    propertyId={property.id}
+                    propertyName={property.name}
+                    messageReservationId={messageReservationId}
+                    onOpenTab={selectTab}
+                    onOpenMessages={openMessagesFor}
+                    onReservationPress={handleReservationPress}
+                    onRoomPress={handleRoomPress}
+                    onBlockPress={handleBlockPress}
+                    onEmptyCellPress={handleEmptyCellPress}
+                  />
+                </ScrollView>
+              </Reanimated.View>
+            </View>
+          </View>
+        </Reanimated.View>
+
+        {/*
+          X deseni: panel soldan içeri kayar, sayfa sağa itilir. Karartma
+          yalnızca itilen sayfanın üstünde; panel tam boy ve kendi genişliğinde.
+        */}
+        {!layout.isDesktop ? (
+          <Reanimated.View
+            pointerEvents={menuVisible ? 'auto' : 'none'}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            style={[
+              StyleSheet.absoluteFill,
+              { backgroundColor: theme.scheme === 'dark' ? '#03070E' : '#0B1220' },
+              scrimStyle,
+            ]}
+          >
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Menüyü kapat"
+              onPress={closeMenu}
+              style={StyleSheet.absoluteFill}
+            />
           </Reanimated.View>
-        </View>
+        ) : null}
 
         {!layout.isDesktop ? (
-          <PmsDrawer
-            open={menuOpen}
-            progress={drawerProgress}
-            width={drawerWidth}
-            tab={tab}
-            property={property}
-            pendingFor={pendingFor}
-            onSelectTab={selectTab}
-            onClose={() => setMenuOpen(false)}
-            onOpenPicker={() => {
-              setMenuOpen(false);
-              setPropertyPickerOpen(true);
-            }}
-            onOpenManagement={() => {
-              setMenuOpen(false);
-              router.push('/konaklama/yonetim' as never);
-            }}
-            onNewProperty={() => {
-              setMenuOpen(false);
-              router.push('/konaklama/otel-ekle' as never);
-            }}
-          />
+          <GestureDetector gesture={closeGesture}>
+            <Reanimated.View
+              accessibilityViewIsModal={menuVisible}
+              accessibilityElementsHidden={!menuVisible}
+              importantForAccessibility={menuVisible ? 'auto' : 'no-hide-descendants'}
+              pointerEvents={menuVisible ? 'auto' : 'none'}
+              style={[styles.panel, { width: panelWidth }, panelStyle]}
+            >
+              <PmsDrawer
+                tab={tab}
+                property={property}
+                pendingFor={pendingFor}
+                onSelectTab={selectTab}
+                onClose={closeMenu}
+                onOpenPicker={openPropertyPicker}
+                onOpenManagement={openManagementHub}
+              />
+            </Reanimated.View>
+          </GestureDetector>
         ) : null}
       </View>
 
@@ -980,6 +1177,8 @@ function TabContent({
       return (
         <MessagesManager propertyId={propertyId} initialReservationId={messageReservationId} />
       );
+    case 'sikayetler':
+      return <ComplaintsCenter propertyId={propertyId} />;
     case 'yorumlar':
       return <ReviewsManager propertyId={propertyId} />;
     case 'medya':
@@ -992,6 +1191,7 @@ function TabContent({
           />
           <HotelOnboardingWizard
             propertyId={propertyId}
+            embedded
             onOpenManagement={(_, tabKey) => onOpenTab(tabKey)}
           />
         </View>
@@ -1322,30 +1522,27 @@ function MenuToggleButton({
   onPress,
 }: {
   open: boolean;
-  progress: Animated.Value;
+  /** Çekmeceyle aynı 0→1 değeri: ikon ve panel birlikte, senkron hareket eder. */
+  progress: SharedValue<number>;
   onPress: () => void;
 }) {
-  const { theme } = useTheme();
-
   // Hamburger → X: üst ve alt çizgi ortada birleşip 45° döner, orta çizgi kaybolur.
-  const topStyle = {
+  const topStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [0, 5] }) },
-      { rotate: progress.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '45deg'] }) },
+      { translateY: interpolate(progress.value, [0, 1], [0, 5]) },
+      { rotate: `${interpolate(progress.value, [0, 1], [0, 45])}deg` },
     ],
-  };
-  const middleStyle = {
-    opacity: progress.interpolate({ inputRange: [0, 0.6, 1], outputRange: [1, 0, 0] }),
-    transform: [{ scaleX: progress.interpolate({ inputRange: [0, 1], outputRange: [1, 0.35] }) }],
-  };
-  const bottomStyle = {
+  }));
+  const middleStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(progress.value, [0, 0.55, 1], [1, 0, 0]),
+    transform: [{ scaleX: interpolate(progress.value, [0, 1], [1, 0.32]) }],
+  }));
+  const bottomStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [0, -5] }) },
-      { rotate: progress.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '-45deg'] }) },
+      { translateY: interpolate(progress.value, [0, 1], [0, -5]) },
+      { rotate: `${interpolate(progress.value, [0, 1], [0, -45])}deg` },
     ],
-  };
-
-  const barColor = open ? theme.colors.primary : theme.colors.text;
+  }));
 
   return (
     <Pressable
@@ -1354,26 +1551,21 @@ function MenuToggleButton({
       accessibilityState={{ expanded: open }}
       onPress={onPress}
       style={({ pressed }) => [
-        styles.headerButton,
-        {
-          backgroundColor: open ? theme.colors.primarySoft : theme.colors.surfaceMuted,
-          opacity: pressed ? 0.75 : 1,
-        },
+        styles.headerGhostButton,
+        open ? styles.headerGhostButtonActive : null,
+        { opacity: pressed ? 0.7 : 1 },
       ]}
     >
       <View style={styles.burger}>
-        <Animated.View style={[styles.burgerBar, { backgroundColor: barColor }, topStyle]} />
-        <Animated.View style={[styles.burgerBar, { backgroundColor: barColor }, middleStyle]} />
-        <Animated.View style={[styles.burgerBar, { backgroundColor: barColor }, bottomStyle]} />
+        <Reanimated.View style={[styles.burgerBar, topStyle]} />
+        <Reanimated.View style={[styles.burgerBar, middleStyle]} />
+        <Reanimated.View style={[styles.burgerBar, bottomStyle]} />
       </View>
     </Pressable>
   );
 }
 
-function PmsDrawer({
-  open,
-  progress,
-  width,
+const PmsDrawer = memo(function PmsDrawer({
   tab,
   property,
   pendingFor,
@@ -1381,11 +1573,7 @@ function PmsDrawer({
   onClose,
   onOpenPicker,
   onOpenManagement,
-  onNewProperty,
 }: {
-  open: boolean;
-  progress: Animated.Value;
-  width: number;
   tab: PmsTabKey;
   property: AccommodationPropertyContext;
   pendingFor: (key: PmsTabKey) => number;
@@ -1393,9 +1581,10 @@ function PmsDrawer({
   onClose: () => void;
   onOpenPicker: () => void;
   onOpenManagement: () => void;
-  onNewProperty: () => void;
 }) {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
+  const keyboardInset = useKeyboardBottomInset();
   const [query, setQuery] = useState('');
   const normalized = query.trim().toLocaleLowerCase('tr-TR');
 
@@ -1408,280 +1597,321 @@ function PmsDrawer({
     );
   }, [normalized]);
 
-  const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [-width - 40, 0] });
-  const backdropOpacity = progress.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
-
-  const renderItem = (entry: (typeof PMS_TABS)[number]) => {
+  /*
+   * Satırlar tek bir kartın içinde yaşar. Ayraç çizgileri kartın kenarına
+   * dayanmaz; ikon sütunundan başlar. Böylece ne kart kenarıyla birleşip
+   * "tek parça" görünür ne de satırlar birbirine yapışır.
+   */
+  const renderItem = (entry: (typeof PMS_TABS)[number], index: number) => {
     const isActive = entry.key === tab;
     const pending = pendingFor(entry.key);
     return (
-      <Pressable
-        key={entry.key}
-        accessibilityRole="button"
-        accessibilityState={{ selected: isActive }}
-        onPress={() => onSelectTab(entry.key)}
-        style={({ pressed }) => [
-          styles.drawerItem,
-          {
-            backgroundColor: isActive ? theme.colors.primarySoft : 'transparent',
-            opacity: pressed ? 0.82 : 1,
-          },
-        ]}
-      >
-        <View
-          style={[
-            styles.drawerItemIcon,
-            { backgroundColor: isActive ? theme.colors.primary : theme.colors.surfaceMuted },
+      <View key={entry.key}>
+        {index > 0 ? (
+          <View style={[styles.drawerItemDivider, { backgroundColor: theme.colors.divider }]} />
+        ) : null}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: isActive }}
+          onPress={() => onSelectTab(entry.key)}
+          style={({ pressed }) => [
+            styles.drawerItem,
+            {
+              backgroundColor: isActive
+                ? theme.colors.primarySoft
+                : pressed
+                  ? theme.colors.surfaceMuted
+                  : 'transparent',
+            },
           ]}
         >
-          <Ionicons
-            name={entry.icon}
-            size={15}
-            color={isActive ? theme.colors.onPrimary : theme.colors.textSecondary}
-          />
-        </View>
-        <View style={styles.flex}>
-          <AppText variant="label" color={isActive ? 'primary' : 'text'} numberOfLines={1}>
-            {entry.label}
-          </AppText>
-          <AppText variant="caption" color="textTertiary" numberOfLines={1}>
-            {entry.description}
-          </AppText>
-        </View>
-        {pending > 0 ? <Badge value={pending} /> : null}
-        <Ionicons name="chevron-forward" size={13} color={theme.colors.textTertiary} />
-      </Pressable>
+          {isActive ? (
+            <View style={[styles.drawerActiveBar, { backgroundColor: theme.colors.primary }]} />
+          ) : null}
+          <View
+            style={[
+              styles.drawerItemIcon,
+              { backgroundColor: isActive ? theme.colors.primary : theme.colors.surfaceMuted },
+            ]}
+          >
+            <Ionicons
+              name={entry.icon}
+              size={15}
+              color={isActive ? theme.colors.onPrimary : theme.colors.textSecondary}
+            />
+          </View>
+          <View style={styles.flex}>
+            <AppText variant="label" color={isActive ? 'primary' : 'text'} numberOfLines={1}>
+              {entry.label}
+            </AppText>
+            <AppText variant="caption" color="textTertiary" numberOfLines={1}>
+              {entry.description}
+            </AppText>
+          </View>
+          {pending > 0 ? <Badge value={pending} /> : null}
+          <Ionicons name="chevron-forward" size={13} color={theme.colors.textTertiary} />
+        </Pressable>
+      </View>
     );
   };
 
   return (
-    <View
-      pointerEvents={open ? 'auto' : 'none'}
-      style={[StyleSheet.absoluteFill, styles.drawerLayer]}
-      accessibilityElementsHidden={!open}
-      importantForAccessibility={open ? 'auto' : 'no-hide-descendants'}
+    <Reanimated.View
+      style={[
+        styles.flex,
+        { backgroundColor: theme.colors.background },
+        Platform.OS === 'android' ? (keyboardInset as unknown as ViewStyle) : null,
+      ]}
     >
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          StyleSheet.absoluteFill,
-          { backgroundColor: theme.colors.overlay, opacity: backdropOpacity },
-        ]}
-      />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Menüyü kapat"
-        onPress={onClose}
-        style={StyleSheet.absoluteFill}
-      />
-
-      <Animated.View
-        style={[
-          styles.drawerPanel,
-          {
-            width,
-            backgroundColor: theme.colors.surface,
-            borderRightColor: theme.colors.divider,
-            transform: [{ translateX }],
-          },
-          theme.shadows.floating,
-        ]}
+      <AuroraBackdrop
+        colors={[AURORA.night, AURORA.indigo, '#2A2660']}
+        style={[styles.drawerBrand, { paddingTop: insets.top + 14 }]}
       >
-        <AuroraBackdrop
-          colors={[AURORA.night, AURORA.indigo, '#2A2660']}
-          style={styles.drawerBrand}
-        >
-          <View style={styles.drawerBrandRow}>
-            <LinearGradient
-              colors={[theme.colors.primary, theme.colors.accent]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.drawerLogo}
-            >
-              <Ionicons name="business" size={15} color="#FFFFFF" />
-            </LinearGradient>
-            <View style={styles.flex}>
-              <AppText variant="overline" style={styles.drawerOverline}>
-                TRABZONE
-              </AppText>
-              <AppText variant="caption" style={styles.drawerBrandText}>
-                Otel Yönetimim
-              </AppText>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Menüyü kapat"
-              onPress={onClose}
-              style={styles.drawerClose}
-            >
-              <Ionicons name="close" size={17} color="#FFFFFF" />
-            </Pressable>
+        <View style={styles.drawerBrandRow}>
+          <LinearGradient
+            colors={[theme.colors.primary, theme.colors.accent]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.drawerLogo}
+          >
+            <Ionicons name="business" size={15} color="#FFFFFF" />
+          </LinearGradient>
+          <View style={styles.flex}>
+            <AppText variant="overline" style={styles.drawerOverline}>
+              TRABZONE
+            </AppText>
+            <AppText variant="caption" style={styles.drawerBrandText}>
+              Otel Yönetimim
+            </AppText>
           </View>
-
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Tesis değiştir"
-            onPress={onOpenPicker}
-            style={({ pressed }) => [styles.drawerProperty, { opacity: pressed ? 0.85 : 1 }]}
+            accessibilityLabel="Menüyü kapat"
+            hitSlop={8}
+            onPress={onClose}
+            style={({ pressed }) => [styles.drawerClose, { opacity: pressed ? 0.7 : 1 }]}
           >
-            <PropertyAvatar property={property} size={32} />
-            <View style={styles.flex}>
-              <AppText variant="caption" numberOfLines={1} style={styles.drawerPropertyName}>
-                {property.name}
-              </AppText>
-              <AppText variant="caption" numberOfLines={1} style={styles.drawerPropertyMeta}>
-                {PROPERTY_TYPE_LABELS[property.property_type]}
-                {property.district ? ` · ${property.district}` : ''}
-              </AppText>
-            </View>
-            <Ionicons name="swap-horizontal" size={14} color="rgba(255,255,255,0.75)" />
+            <Ionicons name="close" size={18} color="#FFFFFF" />
           </Pressable>
-
-          <View style={styles.drawerBadges}>
-            <StatusPill
-              label={PROPERTY_STATUS_LABELS[property.status]}
-              color={property.status === 'published' ? '#3DD68C' : '#FBBF24'}
-              background="rgba(255,255,255,0.12)"
-              border="rgba(255,255,255,0.2)"
-              icon={property.status === 'published' ? 'globe-outline' : 'time-outline'}
-            />
-            <StatusPill
-              label={VERIFICATION_STATUS_LABELS[property.verification_status]}
-              color={property.verification_status === 'verified' ? '#3DD68C' : '#FBBF24'}
-              background="rgba(255,255,255,0.12)"
-              border="rgba(255,255,255,0.2)"
-              icon={
-                property.verification_status === 'verified' ? 'shield-checkmark' : 'shield-outline'
-              }
-            />
-          </View>
-        </AuroraBackdrop>
-
-        <View style={[styles.drawerSearchWrap, { borderBottomColor: theme.colors.divider }]}>
-          <View
-            style={[
-              styles.drawerSearch,
-              { backgroundColor: theme.colors.surfaceMuted, borderColor: theme.colors.border },
-            ]}
-          >
-            <Ionicons name="search" size={15} color={theme.colors.textTertiary} />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Menüde ara"
-              placeholderTextColor={theme.colors.textTertiary}
-              autoCorrect={false}
-              returnKeyType="search"
-              style={[
-                styles.drawerSearchInput,
-                theme.typography.caption,
-                { color: theme.colors.text },
-              ]}
-            />
-            {query ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Aramayı temizle"
-                hitSlop={8}
-                onPress={() => setQuery('')}
-              >
-                <Ionicons name="close-circle" size={15} color={theme.colors.textTertiary} />
-              </Pressable>
-            ) : null}
-          </View>
         </View>
 
-        <ScrollView
-          contentContainerStyle={styles.drawerContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Tesis değiştir"
+          onPress={onOpenPicker}
+          style={({ pressed }) => [styles.drawerProperty, { opacity: pressed ? 0.85 : 1 }]}
         >
-          {results ? (
-            results.length === 0 ? (
-              <View style={styles.drawerEmpty}>
-                <Ionicons name="search-outline" size={22} color={theme.colors.textTertiary} />
-                <AppText variant="caption" color="textTertiary">
-                  Eşleşen menü bulunamadı
-                </AppText>
-              </View>
-            ) : (
-              <View style={styles.drawerGroup}>
+          <PropertyAvatar property={property} size={32} />
+          <View style={styles.flex}>
+            <AppText variant="caption" numberOfLines={1} style={styles.drawerPropertyName}>
+              {property.name}
+            </AppText>
+            <AppText variant="caption" numberOfLines={1} style={styles.drawerPropertyMeta}>
+              {PROPERTY_TYPE_LABELS[property.property_type]}
+              {property.district ? ` · ${property.district}` : ''}
+            </AppText>
+          </View>
+          <Ionicons name="swap-horizontal" size={14} color="rgba(255,255,255,0.75)" />
+        </Pressable>
+
+        <View style={styles.drawerBadges}>
+          <StatusPill
+            label={PROPERTY_STATUS_LABELS[property.status]}
+            color={property.status === 'published' ? '#3DD68C' : '#FBBF24'}
+            background="rgba(255,255,255,0.12)"
+            border="rgba(255,255,255,0.2)"
+            icon={property.status === 'published' ? 'globe-outline' : 'time-outline'}
+          />
+          <StatusPill
+            label={VERIFICATION_STATUS_LABELS[property.verification_status]}
+            color={property.verification_status === 'verified' ? '#3DD68C' : '#FBBF24'}
+            background="rgba(255,255,255,0.12)"
+            border="rgba(255,255,255,0.2)"
+            icon={
+              property.verification_status === 'verified' ? 'shield-checkmark' : 'shield-outline'
+            }
+          />
+        </View>
+      </AuroraBackdrop>
+
+      <View style={styles.drawerSearchWrap}>
+        <View
+          style={[
+            styles.drawerSearch,
+            { backgroundColor: theme.colors.surfaceMuted, borderColor: theme.colors.border },
+          ]}
+        >
+          <Ionicons name="search" size={15} color={theme.colors.textTertiary} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Menüde ara"
+            placeholderTextColor={theme.colors.textTertiary}
+            autoCorrect={false}
+            returnKeyType="search"
+            style={[
+              styles.drawerSearchInput,
+              theme.typography.caption,
+              { color: theme.colors.text },
+            ]}
+          />
+          {query ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Aramayı temizle"
+              hitSlop={8}
+              onPress={() => setQuery('')}
+            >
+              <Ionicons name="close-circle" size={15} color={theme.colors.textTertiary} />
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+      {/* Çizgi panelin iki ucuna dayanmaz: kenarlardan içeri çekilir. */}
+      <View style={[styles.drawerSearchRule, { backgroundColor: theme.colors.divider }]} />
+
+      <ScrollView
+        contentContainerStyle={[styles.drawerContent, { paddingBottom: insets.bottom + 24 }]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {results ? (
+          results.length === 0 ? (
+            <View style={styles.drawerEmpty}>
+              <Ionicons name="search-outline" size={22} color={theme.colors.textTertiary} />
+              <AppText variant="caption" color="textTertiary">
+                Eşleşen menü bulunamadı
+              </AppText>
+            </View>
+          ) : (
+            <View
+              style={[
+                styles.drawerGroup,
+                { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+              ]}
+            >
+              <View style={styles.drawerGroupHead}>
+                <View
+                  style={[styles.drawerGroupIcon, { backgroundColor: theme.colors.primarySoft }]}
+                >
+                  <Ionicons name="search" size={11} color={theme.colors.primaryDeep} />
+                </View>
                 <AppText variant="overline" color="textTertiary" style={styles.drawerGroupLabel}>
                   {results.length} SONUÇ
                 </AppText>
-                {results.map(renderItem)}
               </View>
-            )
-          ) : (
-            PMS_GROUPS.map((group) => (
-              <View key={group} style={styles.drawerGroup}>
+              {results.map(renderItem)}
+            </View>
+          )
+        ) : (
+          PMS_GROUPS.map((group) => {
+            const entries = PMS_TABS.filter((entry) => entry.group === group);
+            return (
+              <View
+                key={group}
+                style={[
+                  styles.drawerGroup,
+                  { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                ]}
+              >
                 <View style={styles.drawerGroupHead}>
-                  <Ionicons
-                    name={GROUP_ICONS[group] ?? 'ellipse'}
-                    size={11}
-                    color={theme.colors.textTertiary}
-                  />
+                  <View
+                    style={[styles.drawerGroupIcon, { backgroundColor: theme.colors.primarySoft }]}
+                  >
+                    <Ionicons
+                      name={GROUP_ICONS[group] ?? 'ellipse'}
+                      size={11}
+                      color={theme.colors.primaryDeep}
+                    />
+                  </View>
                   <AppText variant="overline" color="textTertiary" style={styles.drawerGroupLabel}>
                     {group.toUpperCase()}
                   </AppText>
+                  <AppText variant="caption" color="textTertiary" style={styles.drawerGroupCount}>
+                    {entries.length}
+                  </AppText>
                 </View>
-                {PMS_TABS.filter((entry) => entry.group === group).map(renderItem)}
+                {entries.map(renderItem)}
               </View>
-            ))
-          )}
+            );
+          })
+        )}
 
-          <View style={[styles.drawerFooter, { borderTopColor: theme.colors.divider }]}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Tesis yönetim merkezi"
-              onPress={onOpenManagement}
-              style={({ pressed }) => [styles.drawerFooterItem, { opacity: pressed ? 0.75 : 1 }]}
-            >
-              <Ionicons name="apps-outline" size={15} color={theme.colors.textSecondary} />
-              <AppText variant="caption" color="textSecondary" style={styles.flex}>
-                Tesis yönetim merkezi
-              </AppText>
-              <Ionicons name="chevron-forward" size={12} color={theme.colors.textTertiary} />
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Yeni tesis ekle"
-              onPress={onNewProperty}
-              style={({ pressed }) => [styles.drawerFooterItem, { opacity: pressed ? 0.75 : 1 }]}
-            >
-              <Ionicons name="add-circle-outline" size={15} color={theme.colors.primaryDeep} />
-              <AppText variant="caption" color="primaryDeep" style={styles.flex}>
-                Yeni tesis ekle
-              </AppText>
-              <Ionicons name="chevron-forward" size={12} color={theme.colors.textTertiary} />
-            </Pressable>
+        {/* Tesis ekleme yalnızca yönetim merkezinde; menüde tekrarlanmaz. */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Tesis yönetim merkezi"
+          onPress={onOpenManagement}
+          style={({ pressed }) => [
+            styles.drawerFooter,
+            {
+              backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
+              borderColor: theme.colors.border,
+            },
+          ]}
+        >
+          <View style={[styles.drawerFooterIcon, { backgroundColor: theme.colors.accentSoft }]}>
+            <Ionicons name="apps-outline" size={14} color={theme.colors.accent} />
           </View>
-        </ScrollView>
-      </Animated.View>
-    </View>
+          <View style={styles.flex}>
+            <AppText variant="label" color="text">
+              Tesis yönetim merkezi
+            </AppText>
+            <AppText variant="caption" color="textTertiary" numberOfLines={1}>
+              Tüm tesisleri ve başvuruları yönet
+            </AppText>
+          </View>
+          <Ionicons name="chevron-forward" size={13} color={theme.colors.textTertiary} />
+        </Pressable>
+      </ScrollView>
+    </Reanimated.View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { flex: 1, justifyContent: 'center', padding: 16 },
 
-  header: {
+  root: { flex: 1, overflow: 'hidden' },
+  // Soldan kayan panel: X'teki gibi sayfanın üstünde durur, sayfayı iter.
+  panel: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 40,
+    elevation: 40,
+    overflow: 'hidden',
+    borderTopRightRadius: 22,
+    borderBottomRightRadius: 22,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: 'rgba(120, 140, 180, 0.25)',
+    shadowColor: '#050914',
+    shadowOpacity: 0.28,
+    shadowRadius: 24,
+    shadowOffset: { width: 10, height: 0 },
+  },
+
+  header: { paddingBottom: 9 },
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 9,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    zIndex: 5,
+    paddingTop: 8,
+    paddingBottom: 7,
+    width: '100%',
   },
-  headerButton: {
+  headerGhostButton: {
     width: 38,
     height: 38,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.16)',
   },
+  headerGhostButtonActive: { backgroundColor: 'rgba(255,255,255,0.18)' },
   headerLogo: {
     width: 34,
     height: 34,
@@ -1690,11 +1920,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: { flex: 1, minWidth: 0, gap: 1 },
-  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 0 },
-  headerGroupDot: { width: 5, height: 5, borderRadius: 3 },
-  headerOverline: { fontSize: 8, letterSpacing: 1.4, flexShrink: 1 },
-  headerDivider: { fontSize: 8 },
-  headerBrandMini: { fontSize: 8, letterSpacing: 1.1, flexShrink: 1 },
+  headerOverline: { color: 'rgba(255,255,255,0.55)', fontSize: 8, letterSpacing: 1.8 },
+  headerTitleText: { color: '#FFFFFF', fontSize: 15 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 'auto' },
   headerAddButton: {
     width: 38,
@@ -1702,9 +1929,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   burger: { width: 18, height: 14, justifyContent: 'space-between', paddingVertical: 1 },
-  burgerBar: { height: 2, borderRadius: 2, width: '100%' },
+  burgerBar: { height: 2, borderRadius: 2, width: '100%', backgroundColor: '#FFFFFF' },
   propertyPicker: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1712,11 +1940,42 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 7,
     borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.10)',
     borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.16)',
   },
   propertyDot: { width: 6, height: 6, borderRadius: 3 },
-  propertyName: {},
+  propertyName: { color: 'rgba(255,255,255,0.88)', fontSize: 10 },
   hidden: { display: 'none' },
+
+  // Başlığın alt şeridi: grup, açıklama ve yayın durumu tek satırda.
+  headerMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  headerMetaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  headerMetaGroup: { color: 'rgba(255,255,255,0.72)', fontSize: 8, letterSpacing: 1.2 },
+  headerMetaDot: { width: 3, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.3)' },
+  headerMetaText: { flex: 1, minWidth: 0, color: 'rgba(255,255,255,0.55)', fontSize: 9 },
+  headerStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(8,13,26,0.35)',
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  headerStatusDot: { width: 5, height: 5, borderRadius: 3 },
+  headerStatusText: { color: 'rgba(255,255,255,0.82)', fontSize: 9 },
 
   body: { flex: 1, flexDirection: 'row', minHeight: 0 },
   sidebar: { width: 252, borderRightWidth: StyleSheet.hairlineWidth },
@@ -1797,31 +2056,14 @@ const styles = StyleSheet.create({
   mobileTabText: { fontSize: 10 },
   mobileTabDot: { width: 5, height: 5, borderRadius: 3, marginLeft: 1 },
   content: { padding: 14, paddingBottom: 44, gap: 10 },
-  contentHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  contentOverline: { fontSize: 9, letterSpacing: 1.6, marginBottom: 2 },
-  tabStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
+  contentDesktop: {
+    paddingHorizontal: 24,
+    paddingTop: 18,
+    maxWidth: 1280,
+    width: '100%',
+    alignSelf: 'center',
   },
-  tabStatusText: { fontSize: 9 },
-
-  drawerLayer: { zIndex: 30, elevation: 30 },
-  drawerPanel: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderTopRightRadius: 20,
-    borderBottomRightRadius: 20,
-    overflow: 'hidden',
-  },
-  drawerBrand: { paddingHorizontal: 14, paddingTop: 16, paddingBottom: 13, gap: 10 },
+  drawerBrand: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 14, gap: 10 },
   drawerBrandRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   drawerLogo: {
     width: 32,
@@ -1855,36 +2097,66 @@ const styles = StyleSheet.create({
   drawerBadges: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
   drawerSearchWrap: {
     paddingHorizontal: 10,
-    paddingVertical: 9,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingTop: 9,
+    paddingBottom: 9,
   },
+  // Arama alanını içerikten ayıran ince çizgi: iki uçtan içeri çekilmiş.
+  drawerSearchRule: { height: StyleSheet.hairlineWidth, marginHorizontal: 12 },
   drawerSearch: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
     paddingHorizontal: 10,
-    height: 38,
-    borderRadius: 10,
+    height: 40,
+    borderRadius: 11,
     borderWidth: StyleSheet.hairlineWidth,
   },
   drawerSearchInput: { flex: 1, paddingVertical: 0 },
-  drawerContent: { padding: 8, paddingBottom: 28 },
-  drawerGroup: { gap: 1, marginBottom: 10 },
+  drawerContent: { paddingHorizontal: 10, paddingTop: 10, paddingBottom: 28, gap: 9 },
+  /*
+   * Her grup tek bir kart: kendi yüzeyi, yumuşak köşesi ve ince kenarı var.
+   * Satır arası çizgiler kartın içinde kalır, böylece hiçbir çizgi kart
+   * kenarına ya da bir sonraki gruba "yapışmış" görünmez.
+   */
+  drawerGroup: {
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
   drawerGroupHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 9,
-    paddingVertical: 7,
+    gap: 7,
+    paddingHorizontal: 10,
+    paddingTop: 9,
+    paddingBottom: 8,
   },
-  drawerGroupLabel: { fontSize: 8, letterSpacing: 1.3 },
+  drawerGroupIcon: {
+    width: 20,
+    height: 20,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  drawerGroupLabel: { fontSize: 8, letterSpacing: 1.3, flex: 1 },
+  drawerGroupCount: { fontSize: 10, opacity: 0.7 },
   drawerItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 9,
-    paddingHorizontal: 8,
-    paddingVertical: 7,
-    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    minHeight: 48,
+  },
+  drawerItemDivider: { height: StyleSheet.hairlineWidth, marginLeft: 51, marginRight: 10 },
+  drawerActiveBar: {
+    position: 'absolute',
+    left: 0,
+    top: 10,
+    bottom: 10,
+    width: 2.5,
+    borderTopRightRadius: 3,
+    borderBottomRightRadius: 3,
   },
   drawerItemIcon: {
     width: 30,
@@ -1894,14 +2166,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   drawerEmpty: { alignItems: 'center', gap: 7, paddingVertical: 30 },
-  drawerFooter: { borderTopWidth: StyleSheet.hairlineWidth, marginTop: 4, paddingTop: 6, gap: 2 },
-  drawerFooterItem: {
+  drawerFooter: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 9,
+    gap: 9,
+    paddingHorizontal: 10,
     paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  drawerFooterIcon: {
+    width: 30,
+    height: 30,
     borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   propertyRow: {

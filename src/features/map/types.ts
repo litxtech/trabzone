@@ -67,6 +67,11 @@ export type MapPoint = {
   color?: string | null;
   /** `color` verildiğinde etiket yazı rengi. */
   textColor?: string | null;
+  /**
+   * Premium işaret (otel, tesis vb.): koyu zemin, altın çerçeve ve ikon +
+   * etiket birlikte çizilir. `color` verilirse çerçeve rengini geçersiz kılar.
+   */
+  premium?: boolean;
   meta?: Record<string, unknown>;
 };
 

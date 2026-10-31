@@ -13,7 +13,7 @@ import { RideEmptyState } from '@/features/ride/components/RideBits';
 import { RideHeader } from '@/features/ride/components/RideHeader';
 import { RideMapPreview } from '@/features/ride/components/RideMapPreview';
 import { RideOfferCard } from '@/features/ride/components/RideOfferCard';
-import { useRideOffer, useRideSearch } from '@/features/ride/hooks/use-ride';
+import { useRideOffer, useRideOffersRealtime, useRideSearch } from '@/features/ride/hooks/use-ride';
 import type { RideMode, RideScope } from '@/features/ride/types';
 
 type When = 'any' | 'today' | 'tomorrow' | 'week';
@@ -98,6 +98,7 @@ export default function RideSearchScreen() {
   };
 
   const search = useRideSearch(filters);
+  useRideOffersRealtime();
   const offers = useMemo(() => search.data?.items ?? [], [search.data?.items]);
   const ads = useAdPlacement('ride_list', offers.length, { enabled: !mapMode });
   const rows = useMemo(() => interleaveRows(offers, ads.positions, (offer) => offer.id), [ads.positions, offers]);

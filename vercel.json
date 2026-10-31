@@ -55,9 +55,33 @@
     "api/sitemap.js": {
       "memory": 512,
       "maxDuration": 15
+    },
+    "api/liteapi-sync.js": {
+      "memory": 1024,
+      "maxDuration": 60
+    },
+    "api/liteapi-rates.js": {
+      "memory": 512,
+      "maxDuration": 30
+    },
+    "api/liteapi-book.js": {
+      "memory": 512,
+      "maxDuration": 30
     }
   },
   "redirects": [
+    {
+      "source": "/",
+      "has": [{ "type": "host", "value": "admin.trabzoneapp.com" }],
+      "destination": "/admin",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "has": [{ "type": "host", "value": "admin.trabzone.com" }],
+      "destination": "/admin",
+      "permanent": false
+    },
     { "source": "/policy/terms", "destination": "/terms", "permanent": true },
     { "source": "/policy/privacy", "destination": "/privacy", "permanent": true },
     { "source": "/real-estate", "destination": "/marketplace/real-estate", "permanent": true },
@@ -80,6 +104,7 @@
     { "source": "/policy/marketplace-rules", "destination": "/seo/marketplace-rules.html" },
     { "source": "/policy/real-estate-rules", "destination": "/seo/real-estate-rules.html" },
     { "source": "/policy/vehicle-rules", "destination": "/seo/vehicle-rules.html" },
+    { "source": "/policy/accommodation-guest-rights", "destination": "/seo/accommodation-guest-rights.html" },
 
     { "source": "/sitemap-listings.xml", "destination": "/api/sitemap?type=listings" },
     { "source": "/sitemap-hubs.xml", "destination": "/api/sitemap?type=hubs" },

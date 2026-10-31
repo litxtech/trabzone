@@ -138,12 +138,23 @@ const SOCIAL_CLIENT_STALE_MESSAGE =
   'Sosyal giriş için uygulamanın güncel sürümü gerekli. E-posta ile devam edebilirsin.';
 const GOOGLE_NOT_CONFIGURED_MESSAGE =
   'Google ile giriş henüz yapılandırılmadı. E-posta ile devam edebilirsin.';
-const APPLE_IOS_ONLY_MESSAGE =
-  'Apple ile giriş iPhone ve iPad uygulamasında kullanılabilir. E-posta ile devam edebilirsin.';
+const APPLE_NOT_CONFIGURED_MESSAGE =
+  'Apple ile giriş henüz Apple Developer tarafında hazır değil. Services ID ve dönüş adresi tanımlandığında otomatik etkinleşir. E-posta ile devam edebilirsin.';
+
+/**
+ * Supabase PKCE akışının uygulamaya döneceği adres.
+ *
+ * `app.config.ts` içindeki `scheme` ile birebir aynı olmalı ve Supabase'in
+ * yönlendirme izin listesinde (`trabzone://auth/callback`) bulunmalıdır.
+ * `Linking.createURL` geliştirme derlemelerinde sunucu adresini araya
+ * ekleyebildiği için sabit şema kullanılır.
+ */
+const AUTH_REDIRECT_URL = 'trabzone://auth/callback';
 
 type AppleAuthenticationModule = typeof import('expo-apple-authentication');
 type CryptoModule = typeof import('expo-crypto');
 type GoogleSigninModule = typeof import('@react-native-google-signin/google-signin');
+type WebBrowserModule = typeof import('expo-web-browser');
 
 /**
  * Sosyal giriş native modülleri yalnızca gerektiğinde yüklenir. Eski bir
@@ -169,6 +180,193 @@ function providerFailure(error: AuthError): Result<never> {
     return fail(appError('oauth_unavailable', SOCIAL_DISABLED_MESSAGE));
   }
   return toFailure(error);
+}
+
+/**
+ * Yönlendirme adresinden parametre okur.
+ *
+ * React Native'in `URL` polyfill'i her sürümde `searchParams` sunmadığı için
+ * basit bir regex kullanılır; değer hem sorgu hem parça (hash) kısmından gelir.
+ */
+function readUrlParam(url: string, key: string): string | null {
+  const match = new RegExp(`[?&#]${key}=([^&#]*)`).exec(url);
+  const value = match?.[1];
+  if (value === undefined) {
+    return null;
+  }
+  try {
+    return decodeURIComponent(value.replace(/\+/g, ' '));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sağlayıcının sunucuda gerçekten kullanılabilir olduğunu sorar.
+ *
+ * GoTrue, istemci sırrı tanımlanmamış sağlayıcılar için `/authorize` ucunda
+ * `400 missing OAuth secret` döner (yönlendirme yapmadan). Bu durumda
+ * kullanıcıyı boş bir tarayıcı sayfasına göndermek yerine anlaşılır bir mesaj
+ * gösterilir. `skip_http_redirect` desteklenen sürümlerde gereksiz yönlendirmeyi
+ * engeller.
+ */
+async function providerReady(provider: SocialProvider, redirectTo: string): Promise<boolean> {
+  const url =
+    `${env.supabaseUrl}/auth/v1/authorize?provider=${provider}` +
+    `&skip_http_redirect=true&redirect_to=${encodeURIComponent(redirectTo)}`;
+  try {
+    const response = await fetch(url, {
+      headers: { apikey: env.supabasePublishableKey },
+    });
+    return response.ok;
+  } catch {
+    // Ağ hatasında akışı burada kesmeyiz; tarayıcı kendi hatasını gösterir.
+    return true;
+  }
+}
+
+/**
+ * Tarayıcı tabanlı (PKCE) OAuth oturumu açar ve dönen adresi verir.
+ *
+ * iOS'ta `ASWebAuthenticationSession`, Android'de Custom Tabs kullanılır;
+ * uygulama içi gömülü tarayıcı olmadığı için Google/Apple politikalarına
+ * uygundur.
+ */
+async function openOAuthBrowser(url: string): Promise<Result<string>> {
+  const WebBrowser = await loadNativeModule<WebBrowserModule>(() => import('expo-web-browser'));
+  if (!WebBrowser) {
+    return fail(appError('oauth_unavailable', SOCIAL_CLIENT_STALE_MESSAGE));
+  }
+
+  try {
+    const result = await WebBrowser.openAuthSessionAsync(url, AUTH_REDIRECT_URL);
+    if (result.type !== 'success') {
+      return fail(appError('oauth_cancelled'));
+    }
+    return ok(result.url);
+  } catch {
+    return fail(appError('oauth_unavailable', OAUTH_SESSION_MESSAGE));
+  }
+}
+
+/**
+ * Tarayıcıdan dönen yetki kodunu oturuma çevirir.
+ *
+ * `flowId`, `signInWithOAuth`/`linkIdentity` çağrısının ürettiği PKCE akışını
+ * gösterir; aynı anda başka bir akış (ör. şifre sıfırlama) açılmışsa doğru
+ * doğrulayıcının kullanılmasını sağlar.
+ */
+async function completeOAuthCallback(
+  callbackUrl: string,
+  flowId?: string | null,
+): Promise<Result<Session>> {
+  const providerError =
+    readUrlParam(callbackUrl, 'error_description') ?? readUrlParam(callbackUrl, 'error');
+  if (providerError) {
+    // Sağlayıcının gerçek mesajı (ör. Apple'ın "invalid_client") kullanıcıya
+    // gösterilmez ama geliştirmede loglanır; aksi halde yapılandırma hatası
+    // "tekrar dene" mesajının arkasında kayboluyordu.
+    if (__DEV__) {
+      console.warn('[auth] saglayici hatasi:', providerError, callbackUrl);
+    }
+    const code = readUrlParam(callbackUrl, 'error');
+    if (code === 'invalid_client' || code === 'invalid_grant') {
+      return fail(appError('oauth_unavailable', APPLE_NOT_CONFIGURED_MESSAGE));
+    }
+    return fail(appError('oauth_unavailable', OAUTH_SESSION_MESSAGE));
+  }
+
+  const code = readUrlParam(callbackUrl, 'code');
+  if (!code) {
+    if (__DEV__) {
+      console.warn('[auth] callback adresinde kod yok:', callbackUrl);
+    }
+    return fail(appError('oauth_unavailable', OAUTH_SESSION_MESSAGE));
+  }
+
+  const { data, error } = await supabase.auth.exchangeCodeForSession(
+    code,
+    flowId ? { flowId } : undefined,
+  );
+  if (error) {
+    if (__DEV__) {
+      console.warn('[auth] kod degisimi basarisiz:', error.message, error.status);
+    }
+    return providerFailure(error);
+  }
+  if (!data.session) {
+    return fail(appError('oauth_unavailable', OAUTH_SESSION_MESSAGE));
+  }
+  return ok(data.session);
+}
+
+/**
+ * Tarayıcı tabanlı sosyal giriş.
+ *
+ * Android'de Apple SDK'sı yoktur; Google için platform istemci kimliği
+ * tanımlanmadığında da tek çalışan yol budur. Kimlik anahtarı yerine PKCE
+ * yetki kodu kullanıldığı için nonce doğrulaması gerekmez.
+ */
+async function signInWithOAuthBrowser(provider: SocialProvider): Promise<Result<Session>> {
+  const redirectTo = AUTH_REDIRECT_URL;
+  // Apple'ın web akışı sunucuda istemci sırrı ve geçerli bir Services ID ister.
+  // Android'de ve native modülü olmayan iOS derlemelerinde tek yol bu olduğu
+  // için önce hazır olup olmadığı sorulur; eksikse kullanıcı Apple'ın boş hata
+  // sayfası yerine net bir mesaj görür.
+  if (provider === 'apple' && !(await providerReady('apple', redirectTo))) {
+    return fail(appError('oauth_unavailable', APPLE_NOT_CONFIGURED_MESSAGE));
+  }
+
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider,
+    options: {
+      redirectTo,
+      ...(provider === 'google' ? { queryParams: { prompt: 'select_account' } } : {}),
+    },
+  });
+  if (error) {
+    return providerFailure(error);
+  }
+  if (!data.url) {
+    return fail(appError('oauth_unavailable', OAUTH_SESSION_MESSAGE));
+  }
+
+  const opened = await openOAuthBrowser(data.url);
+  if (!opened.ok) {
+    return opened;
+  }
+  if (__DEV__) {
+    // Donusu adresini logla: saglayici hatasi (error=...), kod eksikligi ya da
+    // yanlis sema burada tek bakista gorulur.
+    console.warn('[auth] ' + provider + ' donusu:', opened.data);
+  }
+  return completeOAuthCallback(opened.data, data.flowId);
+}
+
+/**
+ * Mevcut hesaba tarayıcı (PKCE) akışıyla sosyal kimlik bağlar.
+ *
+ * `linkIdentity` sağlayıcı adresini sunucudan alır; Apple/Google yapılandırması
+ * eksikse hata tarayıcı açılmadan döner.
+ */
+async function linkWithOAuthBrowser(provider: SocialProvider): Promise<Result<null>> {
+  const { data, error } = await supabase.auth.linkIdentity({
+    provider,
+    options: { redirectTo: AUTH_REDIRECT_URL },
+  });
+  if (error) {
+    return linkingFailure(error);
+  }
+  if (!data?.url) {
+    return fail(appError('oauth_unavailable', OAUTH_SESSION_MESSAGE));
+  }
+
+  const opened = await openOAuthBrowser(data.url);
+  if (!opened.ok) {
+    return fail<null>(opened.error);
+  }
+  const completed = await completeOAuthCallback(opened.data, data.flowId);
+  return completed.ok ? ok(null) : fail<null>(completed.error);
 }
 
 /**
@@ -245,15 +443,43 @@ type AppleCredential = {
 };
 
 /**
+ * iOS'un native Apple oturum modülünün **bu derlemede** gerçekten bulunup
+ * bulunmadığını söyler.
+ *
+ * `expo-apple-authentication` bağımlılıkta olsa bile native modül
+ * `autolinking` listesinden çıkarılmış eski bir derlemede yer almaz. Bu durumda
+ * paket hata fırlatmaz: sahte bir modül döndürür ve `isAvailableAsync()`
+ * sessizce `false` olur (bkz. expo-apple-authentication/ExpoAppleAuthentication).
+ * Bu `false` değeri "cihaz desteklemiyor" demek değildir; yalnızca modülün
+ * ikili dosyada olmadığını gösterir. Çağıranlar bu ayrımı kullanarak tarayıcı
+ * (PKCE) akışına düşer.
+ */
+async function isAppleNativeAvailable(): Promise<boolean> {
+  if (Platform.OS !== 'ios') {
+    return false;
+  }
+  const AppleAuthentication = await loadNativeModule<AppleAuthenticationModule>(() =>
+    import('expo-apple-authentication'),
+  );
+  if (!AppleAuthentication) {
+    return false;
+  }
+  return AppleAuthentication.isAvailableAsync().catch(() => false);
+}
+
+/**
  * iOS'un native Apple oturumunu açar.
  *
  * Apple kimlik anahtarı (identity token) nonce ile Supabase tarafında
  * doğrulanır; arada tarayıcı ya da web görünümü yoktur. Apple, Android için
  * native bir SDK sunmadığı için bu yöntem yalnızca iOS'ta çalışır.
+ *
+ * Çağırmadan önce `isAppleNativeAvailable()` ile modülün derlemede olduğu
+ * doğrulanmalıdır.
  */
 async function requestAppleCredential(): Promise<Result<AppleCredential>> {
   if (Platform.OS !== 'ios') {
-    return fail(appError('oauth_unavailable', APPLE_IOS_ONLY_MESSAGE));
+    return fail(appError('oauth_unavailable', SOCIAL_CLIENT_STALE_MESSAGE));
   }
 
   const AppleAuthentication = await loadNativeModule<AppleAuthenticationModule>(() =>
@@ -262,11 +488,6 @@ async function requestAppleCredential(): Promise<Result<AppleCredential>> {
   const Crypto = await loadNativeModule<CryptoModule>(() => import('expo-crypto'));
   if (!AppleAuthentication || !Crypto) {
     return fail(appError('oauth_unavailable', SOCIAL_CLIENT_STALE_MESSAGE));
-  }
-
-  const available = await AppleAuthentication.isAvailableAsync().catch(() => false);
-  if (!available) {
-    return fail(appError('oauth_unavailable', APPLE_IOS_ONLY_MESSAGE));
   }
 
   try {
@@ -365,10 +586,25 @@ function persistAppleToken(code: string | null): void {
   void linkAppleIdentity(code);
 }
 
-/** Apple ile giriş; iOS'un native oturum sayfasında, uygulama içinde açılır. */
+/**
+ * Apple ile giriş.
+ *
+ * iOS'ta sistemin native oturum sayfası kullanılır. Apple, Android için native
+ * bir SDK sunmadığı için Android'de aynı yetkilendirme tarayıcıda PKCE akışıyla
+ * yürütülür; sunucuda Apple web yapılandırması (Services ID + anahtar) hazır
+ * olduğunda ek derleme gerekmeden etkinleşir.
+ *
+ * Native modül eski bir derlemede yer almıyorsa (`isAppleNativeAvailable`
+ * false) iOS'ta da tarayıcı akışı kullanılır. Bu sayede kullanıcı, yeni derleme
+ * yüklemek zorunda kalmadan Apple ile giriş yapabilir.
+ */
 export async function signInWithApple(): Promise<Result<Session>> {
   if (!env.enableSocialAuth) {
     return fail(appError('oauth_unavailable', SOCIAL_DISABLED_MESSAGE));
+  }
+
+  if (!(await isAppleNativeAvailable())) {
+    return signInWithOAuthBrowser('apple');
   }
 
   const credential = await requestAppleCredential();
@@ -407,12 +643,8 @@ export async function signInWithApple(): Promise<Result<Session>> {
   return ok(data.session);
 }
 
-/** Google ile giriş; native hesap seçici ile, tarayıcı açılmadan. */
-export async function signInWithGoogle(): Promise<Result<Session>> {
-  if (!env.enableSocialAuth) {
-    return fail(appError('oauth_unavailable', SOCIAL_DISABLED_MESSAGE));
-  }
-
+/** Google kimlik anahtarını Supabase oturumuna çevirir (native akış). */
+async function signInWithNativeGoogle(): Promise<Result<Session>> {
   const token = await requestGoogleIdToken();
   if (!token.ok) {
     return token;
@@ -432,6 +664,31 @@ export async function signInWithGoogle(): Promise<Result<Session>> {
   return ok(data.session);
 }
 
+/**
+ * Google ile giriş.
+ *
+ * Varsayılan yol tarayıcıdır (PKCE): Android'de imzalama parmak izine bağlı
+ * bir OAuth istemcisi, iOS'ta da ayrı bir istemci kimliği gerektirmez. Native
+ * hesap seçici yalnızca `EXPO_PUBLIC_GOOGLE_NATIVE_LOGIN=true` iken ve platform
+ * istemci kimlikleri tanımlıyken denenir; yapılandırma hatasında tarayıcıya
+ * düşülür.
+ */
+export async function signInWithGoogle(): Promise<Result<Session>> {
+  if (!env.enableSocialAuth) {
+    return fail(appError('oauth_unavailable', SOCIAL_DISABLED_MESSAGE));
+  }
+
+  if (env.enableNativeGoogleLogin && env.googleWebClientId) {
+    const native = await signInWithNativeGoogle();
+    // İptal dışındaki yapılandırma hatalarında tarayıcı akışı kullanılır.
+    if (native.ok || native.error.code !== 'oauth_unavailable') {
+      return native;
+    }
+  }
+
+  return signInWithOAuthBrowser('google');
+}
+
 /** Proje ayarinda hesap bağlama kapalıysa anlaşılır mesaj üretir. */
 function linkingFailure(error: AuthError): Result<never> {
   if (error.message.toLowerCase().includes('manual linking')) {
@@ -445,8 +702,10 @@ function linkingFailure(error: AuthError): Result<never> {
 /**
  * Mevcut hesaba sosyal kimlik bağlar.
  *
- * Oturum açma akışıyla aynı native modüller kullanılır; kullanıcı tarayıcıya
- * çıkmaz. Başka bir hesabın anahtarı dönerse Supabase isteği reddeder.
+ * iOS'ta Apple native oturumla, Android'de ise her iki sağlayıcı tarayıcı
+ * (PKCE) akışıyla bağlanır. Native Apple modülü derlemede yoksa girişte olduğu
+ * gibi tarayıcı akışına düşülür. Başka bir hesabın kimliği dönerse Supabase
+ * isteği reddeder.
  */
 export async function linkSocialIdentity(provider: SocialProvider): Promise<Result<null>> {
   if (!env.enableSocialAuth) {
@@ -454,9 +713,12 @@ export async function linkSocialIdentity(provider: SocialProvider): Promise<Resu
   }
 
   if (provider === 'apple') {
+    if (!(await isAppleNativeAvailable())) {
+      return linkWithOAuthBrowser('apple');
+    }
     const credential = await requestAppleCredential();
     if (!credential.ok) {
-      return credential;
+      return fail<null>(credential.error);
     }
     const { error } = await supabase.auth.linkIdentity({
       provider: 'apple',
@@ -470,15 +732,23 @@ export async function linkSocialIdentity(provider: SocialProvider): Promise<Resu
     return ok(null);
   }
 
-  const token = await requestGoogleIdToken();
-  if (!token.ok) {
-    return token;
+  if (env.enableNativeGoogleLogin && env.googleWebClientId) {
+    const token = await requestGoogleIdToken();
+    if (token.ok) {
+      const { error } = await supabase.auth.linkIdentity({
+        provider: 'google',
+        token: token.data,
+      });
+      if (!error) {
+        return ok(null);
+      }
+      if (error.code !== 'provider_disabled' && !/nonce/i.test(error.message)) {
+        return linkingFailure(error);
+      }
+    }
   }
-  const { error } = await supabase.auth.linkIdentity({
-    provider: 'google',
-    token: token.data,
-  });
-  return error ? linkingFailure(error) : ok(null);
+
+  return linkWithOAuthBrowser('google');
 }
 
 export async function getCurrentSession(): Promise<Session | null> {

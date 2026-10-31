@@ -87,9 +87,43 @@ export function formatPercent(value: number | null | undefined, digits = 1): str
 // Tarih
 // -----------------------------------------------------------------------------
 
+/**
+ * `YYYY-MM-DD` (veya saat dilimi ekli `YYYY-MM-DDTHH:mm:ss+03:00`) metnini
+ * yerel saatte gece yarısına denk gelen Date'e çevirir.
+ *
+ * Eskiden `iso.split('-')` kullanılıyordu; tam zaman damgası geldiğinde gün
+ * parçası `"31T00:00:00+03:00"` oluyor ve `NaN` üretip Invalid Date'e yol
+ * açıyordu. Artık yalnızca tarih öneki okunur, geçersiz girdide geçersiz Date
+ * döner ve biçimlendiriciler bunu "—" olarak gösterir.
+ */
 export function isoToDate(iso: string): Date {
-  const [year, month, day] = iso.split('-').map(Number);
-  return new Date(year ?? 1970, (month ?? 1) - 1, day ?? 1);
+  const match =
+    typeof iso === 'string' ? /^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?/.exec(iso.trim()) : null;
+  if (!match) {
+    return new Date(Number.NaN);
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3] ?? 1);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return new Date(Number.NaN);
+  }
+  return new Date(year, month - 1, day);
+}
+
+/** Tarih metnini güvenli biçimlendirir; geçersiz değerde çökmez, "—" döner. */
+function formatIsoDate(
+  iso: string | null | undefined,
+  options: Intl.DateTimeFormatOptions,
+): string {
+  if (!iso) return '—';
+  const date = isoToDate(iso);
+  if (Number.isNaN(date.getTime())) return '—';
+  try {
+    return new Intl.DateTimeFormat(TR, options).format(date);
+  } catch {
+    return '—';
+  }
 }
 
 export function dateToIso(date: Date): string {
@@ -104,6 +138,7 @@ export function todayIso(): string {
 
 export function addDaysIso(iso: string, days: number): string {
   const date = isoToDate(iso);
+  if (Number.isNaN(date.getTime())) return '';
   date.setDate(date.getDate() + days);
   return dateToIso(date);
 }
@@ -111,6 +146,7 @@ export function addDaysIso(iso: string, days: number): string {
 export function nightsBetween(checkIn: string, checkOut: string): number {
   const start = isoToDate(checkIn).getTime();
   const end = isoToDate(checkOut).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
   return Math.max(0, Math.round((end - start) / 86_400_000));
 }
 
@@ -145,28 +181,25 @@ export function endOfMonth(iso: string): string {
 }
 
 export function formatDate(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  return new Intl.DateTimeFormat(TR, { day: '2-digit', month: 'short', year: 'numeric' }).format(isoToDate(iso));
+  return formatIsoDate(iso, { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 export function formatDateLong(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  return new Intl.DateTimeFormat(TR, {
+  return formatIsoDate(iso, {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
     weekday: 'long',
-  }).format(isoToDate(iso));
+  });
 }
 
 export function formatDateShort(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  return new Intl.DateTimeFormat(TR, { day: '2-digit', month: '2-digit' }).format(isoToDate(iso));
+  return formatIsoDate(iso, { day: '2-digit', month: '2-digit' });
 }
 
 export function formatWeekdayShort(iso: string | null | undefined): string {
   if (!iso) return '';
-  return new Intl.DateTimeFormat(TR, { weekday: 'short' }).format(isoToDate(iso));
+  return formatIsoDate(iso, { weekday: 'short' });
 }
 
 export function formatDateTime(value: string | null | undefined): string {
@@ -194,12 +227,13 @@ export function formatRange(checkIn: string | null | undefined, checkOut: string
 }
 
 export function monthLabel(monthIso: string): string {
-  return new Intl.DateTimeFormat(TR, { month: 'long', year: 'numeric' }).format(isoToDate(`${monthIso}-01`));
+  return formatIsoDate(`${(monthIso ?? '').slice(0, 7)}-01`, { month: 'long', year: 'numeric' });
 }
 
 export function relativeTime(value: string | null | undefined): string {
   if (!value) return '';
   const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
   const diff = Date.now() - date.getTime();
   const minutes = Math.round(diff / 60_000);
   if (minutes < 1) return 'şimdi';
@@ -223,25 +257,35 @@ export type StatusTone = {
   short: string;
 };
 
+/**
+ * Takvim renk dili HotelRunner ile aynı:
+ * yeşil = gelen (içeride), kırmızı = gelip giden (çıkış/tamamlandı),
+ * sarı = gelmeyen (no-show), mavi = onaylı/gelecek, gri = iptal.
+ */
 const RESERVATION_TONES: Record<ReservationStatus, StatusTone> = {
   draft: { label: 'Taslak', short: 'TAS', color: '#C3CEE6', background: 'rgba(148,163,184,0.16)', border: 'rgba(148,163,184,0.35)' },
-  pending: { label: 'Onay bekliyor', short: 'BEK', color: '#FBBF24', background: 'rgba(245,158,11,0.18)', border: 'rgba(245,158,11,0.45)' },
+  pending: { label: 'Onay bekliyor', short: 'BEK', color: '#FB923C', background: 'rgba(249,115,22,0.20)', border: 'rgba(251,146,60,0.48)' },
   confirmed: { label: 'Onaylandı', short: 'ONA', color: '#6284FF', background: 'rgba(65,105,245,0.20)', border: 'rgba(98,132,255,0.48)' },
-  declined: { label: 'Reddedildi', short: 'RED', color: '#FF8085', background: 'rgba(229,72,77,0.18)', border: 'rgba(229,72,77,0.45)' },
+  declined: { label: 'Reddedildi', short: 'RED', color: '#8B95A9', background: 'rgba(139,149,169,0.16)', border: 'rgba(139,149,169,0.34)' },
   expired: { label: 'Süresi doldu', short: 'SÜR', color: '#9AA6BF', background: 'rgba(148,163,184,0.14)', border: 'rgba(148,163,184,0.30)' },
   awaiting_checkin: { label: 'Giriş bekleniyor', short: 'GBK', color: '#A78BFA', background: 'rgba(128,87,244,0.20)', border: 'rgba(167,139,250,0.48)' },
-  checked_in: { label: 'Giriş yapıldı', short: 'GİR', color: '#3DD68C', background: 'rgba(22,163,74,0.20)', border: 'rgba(61,214,140,0.48)' },
-  staying: { label: 'Konaklıyor', short: 'KON', color: '#3DD68C', background: 'rgba(22,163,74,0.26)', border: 'rgba(61,214,140,0.55)' },
-  checked_out: { label: 'Çıkış yapıldı', short: 'ÇIK', color: '#7DD3FC', background: 'rgba(14,165,233,0.18)', border: 'rgba(125,211,252,0.45)' },
-  completed: { label: 'Tamamlandı', short: 'TAM', color: '#9AA6BF', background: 'rgba(148,163,184,0.16)', border: 'rgba(148,163,184,0.32)' },
-  cancelled: { label: 'İptal edildi', short: 'İPT', color: '#FF8085', background: 'rgba(229,72,77,0.20)', border: 'rgba(229,72,77,0.45)' },
-  no_show: { label: 'No-show', short: 'NS', color: '#FB7185', background: 'rgba(190,18,60,0.22)', border: 'rgba(251,113,133,0.45)' },
+  checked_in: { label: 'Gelen', short: 'GİR', color: '#3DD68C', background: 'rgba(22,163,74,0.24)', border: 'rgba(61,214,140,0.52)' },
+  staying: { label: 'Konaklıyor', short: 'KON', color: '#3DD68C', background: 'rgba(22,163,74,0.30)', border: 'rgba(61,214,140,0.58)' },
+  checked_out: { label: 'Giden', short: 'ÇIK', color: '#FF6B70', background: 'rgba(229,72,77,0.24)', border: 'rgba(255,107,112,0.55)' },
+  completed: { label: 'Tamamlandı', short: 'TAM', color: '#FF6B70', background: 'rgba(229,72,77,0.18)', border: 'rgba(255,107,112,0.44)' },
+  cancelled: { label: 'İptal edildi', short: 'İPT', color: '#8B95A9', background: 'rgba(139,149,169,0.18)', border: 'rgba(139,149,169,0.38)' },
+  no_show: { label: 'Gelmedi', short: 'GLM', color: '#EAB308', background: 'rgba(234,179,8,0.22)', border: 'rgba(234,179,8,0.52)' },
   change_pending: { label: 'Değişiklik bekliyor', short: 'DEĞ', color: '#C4B5FD', background: 'rgba(128,87,244,0.16)', border: 'rgba(196,181,253,0.40)' },
   disputed: { label: 'Uyuşmazlıkta', short: 'UYU', color: '#FDA4AF', background: 'rgba(244,63,94,0.18)', border: 'rgba(253,164,175,0.42)' },
 };
 
 export function reservationTone(status: ReservationStatus): StatusTone {
   return RESERVATION_TONES[status] ?? RESERVATION_TONES.draft;
+}
+
+/** Takvimde üstü çizili gösterilen (envanteri bloke etmeyen) durumlar. */
+export function reservationIsInactive(status: ReservationStatus): boolean {
+  return status === 'cancelled' || status === 'declined' || status === 'expired';
 }
 
 export function reservationStatusLabel(status: ReservationStatus): string {
@@ -258,7 +302,7 @@ export const RESERVATION_STATUS_OPTIONS: { value: ReservationStatus | 'all'; lab
   { value: 'checked_out', label: 'Çıkış yapıldı' },
   { value: 'completed', label: 'Tamamlandı' },
   { value: 'cancelled', label: 'İptal edildi' },
-  { value: 'no_show', label: 'No-show' },
+  { value: 'no_show', label: 'Gelmedi' },
   { value: 'draft', label: 'Taslak' },
   { value: 'declined', label: 'Reddedildi' },
   { value: 'expired', label: 'Süresi doldu' },

@@ -43,10 +43,7 @@ export function FullScreenGallery({
   }, [media]);
 
   const filtered = useMemo(
-    () =>
-      (category === 'all' ? media : media.filter((item) => item.category === category))
-        .slice()
-        .sort((a, b) => a.sort_order - b.sort_order),
+    () => (category === 'all' ? media : media.filter((item) => item.category === category)),
     [category, media],
   );
 

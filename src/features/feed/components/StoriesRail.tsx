@@ -9,10 +9,18 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { useStoryFeed } from '../hooks/use-stories';
 import type { StoryGroup } from '../services/stories-service';
 
-function StoryTile({ group, onPress }: { group: StoryGroup; onPress: () => void }) {
+function StoryTile({
+  group,
+  onPress,
+  avatarFallback,
+}: {
+  group: StoryGroup;
+  onPress: () => void;
+  avatarFallback?: string | null;
+}) {
   const { theme } = useTheme();
   const name = group.is_me ? 'Hikâyen' : (group.first_name ?? group.username);
-  const avatar = mediaPublicUrl('avatar', group.avatar_path);
+  const avatar = mediaPublicUrl('avatar', group.avatar_path) ?? avatarFallback ?? null;
   const seen = !group.has_unseen;
 
   return (
@@ -133,7 +141,11 @@ export function StoriesRail({
       style={styles.scroll}
     >
       {ownGroup && ownGroup.items.length > 0 ? (
-        <StoryTile group={ownGroup} onPress={() => onOpen(ownGroup, 0)} />
+        <StoryTile
+          group={ownGroup}
+          avatarFallback={ownAvatar}
+          onPress={() => onOpen(ownGroup, 0)}
+        />
       ) : (
         <AddStoryTile onPress={onCreate} avatarUri={ownAvatar} name={ownName} />
       )}

@@ -25,6 +25,8 @@ type Props = {
   neighborhood: string;
   loading?: boolean;
   errorMessage?: string | null;
+  /** Form doğrulamasından gelen kırmızı uyarı (ilçe seçilmediğinde). */
+  validationError?: string | null;
   onRetry?: () => void;
   onChange: (next: LocationSelection) => void;
 };
@@ -45,6 +47,7 @@ export function LocationPicker({
   neighborhood,
   loading = false,
   errorMessage = null,
+  validationError = null,
   onRetry,
   onChange,
 }: Props) {
@@ -103,7 +106,7 @@ export function LocationPicker({
   return (
     <View style={styles.wrap}>
       <View style={styles.labelRow}>
-        <AppText variant="label" color="textSecondary">
+        <AppText variant="label" color={validationError ? 'danger' : 'textSecondary'}>
           İlçe *
         </AppText>
         {loading ? <ActivityIndicator size="small" color={theme.colors.primary} /> : null}
@@ -117,7 +120,12 @@ export function LocationPicker({
           styles.field,
           {
             backgroundColor: theme.colors.inputBackground,
-            borderColor: errorMessage ? theme.colors.danger : theme.colors.border,
+            borderColor: validationError
+              ? theme.colors.danger
+              : errorMessage
+                ? theme.colors.danger
+                : theme.colors.border,
+            borderWidth: validationError ? 1.5 : 1,
             borderRadius: theme.radius.md,
             opacity: pressed ? 0.85 : 1,
           },
@@ -135,6 +143,15 @@ export function LocationPicker({
           <Ionicons name="chevron-down" size={14} color={theme.colors.primaryDeep} />
         </View>
       </Pressable>
+
+      {validationError ? (
+        <View style={styles.validationRow}>
+          <Ionicons name="alert-circle" size={13} color={theme.colors.danger} />
+          <AppText variant="caption" color="danger" style={styles.flex}>
+            {validationError}
+          </AppText>
+        </View>
+      ) : null}
 
       {errorMessage ? (
         <AppText variant="caption" color="danger">
@@ -312,4 +329,5 @@ const styles = StyleSheet.create({
   empty: { paddingVertical: 22 },
   manual: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 12, paddingVertical: 11, borderWidth: 1 },
   amenities: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  validationRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
 });

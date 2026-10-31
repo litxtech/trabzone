@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { AppText, Badge, Button, IconButton, TextField } from '@/components/ui';
-import { AdminSection, AdminToolbar, Pager } from '@/features/admin/components/AdminPage';
+import { AdminSection, AdminToolbar, FilterChips, Pager } from '@/features/admin/components/AdminPage';
 import { useAdminToast } from '@/features/admin/components/AdminToast';
 import { DataTable, type Column } from '@/features/admin/components/DataTable';
 import { ChipSelect } from '@/features/admin/components/news-api/shared';
@@ -19,12 +19,22 @@ const STATUS = {
   archived: { label: 'Arşiv', tone: 'neutral' },
 } as const;
 
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  return `${parts[0][0] ?? ''}${parts.length > 1 ? (parts[parts.length - 1][0] ?? '') : ''}`.toLocaleUpperCase('tr-TR');
+}
+
 export function AdvertisersSection({ canManage }: { canManage: boolean }) {
   const { theme } = useTheme();
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | AdAdvertiser['status']>('all');
   const [offset, setOffset] = useState(0);
   const [editing, setEditing] = useState<AdAdvertiser | 'new' | null>(null);
   const advertisers = useAdAdvertisers(search, offset);
+  const rows = (advertisers.data?.items ?? []).filter(
+    (item) => statusFilter === 'all' || item.status === statusFilter,
+  );
 
   const columns: Column<AdAdvertiser>[] = [
     {
@@ -32,13 +42,25 @@ export function AdvertisersSection({ canManage }: { canManage: boolean }) {
       label: 'Reklamveren',
       width: 2,
       render: (row) => (
-        <View style={styles.flex}>
-          <AppText variant="caption" style={styles.bold} numberOfLines={1}>
-            {row.name}
-          </AppText>
-          <AppText variant="caption" color="textTertiary" numberOfLines={1}>
-            {[row.contact_name, row.contact_email, row.place_name].filter(Boolean).join(' · ') || '—'}
-          </AppText>
+        <View style={styles.nameCell}>
+          <View style={[styles.avatar, { backgroundColor: theme.colors.primarySoft }]}>
+            <AppText variant="caption" color="primaryDeep" style={styles.bold}>
+              {initials(row.name)}
+            </AppText>
+          </View>
+          <View style={styles.flex}>
+            <AppText variant="caption" style={styles.bold} numberOfLines={1}>
+              {row.name}
+            </AppText>
+            <AppText variant="caption" color="textTertiary" numberOfLines={1}>
+              {[row.contact_name, row.contact_email, row.place_name].filter(Boolean).join(' · ') || 'İletişim bilgisi yok'}
+            </AppText>
+            {row.members?.length ? (
+              <AppText variant="caption" color="textTertiary" numberOfLines={1}>
+                {row.members.length} panel kullanıcısı
+              </AppText>
+            ) : null}
+          </View>
         </View>
       ),
     },

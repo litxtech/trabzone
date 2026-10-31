@@ -21,6 +21,7 @@ const routes = {
   '/policy/marketplace-rules': '/seo/marketplace-rules.html',
   '/policy/real-estate-rules': '/seo/real-estate-rules.html',
   '/policy/vehicle-rules': '/seo/vehicle-rules.html',
+  '/policy/accommodation-guest-rights': '/seo/accommodation-guest-rights.html',
 };
 
 const types = {

@@ -1,9 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 
+import { supabase } from '@/services/supabase/client';
 import { unwrap } from '@/utils/result';
 
 import * as ride from '../services/ride-service';
 import type { OfferInput, RecurringInput, SearchFilters, VehicleInput } from '../services/ride-service';
+import type {
+  OfferStatus,
+  RideMyOffer,
+  RideOfferDetail,
+  RideSearchResponse,
+  RideTripDetail,
+} from '../types';
 
 export function useRideProfile(enabled = true) {
   return useQuery({
@@ -743,3 +752,222 @@ export const useRideAdminReviewModerate = () =>
   useAdminMutation((input: { reviewId: string; hide: boolean; reason: string }) =>
     unwrap(ride.adminReviewModerate(input.reviewId, input.hide, input.reason)),
   );
+
+// ---------------------------------------------------------------------------
+// Canlı ilanlar
+// ---------------------------------------------------------------------------
+
+export type RideOfferPatch = {
+  offer_id: string;
+  status: OfferStatus;
+  seats_total?: number;
+  seats_available?: number;
+  depart_at?: string;
+  visibility?: string;
+  updated_at?: string;
+};
+
+const rideLiveListeners = new Set<(patch: RideOfferPatch) => void>();
+let rideLiveChannelReady = false;
+
+function parseRidePatch(input: unknown): RideOfferPatch | null {
+  let value = input;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.offer_id !== 'string' || typeof candidate.status !== 'string') {
+    return null;
+  }
+  return {
+    offer_id: candidate.offer_id,
+    status: candidate.status as OfferStatus,
+    seats_total: typeof candidate.seats_total === 'number' ? candidate.seats_total : undefined,
+    seats_available:
+      typeof candidate.seats_available === 'number' ? candidate.seats_available : undefined,
+    depart_at: typeof candidate.depart_at === 'string' ? candidate.depart_at : undefined,
+    visibility: typeof candidate.visibility === 'string' ? candidate.visibility : undefined,
+    updated_at: typeof candidate.updated_at === 'string' ? candidate.updated_at : undefined,
+  };
+}
+
+/**
+ * `ride-offers` kanalı süreç başına bir kez dinlenir; tüm açık ekranlar aynı
+ * yayını paylaşır. Sunucu yalnızca herkese açık ilanlar için kişisel veri
+ * içermeyen bir patch yayınlar (bkz. 0226 migrasyonu).
+ */
+function ensureRideLiveChannel() {
+  if (rideLiveChannelReady) {
+    return;
+  }
+  rideLiveChannelReady = true;
+  try {
+    supabase
+      .channel('ride-offers')
+      .on('broadcast', { event: 'ride_offer_changed' }, (message: { payload?: unknown }) => {
+        const patch = parseRidePatch(message?.payload);
+        if (patch) {
+          rideLiveListeners.forEach((listener) => listener(patch));
+        }
+      })
+      .subscribe();
+  } catch {
+    // Kanal zaten kurulu olabilir; mevcut dinleyiciler çalışmaya devam eder.
+  }
+}
+
+/**
+ * Görünür ilan kartlarını canlı günceller.
+ *
+ * - Arama sonuçlarında yalnızca ilgili kartın durum/koltuk/kalkış alanları
+ *   değiştirilir; liste ve diğer kartların referansları korunur (titreme yok).
+ * - Üzerinde çalışılan ilan detayı ve sürücünün kendi ilanları kısa bir
+ *   gecikmeyle sunucudan tazelenir; böylece segment bazlı koltuk durumu ve
+ *   kişisel rezervasyon durumu da doğru kalır.
+ */
+export function useRideOffersRealtime(enabled = true) {
+  const client = useQueryClient();
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+    let personalTimer: ReturnType<typeof setTimeout> | null = null;
+    let detailTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const applyPatch = (patch: RideOfferPatch) => {
+      // 1) Arama kartları: yalnızca değişen alanlar.
+      client.setQueriesData<RideSearchResponse>({ queryKey: ['ride', 'search'] }, (old) => {
+        if (!old) {
+          return old;
+        }
+        let changed = false;
+        const items = old.items.map((item) => {
+          if (item.id !== patch.offer_id) {
+            return item;
+          }
+          const status = patch.status ?? item.status;
+          const seatsTotal = patch.seats_total ?? item.seats_total;
+          const seatsAvailable = patch.seats_available ?? item.seats_available;
+          const departAt = patch.depart_at ?? item.depart_at;
+          if (
+            status === item.status &&
+            seatsTotal === item.seats_total &&
+            seatsAvailable === item.seats_available &&
+            departAt === item.depart_at
+          ) {
+            return item;
+          }
+          changed = true;
+          return {
+            ...item,
+            status,
+            seats_total: seatsTotal,
+            seats_available: seatsAvailable,
+            depart_at: departAt,
+          };
+        });
+        return changed ? { ...old, items } : old;
+      });
+
+      // 2) Sürücünün kendi ilan listesi.
+      client.setQueriesData<RideMyOffer[]>({ queryKey: ride.rideQueryKeys.myOffers }, (old) => {
+        if (!old) {
+          return old;
+        }
+        let changed = false;
+        const items = old.map((item) => {
+          if (item.id !== patch.offer_id) {
+            return item;
+          }
+          const status = patch.status ?? item.status;
+          const seatsTotal = patch.seats_total ?? item.seats_total;
+          const departAt = patch.depart_at ?? item.depart_at;
+          if (status === item.status && seatsTotal === item.seats_total && departAt === item.depart_at) {
+            return item;
+          }
+          changed = true;
+          return { ...item, status, seats_total: seatsTotal, depart_at: departAt };
+        });
+        return changed ? items : old;
+      });
+
+      // 3) Açık ilan detayı: durum anında yansır, koltuk ayrıntısı tazelenir.
+      const detailKey = ride.rideQueryKeys.offer(patch.offer_id);
+      const cachedDetail = client.getQueryData<RideOfferDetail>(detailKey);
+      if (cachedDetail) {
+        client.setQueryData<RideOfferDetail>(detailKey, (old) => {
+          if (!old) {
+            return old;
+          }
+          return {
+            ...old,
+            status: patch.status ?? old.status,
+            seats_total: patch.seats_total ?? old.seats_total,
+            depart_at: patch.depart_at ?? old.depart_at,
+            availability:
+              patch.seats_total != null && old.availability
+                ? { ...old.availability, seats_total: patch.seats_total }
+                : old.availability,
+          };
+        });
+        if (!detailTimer) {
+          detailTimer = setTimeout(() => {
+            detailTimer = null;
+            void client.invalidateQueries({ queryKey: detailKey, refetchType: 'active' });
+          }, 700);
+        }
+      }
+
+      // 3b) Açık yolculuk takip ekranı: rezervasyonun ilan durumu anında değişir.
+      client.setQueriesData<RideTripDetail>({ queryKey: ['ride', 'trip'] }, (old) => {
+        if (!old || old.reservation.offer_id !== patch.offer_id) {
+          return old;
+        }
+        if (old.reservation.offer_status === patch.status) {
+          return old;
+        }
+        return {
+          ...old,
+          reservation: { ...old.reservation, offer_status: patch.status },
+        };
+      });
+
+      // 4) Kişisel rezervasyon durumu değişmiş olabilir. Yalnızca bu ilanda
+      //    rezervasyonu olan kullanıcı ya da ilanın sürücüsü için tazele.
+      let personal = Boolean(cachedDetail?.is_driver);
+      if (!personal) {
+        const searches = client.getQueriesData<RideSearchResponse>({ queryKey: ['ride', 'search'] });
+        personal = searches.some(([, data]) =>
+          Boolean(data?.items.some((item) => item.id === patch.offer_id && item.my_reservation_id)),
+        );
+      }
+      if (personal && !personalTimer) {
+        personalTimer = setTimeout(() => {
+          personalTimer = null;
+          void client.invalidateQueries({ queryKey: ['ride', 'search'] });
+          void client.invalidateQueries({ queryKey: ride.rideQueryKeys.myOffers });
+          void client.invalidateQueries({ queryKey: ['ride', 'offer'], refetchType: 'active' });
+        }, 900);
+      }
+    };
+
+    rideLiveListeners.add(applyPatch);
+    ensureRideLiveChannel();
+    return () => {
+      rideLiveListeners.delete(applyPatch);
+      if (personalTimer) {
+        clearTimeout(personalTimer);
+      }
+      if (detailTimer) {
+        clearTimeout(detailTimer);
+      }
+    };
+  }, [client, enabled]);
+}

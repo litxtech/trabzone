@@ -130,6 +130,15 @@ export const PUBLIC_LEGAL_PAGES: LegalCatalogItem[] = [
     description: 'Araç ilanlarında doğru bilgi, belge ve güvenlik kuralları.',
     category: 'Platform Kuralları',
   },
+  {
+    slug: 'accommodation-guest-rights',
+    path: '/policy/accommodation-guest-rights',
+    title: 'Misafir Hakları, Eşit Konaklama ve İşletmeci Yükümlülükleri Politikası',
+    shortTitle: 'Misafir Hakları',
+    description:
+      'Konaklama işletmelerinin misafirlere karşı yükümlülükleri, eşit hizmet ve zorunlu işletmeci kabul beyanı.',
+    category: 'Platform Kuralları',
+  },
 ];
 
 export function findPublicLegalPage(slug: string | undefined) {

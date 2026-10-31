@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { Linking, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText, Badge, Button, TextField } from '@/components/ui';
 import { AdminPage, AdminSection, FilterChips } from '@/features/admin/components/AdminPage';
@@ -10,10 +10,19 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { ModalSheet } from '@/features/accommodation/components/AccommodationUI';
 import {
   useAdminProperties,
+  useAdminPropertyClaims,
+  useLiteApiAdminStatus,
+  useLiteApiSync,
+  useReviewAdminPropertyClaim,
   useReviewProperty,
 } from '@/features/accommodation/hooks/use-accommodation';
 import { accommodationDocumentUrl } from '@/features/accommodation/services/accommodation-media-service';
-import type { AdminProperty } from '@/features/accommodation/types';
+import type {
+  AdminProperty,
+  AdminPropertyClaim,
+  LiteApiAdminStatus,
+  LiteApiSyncResult,
+} from '@/features/accommodation/types';
 import {
   PROPERTY_STATUS_LABELS,
   PROPERTY_TYPE_LABELS,
@@ -72,6 +81,8 @@ export default function AdminAccommodationScreen() {
         <StatCard label="Askıda" value={counts?.suspended ?? 0} tone={theme.colors.textTertiary} icon="pause-circle-outline" />
       </View>
 
+      <LiteApiAdminPanel enabled={Boolean(me.data?.is_admin)} />
+
       <FilterChips
         options={FILTERS.map((filter) => ({
           ...filter,
@@ -121,6 +132,339 @@ export default function AdminAccommodationScreen() {
     </AdminPage>
   );
 }
+
+function LiteApiAdminPanel({ enabled }: { enabled: boolean }) {
+  const { theme } = useTheme();
+  const statusQuery = useLiteApiAdminStatus(enabled);
+  const claims = useAdminPropertyClaims('pending', enabled);
+  const sync = useLiteApiSync();
+  const reviewClaim = useReviewAdminPropertyClaim();
+  const [progress, setProgress] = useState<string | null>(null);
+  const [summary, setSummary] = useState<{
+    mode: 'test' | 'full';
+    inserted: number;
+    updated: number;
+    linked: number;
+    skipped: number;
+    failed: number;
+    scanned: number;
+    batches: number;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [claimNote, setClaimNote] = useState('');
+  const [claimError, setClaimError] = useState<string | null>(null);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+
+  if (!enabled) return null;
+
+  const status: LiteApiAdminStatus | undefined = statusQuery.data;
+  const provider =
+    status?.provider && 'active' in status.provider && typeof status.provider.active === 'boolean'
+      ? status.provider
+      : null;
+  const lastRun =
+    status?.last_run && 'id' in status.last_run && typeof status.last_run.id === 'string'
+      ? status.last_run
+      : null;
+  const pendingClaims = claims.data?.items ?? [];
+
+  /**
+   * Tam senkron tek istekte bitmez: sunucu sayfa sayfa ilerler ve
+   * `hasMore` döner. Yönetici tetiklediğinde partiler sırayla yürütülür.
+   */
+  const runSync = async (mode: 'test' | 'full') => {
+    setError(null);
+    setSummary(null);
+    setProgress(mode === 'test' ? '10 otel test taraması başlatılıyor…' : 'Trabzon taraması başlatılıyor…');
+    let cursor = 0;
+    let runId: string | null = null;
+    let phase: 'city' | 'radius' = 'city';
+    let batches = 0;
+    const totals = { inserted: 0, updated: 0, linked: 0, skipped: 0, failed: 0, scanned: 0 };
+    const maxBatches = mode === 'test' ? 1 : 80;
+    try {
+      while (batches < maxBatches) {
+        const result: LiteApiSyncResult = await sync.mutateAsync({
+          mode,
+          cursor,
+          phase,
+          runId,
+          limit: mode === 'test' ? 10 : 25,
+        });
+        batches += 1;
+        totals.inserted += result.counts.inserted;
+        totals.updated += result.counts.updated;
+        totals.linked += result.counts.linked;
+        totals.skipped += result.counts.skipped;
+        totals.failed += result.counts.failed;
+        totals.scanned += result.counts.scanned;
+        setProgress(
+          `${batches}. parti · ${result.phase} · taranan ${totals.scanned} · eklenen ${totals.inserted} · güncellenen ${totals.updated}`,
+        );
+        if (!result.hasMore) {
+          runId = result.runId;
+          break;
+        }
+        runId = result.runId;
+        cursor = result.nextCursor;
+        phase = result.nextPhase === 'radius' ? 'radius' : 'city';
+      }
+      setSummary({ mode, ...totals, batches });
+      if (runId) setProgress(`Senkron tamamlandı · çalışma ${runId.slice(0, 8)}…`);
+      void statusQuery.refetch();
+      void claims.refetch();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Senkronizasyon başarısız.');
+      setProgress(null);
+    }
+  };
+
+  const decideClaim = async (claim: AdminPropertyClaim, approve: boolean) => {
+    setClaimError(null);
+    setReviewingId(claim.id);
+    try {
+      await reviewClaim.mutateAsync({
+        claimId: claim.id,
+        approve,
+        note: claimNote.trim() || null,
+      });
+      setClaimNote('');
+      void claims.refetch();
+    } catch (cause) {
+      setClaimError(cause instanceof Error ? cause.message : 'Sahiplenme talebi işlenemedi.');
+    } finally {
+      setReviewingId(null);
+    }
+  };
+
+  return (
+    <>
+      <AdminSection
+        title="LiteAPI otel senkronizasyonu"
+        subtitle="Yalnızca Trabzon il sınırı doğrulanan tesisler aktarılır. Manuel tesisler korunur; mükerrer kayıt oluşturulmaz."
+        action={
+          <Badge
+            label={provider?.active ? 'Sağlayıcı açık' : 'Sağlayıcı kapalı'}
+            tone={provider?.active ? 'success' : 'neutral'}
+          />
+        }
+      >
+        <View style={styles.stats}>
+          <StatCard
+            label="API tesisi"
+            value={status?.stats.external_total ?? 0}
+            tone={theme.colors.primary}
+            icon="cloud-download-outline"
+          />
+          <StatCard
+            label="Yayında"
+            value={status?.stats.external_published ?? 0}
+            tone={theme.colors.success}
+            icon="checkmark-circle-outline"
+          />
+          <StatCard
+            label="Sahiplenilen"
+            value={status?.stats.claimed ?? 0}
+            tone={theme.colors.accent}
+            icon="shield-checkmark-outline"
+          />
+          <StatCard
+            label="Bekleyen talep"
+            value={status?.stats.pending_claims ?? 0}
+            tone={theme.colors.warning}
+            icon="hourglass-outline"
+          />
+        </View>
+
+        <View style={styles.syncMetaGrid}>
+          <View style={[styles.syncMetaCell, { borderColor: theme.colors.border }]}>
+            <AppText variant="caption" color="textTertiary">Manuel tesis</AppText>
+            <AppText variant="bodyStrong">{status?.stats.manual_total ?? '—'}</AppText>
+          </View>
+          <View style={[styles.syncMetaCell, { borderColor: theme.colors.border }]}>
+            <AppText variant="caption" color="textTertiary">Booking anahtarı</AppText>
+            <AppText variant="bodyStrong" color={provider?.booking_enabled ? 'success' : 'textSecondary'}>
+              {provider?.booking_enabled ? 'Açık' : 'Kapalı'}
+            </AppText>
+          </View>
+          <View style={[styles.syncMetaCell, { borderColor: theme.colors.border }]}>
+            <AppText variant="caption" color="textTertiary">Tesiste ödeme</AppText>
+            <AppText variant="bodyStrong" color={provider?.property_pay_enabled ? 'success' : 'textSecondary'}>
+              {provider?.property_pay_enabled ? 'Destekli' : 'Kapalı'}
+            </AppText>
+          </View>
+          <View style={[styles.syncMetaCell, { borderColor: theme.colors.border }]}>
+            <AppText variant="caption" color="textTertiary">Komisyon</AppText>
+            <AppText variant="bodyStrong">%{provider?.commission_rate ?? 0}</AppText>
+          </View>
+        </View>
+
+        <View style={[styles.syncBanner, { backgroundColor: theme.colors.warningSoft }]}>
+          <Ionicons name="lock-closed-outline" size={14} color={theme.colors.warning} />
+          <AppText variant="caption" color="textSecondary" style={styles.flex}>
+            Canlı rezervasyon varsayılan olarak kapalıdır. Açmak için veritabanı anahtarına ek olarak sunucuda
+            LITEAPI_BOOKING_ENABLED ve LITEAPI_BOOKING_OWNER_APPROVED bayrakları gerekir.
+          </AppText>
+        </View>
+
+        <View style={styles.syncActions}>
+          <Button
+            label="10 otel test senkronu"
+            size="sm"
+            fullWidth={false}
+            loading={sync.isPending && progress?.startsWith('10 otel') === true}
+            disabled={sync.isPending}
+            onPress={() => void runSync('test')}
+          />
+          <Button
+            label="Trabzon tam senkron"
+            size="sm"
+            variant="outline"
+            fullWidth={false}
+            disabled={sync.isPending}
+            onPress={() => void runSync('full')}
+          />
+        </View>
+
+        {progress ? (
+          <View style={[styles.syncProgress, { borderColor: theme.colors.border }]}>
+            {sync.isPending ? <ActivityIndicator size="small" color={theme.colors.primary} /> : null}
+            <AppText variant="caption" color="textSecondary" style={styles.flex}>
+              {progress}
+            </AppText>
+          </View>
+        ) : null}
+
+        {error ? (
+          <AppText variant="caption" color="danger">
+            {error}
+          </AppText>
+        ) : null}
+
+        {summary ? (
+          <View style={[styles.syncBanner, { backgroundColor: theme.colors.successSoft }]}>
+            <Ionicons name="checkmark-circle-outline" size={14} color={theme.colors.success} />
+            <AppText variant="caption" color="textSecondary" style={styles.flex}>
+              {summary.mode === 'test' ? 'Test' : 'Tam senkron'} · {summary.batches} parti · taranan{' '}
+              {summary.scanned} · eklenen {summary.inserted} · güncellenen {summary.updated} · bağlanan{' '}
+              {summary.linked} · atlanan {summary.skipped} · hata {summary.failed}
+            </AppText>
+          </View>
+        ) : null}
+
+        {lastRun ? (
+          <View style={[styles.syncRun, { borderTopColor: theme.colors.divider }]}>
+            <View style={styles.rowBetween}>
+              <AppText variant="caption" color="textSecondary">
+                Son senkron · {lastRun.mode === 'full' ? 'tam' : 'test'}
+              </AppText>
+              <Badge
+                label={SYNC_STATUS_LABELS[lastRun.status ?? 'running'] ?? 'Bilinmiyor'}
+                tone={lastRun.status === 'success' ? 'success' : lastRun.status === 'failed' ? 'danger' : 'warning'}
+              />
+            </View>
+            <AppText variant="caption" color="textTertiary">
+              {lastRun.started_at ? formatDate(lastRun.started_at.slice(0, 10)) : '—'} · taranan{' '}
+              {lastRun.scanned ?? 0} · eklenen {lastRun.inserted ?? 0} · güncellenen {lastRun.updated ?? 0} ·
+              atlanan {lastRun.skipped ?? 0} · hata {lastRun.failed ?? 0}
+              {lastRun.triggered_by_label ? ` · ${lastRun.triggered_by_label}` : ''}
+            </AppText>
+            {lastRun.error ? (
+              <AppText variant="caption" color="danger">
+                {lastRun.error}
+              </AppText>
+            ) : null}
+          </View>
+        ) : null}
+
+        {status && status.recent_errors.length > 0 ? (
+          <View style={[styles.syncRun, { borderTopColor: theme.colors.divider }]}>
+            <AppText variant="caption" color="textSecondary">Son hatalar</AppText>
+            {status.recent_errors.slice(0, 6).map((entry) => (
+              <AppText key={entry.id} variant="caption" color="textTertiary" numberOfLines={2}>
+                {entry.hotel_name ?? entry.external_id ?? 'Bilinmeyen tesis'} · {entry.code}
+                {entry.message ? ` · ${entry.message}` : ''}
+              </AppText>
+            ))}
+          </View>
+        ) : null}
+      </AdminSection>
+
+      <AdminSection
+        title="Sahiplenme talepleri"
+        subtitle="API kaynaklı tesisin işletmeci tarafından sahiplenilmesi. Onaylanınca tesis PMS'e bağlanır."
+        action={<Badge label={`${pendingClaims.length} bekliyor`} tone={pendingClaims.length > 0 ? 'warning' : 'neutral'} />}
+      >
+        {claims.isLoading ? (
+          <AppText variant="caption" color="textTertiary">Talepler yükleniyor…</AppText>
+        ) : claims.isError ? (
+          <AppText variant="caption" color="danger">
+            {claims.error instanceof Error ? claims.error.message : 'Talepler yüklenemedi.'}
+          </AppText>
+        ) : pendingClaims.length === 0 ? (
+          <AppText variant="caption" color="textTertiary">
+            Onay bekleyen sahiplenme talebi yok.
+          </AppText>
+        ) : (
+          <>
+            <TextField
+              label="Karar notu (opsiyonel)"
+              value={claimNote}
+              onChangeText={setClaimNote}
+              placeholder="Onay/ret gerekçesi"
+            />
+            {claimError ? (
+              <AppText variant="caption" color="danger">
+                {claimError}
+              </AppText>
+            ) : null}
+            {pendingClaims.map((claim) => (
+              <View key={claim.id} style={[styles.claimRow, { borderColor: theme.colors.border }]}>
+                <View style={styles.flex}>
+                  <AppText variant="bodyStrong" numberOfLines={1}>{claim.property.name}</AppText>
+                  <AppText variant="caption" color="textTertiary" numberOfLines={1}>
+                    {claim.property.district ?? 'Trabzon'}
+                    {claim.property.external_id ? ` · ${claim.property.external_id}` : ''} ·{' '}
+                    {claim.user.display_name ?? claim.user.username ?? 'İşletmeci'}
+                  </AppText>
+                  {claim.note ? (
+                    <AppText variant="caption" color="textSecondary" numberOfLines={2}>{claim.note}</AppText>
+                  ) : null}
+                  <AppText variant="caption" color="textTertiary">{formatDate(claim.created_at.slice(0, 10))}</AppText>
+                </View>
+                <View style={styles.claimActions}>
+                  <Button
+                    label="Onayla"
+                    size="sm"
+                    fullWidth={false}
+                    loading={reviewingId === claim.id && reviewClaim.isPending}
+                    disabled={reviewClaim.isPending}
+                    onPress={() => void decideClaim(claim, true)}
+                  />
+                  <Button
+                    label="Reddet"
+                    size="sm"
+                    variant="danger"
+                    fullWidth={false}
+                    disabled={reviewClaim.isPending}
+                    onPress={() => void decideClaim(claim, false)}
+                  />
+                </View>
+              </View>
+            ))}
+          </>
+        )}
+      </AdminSection>
+    </>
+  );
+}
+
+const SYNC_STATUS_LABELS: Record<string, string> = {
+  running: 'Çalışıyor',
+  success: 'Başarılı',
+  partial: 'Kısmi',
+  failed: 'Başarısız',
+};
 
 function StatCard({
   label,
@@ -185,6 +529,7 @@ function PropertyReviewCard({ property, onPress }: { property: AdminProperty; on
 
       <View style={styles.metaRow}>
         <Badge label={PROPERTY_STATUS_LABELS[property.status]} tone="neutral" />
+        {property.source === 'liteapi' ? <Badge label="LiteAPI" tone="primary" /> : null}
         <Badge
           label={VERIFICATION_STATUS_LABELS[property.verification_status]}
           tone={property.verification_status === 'verified' ? 'success' : 'warning'}
@@ -417,4 +762,35 @@ const styles = StyleSheet.create({
   rejectBox: { flexDirection: 'row', alignItems: 'center', gap: 7, padding: 9, borderRadius: 8 },
   errorBox: { padding: 9, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth },
   footer: { flexDirection: 'row', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  syncMetaGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  syncMetaCell: {
+    flex: 1,
+    minWidth: 130,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    padding: 9,
+    gap: 2,
+  },
+  syncBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, padding: 9, borderRadius: 9 },
+  syncActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  syncProgress: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 9,
+    padding: 9,
+  },
+  syncRun: { gap: 4, borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 8 },
+  claimRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    padding: 10,
+  },
+  claimActions: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
 });

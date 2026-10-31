@@ -1,12 +1,25 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { memo, useCallback, useMemo, useState } from 'react';
+import {
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppImage, AppText, Screen, TextField } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useRouter } from '@/utils/router';
 
+import {
+  AccommodationMenu,
+  type AccommodationMenuItem,
+} from '@/features/accommodation/components/AccommodationMenu';
 import {
   Chip,
   EmptyState,
@@ -60,14 +73,31 @@ const SORT_LABELS: Record<PublicSearchState['sort'], string> = {
   new: 'Yeni eklenen',
 };
 
+/**
+ * Izgara kademeli çizilir: ilk açılışta yalnızca ilk kartlar bağlanır.
+ * Böylece 40 tesisin tüm kapak fotoğrafları aynı anda indirilmez/çözülmez;
+ * kaydırdıkça (veya "Daha fazla" ile) yenileri eklenir.
+ */
+const INITIAL_VISIBLE_CARDS = 12;
+const CARD_LOAD_STEP = 12;
+
 export default function KonaklamaHubScreen() {
   const { theme, scheme } = useTheme();
   const router = useRouter();
   const layout = useAccommodationLayout();
-  const [search, setSearch] = useState('');
+  const insets = useSafeAreaInsets();
+  // Arama kutusunun metni kendi bileşeninde tutulur; her tuş vuruşunda tüm
+  // vitrin (ızgara + raylar) yeniden çizilmesin diye yalnızca gönderilen
+  // sorgu üst bileşene taşınır.
+  const [searchResetKey, setSearchResetKey] = useState(0);
   const [query, setQuery] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
   const [filters, setFilters] = useState<PublicSearchState>(DEFAULT_SEARCH_STATE);
+  const [gridWidth, setGridWidth] = useState(0);
+  // Kademeli çizim penceresi. Sonuç kümesi değiştiğinde sayaç ayrı bir effect
+  // ile sıfırlanmaz; veri sürümü eşleşmediğinde pencere doğrudan baştan
+  // hesaplanır (React'in önerdiği "effect'siz reset" deseni).
+  const [cardWindow, setCardWindow] = useState({ version: 0, count: INITIAL_VISIBLE_CARDS });
 
   const context = useAccommodationContext();
   const publicFilters = usePublicFilters();
@@ -132,19 +162,119 @@ export default function KonaklamaHubScreen() {
 
   const districts = publicFilters.data?.districts ?? [];
   const selectedDistrict = districts.find((district) => district.id === filters.districtId) ?? null;
-  const horizontalPadding = layout.isDesktop ? 28 : theme.layout.screenPadding;
+  const horizontalPadding = layout.pagePadding;
+  const unreadMessages = ownedProperties.reduce((total, item) => total + item.unread_messages, 0);
+
+  const menuItems = useMemo<AccommodationMenuItem[]>(() => {
+    const hasProperties = ownedProperties.length > 0;
+    const summary = [
+      pendingReservations > 0 ? `${pendingReservations} onay` : null,
+      unreadMessages > 0 ? `${unreadMessages} mesaj` : null,
+      pendingTasks > 0 ? `${pendingTasks} görev` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+    return [
+      {
+        key: 'reservations',
+        label: 'Rezervasyonlarım',
+        description: 'Yaklaşan konaklamalar',
+        icon: 'calendar-outline',
+      },
+      {
+        key: 'new-property',
+        label: hasProperties ? 'Yeni tesis' : 'Otelimi ekle',
+        description: 'Ücretsiz başvuru',
+        icon: 'add-circle-outline',
+      },
+      {
+        key: 'manage',
+        label: 'Otel yönetimim',
+        description: hasProperties ? summary || 'Panel ve takvim' : 'Tesisini ekleyip yönet',
+        icon: 'briefcase-outline',
+        badge: pendingReservations,
+      },
+      {
+        key: 'map',
+        label: 'Haritada gör',
+        description: 'Konuma göre keşfet',
+        icon: 'map-outline',
+      },
+    ];
+  }, [ownedProperties.length, pendingReservations, unreadMessages, pendingTasks]);
+
+  const gridCellStyle = useMemo(
+    () =>
+      gridWidth > 0
+        ? { width: Math.floor((gridWidth - GRID_GAP * (layout.columns - 1)) / layout.columns) }
+        : gridItemWidth(layout.columns),
+    [gridWidth, layout.columns],
+  );
+
+  const dataVersion = results.dataUpdatedAt;
+  const visibleCards =
+    cardWindow.version === dataVersion ? cardWindow.count : INITIAL_VISIBLE_CARDS;
+
+  const showMoreCards = useCallback(() => {
+    setCardWindow((current) => {
+      const base = current.version === dataVersion ? current.count : INITIAL_VISIBLE_CARDS;
+      if (base >= properties.length) {
+        return current;
+      }
+      return { version: dataVersion, count: Math.min(base + CARD_LOAD_STEP, properties.length) };
+    });
+  }, [dataVersion, properties.length]);
+
+  const openProperty = useCallback(
+    (propertyId: string) => router.push(`/konaklama/${propertyId}` as never),
+    [router],
+  );
+
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+      const remaining = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+      if (remaining < 700) {
+        showMoreCards();
+      }
+    },
+    [showMoreCards],
+  );
+
+  const handleMenuSelect = (key: string) => {
+    if (key === 'reservations') {
+      router.push('/konaklama/rezervasyonlarim' as never);
+      return;
+    }
+    if (key === 'new-property') {
+      router.push('/konaklama/otel-ekle' as never);
+      return;
+    }
+    if (key === 'manage') {
+      router.push((ownedProperties.length > 0 ? '/konaklama/yonetim' : '/konaklama/otel-ekle') as never);
+      return;
+    }
+    if (key === 'map') {
+      router.push('/konaklama/harita' as never);
+    }
+  };
 
   const resetFilters = () => {
     setFilters(DEFAULT_SEARCH_STATE);
-    setSearch('');
     setQuery('');
+    // Arama kutusu kendi metnini tuttuğu için anahtarı değiştirerek sıfırlanır.
+    setSearchResetKey((current) => current + 1);
   };
 
   return (
     <Screen
       scroll
-      edges={['top', 'left', 'right']}
+      // Üst safe-area'yı Aurora bloğu boyasın: header "ayrı şerit" gibi durmasın.
+      edges={['left', 'right']}
       padded={false}
+      onScroll={handleScroll}
+      scrollEventThrottle={120}
       refreshControl={
         <RefreshControl
           refreshing={results.isRefetching && !results.isLoading}
@@ -154,7 +284,7 @@ export default function KonaklamaHubScreen() {
       }
     >
       <AuroraBackdrop style={styles.hero} colors={[AURORA.night, '#101A33', AURORA.violet]}>
-        <View style={[styles.heroInner, { paddingHorizontal: horizontalPadding }]}>
+        <View style={[styles.heroInner, { paddingHorizontal: horizontalPadding, paddingTop: insets.top + 10 }]}>
           <View style={styles.heroTop}>
             <Pressable
               accessibilityRole="button"
@@ -173,14 +303,12 @@ export default function KonaklamaHubScreen() {
                 Trabzon · Karadeniz
               </AppText>
             </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Haritada otelleri gör"
-              onPress={() => router.push('/konaklama/harita' as never)}
-              style={styles.heroIcon}
-            >
-              <Ionicons name="map-outline" size={20} color="#FFFFFF" />
-            </Pressable>
+            <AccommodationMenu
+              items={menuItems}
+              onSelect={handleMenuSelect}
+              hasAlert={pendingReservations > 0 || pendingTasks > 0}
+              edgePadding={horizontalPadding}
+            />
           </View>
 
           <View style={[styles.heroGrid, layout.isDesktop ? styles.heroGridDesktop : null]}>
@@ -251,66 +379,54 @@ export default function KonaklamaHubScreen() {
             ]}
           >
             <View style={[styles.searchRow, layout.isDesktop ? styles.searchRowDesktop : null]}>
-              <View style={styles.searchField}>
-                <TextField
-                  value={search}
-                  onChangeText={setSearch}
-                  placeholder="Tesis, bölge veya mahalle ara"
-                  leftIcon="search-outline"
-                  returnKeyType="search"
-                  onSubmitEditing={() => setQuery(search.trim())}
-                  rightSlot={
-                    search ? (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Aramayı temizle"
-                        onPress={() => {
-                          setSearch('');
-                          setQuery('');
-                        }}
-                      >
-                        <Ionicons name="close-circle" size={18} color={theme.colors.textTertiary} />
-                      </Pressable>
-                    ) : null
-                  }
-                />
+              <View style={[styles.searchField, layout.isDesktop ? null : styles.searchFieldFull]}>
+                <SearchField key={searchResetKey} onSubmit={setQuery} />
               </View>
 
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Tarih seç"
-                onPress={() => setFilterOpen(true)}
-                style={[styles.searchCell, { backgroundColor: theme.colors.inputBackground, borderColor: theme.colors.border }]}
-              >
-                <Ionicons name="calendar-outline" size={16} color={theme.colors.primaryDeep} />
-                <View style={styles.flex}>
-                  <AppText variant="caption" color="textTertiary" style={styles.searchLabel}>
-                    Giriş – Çıkış
-                  </AppText>
-                  <AppText variant="caption" color="text" numberOfLines={1}>
-                    {filters.checkIn
-                      ? `${formatDate(filters.checkIn)} → ${filters.checkOut ? formatDate(filters.checkOut) : '—'}`
-                      : 'Tarih ekle'}
-                  </AppText>
-                </View>
-              </Pressable>
+              <View style={styles.searchCellGroup}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Tarih seç"
+                  onPress={() => setFilterOpen(true)}
+                  style={[
+                    styles.searchCell,
+                    styles.searchCellDate,
+                    { backgroundColor: theme.colors.inputBackground, borderColor: theme.colors.border },
+                  ]}
+                >
+                  <Ionicons name="calendar-outline" size={16} color={theme.colors.primaryDeep} />
+                  <View style={styles.flex}>
+                    <AppText variant="caption" color="textTertiary" style={styles.searchLabel}>
+                      Giriş – Çıkış
+                    </AppText>
+                    <AppText variant="caption" color="text" numberOfLines={1}>
+                      {filters.checkIn
+                        ? `${formatDate(filters.checkIn)} → ${filters.checkOut ? formatDate(filters.checkOut) : '—'}`
+                        : 'Tarih ekle'}
+                    </AppText>
+                  </View>
+                </Pressable>
 
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Misafir sayısı ve filtreler"
-                onPress={() => setFilterOpen(true)}
-                style={[styles.searchCell, { backgroundColor: theme.colors.inputBackground, borderColor: theme.colors.border }]}
-              >
-                <Ionicons name="people-outline" size={16} color={theme.colors.primaryDeep} />
-                <View style={styles.flex}>
-                  <AppText variant="caption" color="textTertiary" style={styles.searchLabel}>
-                    Misafir
-                  </AppText>
-                  <AppText variant="caption" color="text">
-                    {filters.guests} kişi
-                  </AppText>
-                </View>
-              </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Misafir sayısı ve filtreler"
+                  onPress={() => setFilterOpen(true)}
+                  style={[
+                    styles.searchCell,
+                    { backgroundColor: theme.colors.inputBackground, borderColor: theme.colors.border },
+                  ]}
+                >
+                  <Ionicons name="people-outline" size={16} color={theme.colors.primaryDeep} />
+                  <View style={styles.flex}>
+                    <AppText variant="caption" color="textTertiary" style={styles.searchLabel}>
+                      Misafir
+                    </AppText>
+                    <AppText variant="caption" color="text" numberOfLines={1}>
+                      {filters.guests} kişi
+                    </AppText>
+                  </View>
+                </Pressable>
+              </View>
 
               <Pressable
                 accessibilityRole="button"
@@ -318,13 +434,16 @@ export default function KonaklamaHubScreen() {
                 onPress={() => setFilterOpen(true)}
                 style={({ pressed }) => [
                   styles.searchButton,
+                  layout.isDesktop ? null : styles.searchButtonCompact,
                   { backgroundColor: theme.colors.primaryDeep, opacity: pressed ? 0.85 : 1 },
                 ]}
               >
                 <Ionicons name="options-outline" size={17} color="#FFFFFF" />
-                <AppText variant="caption" style={styles.searchButtonText}>
-                  Filtrele
-                </AppText>
+                {layout.isDesktop ? (
+                  <AppText variant="caption" style={styles.searchButtonText}>
+                    Filtrele
+                  </AppText>
+                ) : null}
               </Pressable>
             </View>
 
@@ -360,77 +479,6 @@ export default function KonaklamaHubScreen() {
       </AuroraBackdrop>
 
       <View style={[styles.body, { paddingHorizontal: horizontalPadding }]}>
-        <View style={styles.quickRow}>
-          <QuickAction
-            icon="calendar-outline"
-            label="Rezervasyonlarım"
-            hint="Yaklaşan konaklamalar"
-            onPress={() => router.push('/konaklama/rezervasyonlarim' as never)}
-          />
-          <QuickAction
-            icon="add-circle-outline"
-            label={ownedProperties.length > 0 ? 'Yeni tesis' : 'Otelimi ekle'}
-            hint="Ücretsiz başvuru"
-            onPress={() => router.push('/konaklama/otel-ekle' as never)}
-          />
-          <QuickAction
-            icon="briefcase-outline"
-            label="Otel yönetimim"
-            hint="Panel ve takvim"
-            badge={pendingReservations}
-            onPress={() =>
-              router.push((ownedProperties.length > 0 ? '/konaklama/yonetim' : '/konaklama/otel-ekle') as never)
-            }
-          />
-          <QuickAction
-            icon="map-outline"
-            label="Haritada gör"
-            hint="Konuma göre keşfet"
-            onPress={() => router.push('/konaklama/harita' as never)}
-          />
-        </View>
-
-        {ownedProperties.length > 0 ? (
-          <AuroraBackdrop
-            rounded
-            colors={[AURORA.indigo, '#1D2450', '#3A2E78']}
-            style={styles.ownerCard}
-          >
-            <View style={styles.ownerHead}>
-              <View style={styles.ownerIcon}>
-                <Ionicons name="briefcase" size={18} color="#FFFFFF" />
-              </View>
-              <View style={styles.flex}>
-                <AppText variant="overline" style={styles.ownerOverline}>
-                  İŞLETME PANELİ
-                </AppText>
-                <AppText variant="title" style={styles.ownerTitle}>
-                  {ownedProperties.length} tesisini yönetiyorsun
-                </AppText>
-                <AppText variant="caption" style={styles.ownerSub}>
-                  {pendingReservations} onay bekleyen rezervasyon · {pendingTasks} açık görev
-                </AppText>
-              </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Yönetim paneline git"
-                onPress={() => router.push('/konaklama/yonetim' as never)}
-                style={({ pressed }) => [styles.ownerCta, { opacity: pressed ? 0.8 : 1 }]}
-              >
-                <AppText variant="caption" style={styles.ownerCtaText}>
-                  Panele git
-                </AppText>
-                <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
-              </Pressable>
-            </View>
-            <View style={styles.ownerStats}>
-              <OwnerStat label="Onay bekleyen" value={pendingReservations} tone="#FBBF24" />
-              <OwnerStat label="Okunmamış mesaj" value={ownedProperties.reduce((total, item) => total + item.unread_messages, 0)} tone="#6284FF" />
-              <OwnerStat label="Açık görev" value={pendingTasks} tone="#A78BFA" />
-            </View>
-          </AuroraBackdrop>
-        ) : null}
-
         <View style={styles.categoryWrap}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRail}>
             <CategoryTile
@@ -540,9 +588,9 @@ export default function KonaklamaHubScreen() {
         </View>
 
         {results.isLoading ? (
-          <View style={styles.grid}>
-            {[0, 1, 2, 3].map((key) => (
-              <View key={key} style={[styles.gridItem, gridItemWidth(layout.columns)]}>
+          <View style={styles.grid} onLayout={(event) => setGridWidth(event.nativeEvent.layout.width)}>
+            {Array.from({ length: Math.max(4, layout.columns) }, (_, key) => (
+              <View key={key} style={[styles.gridItem, gridCellStyle]}>
                 <PropertyCardSkeleton />
               </View>
             ))}
@@ -561,16 +609,35 @@ export default function KonaklamaHubScreen() {
             onAction={hasFilters ? resetFilters : undefined}
           />
         ) : (
-          <View style={styles.grid}>
-            {properties.map((property) => (
-              <View key={property.id} style={[styles.gridItem, gridItemWidth(layout.columns)]}>
-                <PropertyCard
-                  property={property}
-                  onPress={() => router.push(`/konaklama/${property.id}` as never)}
-                />
-              </View>
-            ))}
-          </View>
+          <>
+            <View style={styles.grid} onLayout={(event) => setGridWidth(event.nativeEvent.layout.width)}>
+              {properties.slice(0, visibleCards).map((property) => (
+                <View key={property.id} style={[styles.gridItem, gridCellStyle]}>
+                  <PropertyCard property={property} onPress={openProperty} />
+                </View>
+              ))}
+            </View>
+
+            {visibleCards < properties.length ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Daha fazla tesis göster, ${properties.length - visibleCards} tesis kaldı`}
+                onPress={showMoreCards}
+                style={({ pressed }) => [
+                  styles.loadMore,
+                  {
+                    borderColor: theme.colors.border,
+                    backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
+                  },
+                ]}
+              >
+                <AppText variant="caption" color="textSecondary">
+                  Daha fazla tesis göster ({properties.length - visibleCards})
+                </AppText>
+                <Ionicons name="chevron-down" size={15} color={theme.colors.textSecondary} />
+              </Pressable>
+            ) : null}
+          </>
         )}
 
         {results.isFetching && !results.isLoading ? <LoadingBlock label="Güncelleniyor…" height={54} /> : null}
@@ -595,8 +662,57 @@ export default function KonaklamaHubScreen() {
   );
 }
 
+/**
+ * Vitrin arama kutusu. Metin burada tutulur: kullanıcı yazarken üst ekran
+ * (ızgara, raylar, hero) yeniden render edilmez; ağ isteği yalnızca klavyeden
+ * "ara" tetiklendiğinde veya metin temizlendiğinde atılır.
+ */
+const SearchField = memo(function SearchField({
+  onSubmit,
+}: {
+  onSubmit: (value: string) => void;
+}) {
+  const { theme } = useTheme();
+  const [value, setValue] = useState('');
+
+  const commit = useCallback(
+    (next: string) => {
+      setValue(next);
+      onSubmit(next.trim());
+    },
+    [onSubmit],
+  );
+
+  return (
+    <TextField
+      value={value}
+      onChangeText={setValue}
+      placeholder="Tesis, bölge veya mahalle ara"
+      leftIcon="search-outline"
+      returnKeyType="search"
+      onSubmitEditing={() => onSubmit(value.trim())}
+      rightSlot={
+        value ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Aramayı temizle"
+            hitSlop={8}
+            onPress={() => commit('')}
+          >
+            <Ionicons name="close-circle" size={18} color={theme.colors.textTertiary} />
+          </Pressable>
+        ) : null
+      }
+    />
+  );
+});
+
+const GRID_GAP = 12;
+
 function gridItemWidth(columns: number) {
-  if (columns >= 4) return { width: '24%' as const };
+  if (columns >= 6) return { width: '15.6%' as const };
+  if (columns === 5) return { width: '19.2%' as const };
+  if (columns === 4) return { width: '24%' as const };
   if (columns === 3) return { width: '32.3%' as const };
   if (columns === 2) return { width: '48.8%' as const };
   return { width: '100%' as const };
@@ -615,22 +731,6 @@ function HeroStat({ value, label }: { value: string; label: string }) {
   );
 }
 
-function OwnerStat({ label, value, tone }: { label: string; value: number; tone: string }) {
-  return (
-    <View style={styles.ownerStat}>
-      <View style={[styles.ownerStatDot, { backgroundColor: tone }]} />
-      <View style={styles.flex}>
-        <AppText variant="bodyStrong" style={styles.ownerStatValue}>
-          {value}
-        </AppText>
-        <AppText variant="caption" style={styles.ownerStatLabel} numberOfLines={1}>
-          {label}
-        </AppText>
-      </View>
-    </View>
-  );
-}
-
 function GlassPillActive({ label, onRemove }: { label: string; onRemove: () => void }) {
   const { theme } = useTheme();
   return (
@@ -644,58 +744,6 @@ function GlassPillActive({ label, onRemove }: { label: string; onRemove: () => v
         {label}
       </AppText>
       <Ionicons name="close" size={12} color={theme.colors.primaryDeep} />
-    </Pressable>
-  );
-}
-
-function QuickAction({
-  icon,
-  label,
-  hint,
-  onPress,
-  badge = 0,
-}: {
-  icon: IconName;
-  label: string;
-  hint: string;
-  onPress: () => void;
-  badge?: number;
-}) {
-  const { theme } = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${label}. ${hint}`}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.quickAction,
-        {
-          backgroundColor: theme.colors.surface,
-          borderColor: theme.colors.border,
-          opacity: pressed ? 0.86 : 1,
-        },
-      ]}
-    >
-      <View style={[styles.quickIcon, { backgroundColor: theme.colors.primarySoft }]}>
-        <Ionicons name={icon} size={17} color={theme.colors.primaryDeep} />
-      </View>
-      <View style={styles.flex}>
-        <AppText variant="caption" color="text" numberOfLines={1} style={styles.quickLabel}>
-          {label}
-        </AppText>
-        <AppText variant="caption" color="textTertiary" numberOfLines={1} style={styles.quickHint}>
-          {hint}
-        </AppText>
-      </View>
-      {badge > 0 ? (
-        <View style={[styles.quickBadge, { backgroundColor: theme.colors.danger }]}>
-          <AppText variant="caption" style={styles.quickBadgeText}>
-            {badge > 9 ? '9+' : badge}
-          </AppText>
-        </View>
-      ) : (
-        <Ionicons name="chevron-forward" size={13} color={theme.colors.textTertiary} />
-      )}
     </Pressable>
   );
 }
@@ -749,8 +797,8 @@ function CategoryTile({
 const styles = StyleSheet.create({
   flex: { flex: 1 },
 
-  hero: { paddingBottom: 18 },
-  heroInner: { width: '100%', maxWidth: 1280, alignSelf: 'center', paddingTop: 12, gap: 16 },
+  hero: { paddingBottom: 14 },
+  heroInner: { width: '100%', alignSelf: 'center', paddingTop: 10, gap: 12 },
   heroTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   heroIcon: {
     width: 40,
@@ -765,20 +813,20 @@ const styles = StyleSheet.create({
   heroBrand: { flex: 1, alignItems: 'center', gap: 2 },
   brandOverline: { color: 'rgba(255,255,255,0.72)', fontSize: 10, letterSpacing: 2.6 },
   brandSub: { color: 'rgba(255,255,255,0.5)', fontSize: 10 },
-  heroGrid: { gap: 16 },
-  heroGridDesktop: { flexDirection: 'row', alignItems: 'center', gap: 32 },
-  heroCopy: { flex: 1, gap: 12 },
+  heroGrid: { gap: 12 },
+  heroGridDesktop: { flexDirection: 'row', alignItems: 'center', gap: 24 },
+  heroCopy: { flex: 1, gap: 10 },
   heroPillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  heroTitle: { color: '#FFFFFF', fontSize: 30, lineHeight: 37, letterSpacing: -0.9 },
-  heroTitleDesktop: { fontSize: 44, lineHeight: 52, letterSpacing: -1.6 },
-  heroSubtitle: { color: 'rgba(255,255,255,0.72)', fontSize: 13, lineHeight: 20, maxWidth: 520 },
-  heroStats: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingTop: 4 },
+  heroTitle: { color: '#FFFFFF', fontSize: 26, lineHeight: 32, letterSpacing: -0.8 },
+  heroTitleDesktop: { fontSize: 36, lineHeight: 44, letterSpacing: -1.3 },
+  heroSubtitle: { color: 'rgba(255,255,255,0.72)', fontSize: 12.5, lineHeight: 19, maxWidth: 520 },
+  heroStats: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingTop: 2 },
   heroStat: { gap: 1 },
   heroStatValue: { color: '#FFFFFF', fontSize: 19 },
   heroStatLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 10 },
   heroStatDivider: { width: StyleSheet.hairlineWidth, height: 26, backgroundColor: 'rgba(255,255,255,0.18)' },
 
-  heroCollage: { width: 380, height: 300, flexDirection: 'row', flexWrap: 'wrap', gap: 8, position: 'relative' },
+  heroCollage: { width: 340, height: 240, flexDirection: 'row', flexWrap: 'wrap', gap: 8, position: 'relative' },
   collageItem: { borderRadius: 18, overflow: 'hidden', position: 'relative', justifyContent: 'flex-end', padding: 10 },
   collagePrimary: { width: '58%', height: '100%', backgroundColor: 'rgba(255,255,255,0.07)', alignItems: 'center', justifyContent: 'center' },
   collageSecondary: { width: '38%', height: '48%', backgroundColor: 'rgba(255,255,255,0.07)' },
@@ -796,9 +844,12 @@ const styles = StyleSheet.create({
     padding: 10,
     gap: 8,
   },
-  searchRow: { gap: 8 },
-  searchRowDesktop: { flexDirection: 'row', alignItems: 'center' },
+  searchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  searchRowDesktop: { alignItems: 'center' },
   searchField: { flex: 1.4, minWidth: 0 },
+  searchFieldFull: { flexGrow: 0, flexShrink: 0, flexBasis: '100%' },
+  searchCellGroup: { flex: 1, minWidth: 0, flexDirection: 'row', gap: 8 },
+  searchCellDate: { flex: 1.3 },
   searchCell: {
     flex: 1,
     minWidth: 0,
@@ -821,6 +872,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   searchButtonText: { color: '#FFFFFF', fontSize: 12 },
+  searchButtonCompact: { width: 54, paddingHorizontal: 0, flexGrow: 0, flexShrink: 0 },
   activeFilterRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, paddingTop: 2 },
   activePill: {
     flexDirection: 'row',
@@ -833,75 +885,16 @@ const styles = StyleSheet.create({
   activePillText: { fontSize: 10 },
   clearAll: { fontSize: 10, textDecorationLine: 'underline' },
 
-  body: { width: '100%', maxWidth: 1280, alignSelf: 'center', paddingTop: 16, paddingBottom: 34, gap: 18 },
-  quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  quickAction: {
-    flex: 1,
-    minWidth: 158,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-    padding: 10,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    minHeight: 58,
-  },
-  quickIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  quickLabel: { fontSize: 11.5 },
-  quickHint: { fontSize: 9.5 },
-  quickBadge: { minWidth: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  quickBadgeText: { color: '#FFFFFF', fontSize: 9 },
-
-  ownerCard: { padding: 16, gap: 14 },
-  ownerHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  ownerIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 13,
-    backgroundColor: 'rgba(255,255,255,0.14)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ownerOverline: { color: 'rgba(255,255,255,0.55)', fontSize: 9 },
-  ownerTitle: { color: '#FFFFFF' },
-  ownerSub: { color: 'rgba(255,255,255,0.65)', fontSize: 11 },
-  ownerCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.24)',
-  },
-  ownerCtaText: { color: '#FFFFFF', fontSize: 11 },
-  ownerStats: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  ownerStat: {
-    flex: 1,
-    minWidth: 120,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-    padding: 10,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  ownerStatDot: { width: 7, height: 7, borderRadius: 4 },
-  ownerStatValue: { color: '#FFFFFF', fontSize: 15 },
-  ownerStatLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 9.5 },
+  body: { width: '100%', alignSelf: 'center', paddingTop: 14, paddingBottom: 32, gap: 16 },
 
   categoryWrap: { marginHorizontal: -4 },
   categoryRail: { gap: 10, paddingHorizontal: 4, paddingVertical: 2 },
-  categoryTile: { alignItems: 'center', gap: 6, width: 74 },
-  categoryIcon: { width: 52, height: 52, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  categoryTile: { alignItems: 'center', gap: 6, width: 68 },
+  categoryIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   categoryIconActive: {},
   categoryLabel: { fontSize: 10.5, textAlign: 'center' },
 
-  section: { gap: 11 },
+  section: { gap: 10 },
   resultsHead: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 2 },
   resultActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   filterButton: {
@@ -913,8 +906,17 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GRID_GAP },
   gridItem: {},
+  loadMore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 46,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
   footNote: {
     flexDirection: 'row',
     alignItems: 'flex-start',

@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { memo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppImage, AppText } from '@/components/ui';
@@ -14,13 +15,17 @@ import { AmenityChips, GlassPill, ratingLabel } from './PremiumUI';
  * Keşfet vitrininindeki tesis kartı.
  * Görsel oranı korunur, üzerine cam etiketler biner; alt bölümde ad, puan,
  * olanak özeti ve gecelik fiyat bulunur.
+ *
+ * `memo` + kimlik tabanlı `onPress`: vitrin ızgarası 40 karta kadar çıkıyor.
+ * Her tuş vuruşunda/filtre değişiminde aynı nesneler yeniden çizilmesin diye
+ * kart yalnızca kendi verisi değiştiğinde render edilir.
  */
-export function PropertyCard({
+export const PropertyCard = memo(function PropertyCard({
   property,
   onPress,
 }: {
   property: PropertySummary;
-  onPress: () => void;
+  onPress: (propertyId: string) => void;
 }) {
   const { theme } = useTheme();
   const photos = property.photos.length > 0 ? property.photos : property.cover_path ? [property.cover_path] : [];
@@ -33,7 +38,7 @@ export function PropertyCard({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${property.name}, ${PROPERTY_TYPE_LABELS[property.property_type]}, ${location}`}
-      onPress={onPress}
+      onPress={() => onPress(property.id)}
       style={({ pressed }) => [
         styles.card,
         {
@@ -173,7 +178,7 @@ export function PropertyCard({
       </View>
     </Pressable>
   );
-}
+});
 
 export function PropertyCardSkeleton() {
   const { theme } = useTheme();

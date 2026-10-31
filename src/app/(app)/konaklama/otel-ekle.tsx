@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { AppText, Button, Screen } from '@/components/ui';
 import { useSession } from '@/stores/auth-store';
@@ -58,15 +58,17 @@ export default function AddPropertyScreen() {
     setResumeChoice('new');
   };
 
-  const showResumeCard = !isEditing && !draftLoading && Boolean(storedDraft) && resumeChoice === 'pending';
+  const showResumeCard =
+    !isEditing && !draftLoading && Boolean(storedDraft) && resumeChoice === 'pending';
 
   return (
-    <Screen scroll edges={['top', 'left', 'right']}>
-      <View style={styles.header}>
+    <Screen padded={false} keyboardAware edges={['top', 'left', 'right']}>
+      <View style={[styles.header, { paddingHorizontal: theme.layout.screenPadding }]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Geri"
           onPress={() => router.back()}
+          hitSlop={8}
           style={({ pressed }) => [
             styles.back,
             { backgroundColor: theme.colors.surfaceMuted, opacity: pressed ? 0.7 : 1 },
@@ -75,11 +77,11 @@ export default function AddPropertyScreen() {
           <Ionicons name="chevron-back" size={21} color={theme.colors.text} />
         </Pressable>
         <View style={styles.flex}>
-          <AppText variant="h3">{isEditing ? 'Tesis bilgilerini düzenle' : 'Otelimi ekle'}</AppText>
-          <AppText variant="caption" color="textTertiary" numberOfLines={1}>
-            {isEditing
-              ? 'Değişiklikleri kaydettikten sonra doğrulamaya gönderebilirsin'
-              : 'Ücretsiz başvuru · Otomatik taslak · Doğrulama sonrası yayın'}
+          <AppText variant="overline" color="primaryDeep" style={styles.overline}>
+            HOTEL PARTNER
+          </AppText>
+          <AppText variant="h3" numberOfLines={1}>
+            {isEditing ? 'Tesis bilgilerini düzenle' : 'Otelini Trabzone’a ekle'}
           </AppText>
         </View>
         {!isEditing ? (
@@ -92,37 +94,47 @@ export default function AddPropertyScreen() {
         ) : null}
       </View>
 
-      {isEditing ? (
-        <HotelOnboardingWizard
-          propertyId={propertyId ?? null}
-          onCancel={() => router.back()}
-          onSaved={(id) => {
-            router.replace(`/konaklama/yonetim/${'genel-bakis'}?property=${id}` as never);
-          }}
-          onOpenManagement={(id, tab) => {
-            router.replace(`/konaklama/yonetim/${tab}?property=${id}` as never);
-          }}
-        />
-      ) : draftLoading ? (
-        <LoadingBlock height={240} label="Taslak kontrol ediliyor…" />
-      ) : showResumeCard && storedDraft ? (
-        <ResumeApplicationCard
-          draft={storedDraft}
-          onResume={() => setResumeChoice('resume')}
-          onStartNew={startFresh}
-        />
-      ) : (
-        <HotelOnboardingWizard
-          initialDraft={resumeChoice === 'resume' ? storedDraft : null}
-          onCancel={() => router.back()}
-          onSaved={(id) => {
-            router.replace(`/konaklama/yonetim/${'genel-bakis'}?property=${id}` as never);
-          }}
-          onOpenManagement={(id, tab) => {
-            router.replace(`/konaklama/yonetim/${tab}?property=${id}` as never);
-          }}
-        />
-      )}
+      <View style={styles.flex}>
+        {isEditing ? (
+          <HotelOnboardingWizard
+            propertyId={propertyId ?? null}
+            onCancel={() => router.back()}
+            onSaved={(id) => {
+              router.replace(`/konaklama/yonetim/${'genel-bakis'}?property=${id}` as never);
+            }}
+            onOpenManagement={(id, tab) => {
+              router.replace(`/konaklama/yonetim/${tab}?property=${id}` as never);
+            }}
+          />
+        ) : draftLoading ? (
+          <LoadingBlock height={240} label="Taslak kontrol ediliyor…" />
+        ) : showResumeCard && storedDraft ? (
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[
+              styles.resumeScroll,
+              { paddingHorizontal: theme.layout.screenPadding },
+            ]}
+          >
+            <ResumeApplicationCard
+              draft={storedDraft}
+              onResume={() => setResumeChoice('resume')}
+              onStartNew={startFresh}
+            />
+          </ScrollView>
+        ) : (
+          <HotelOnboardingWizard
+            initialDraft={resumeChoice === 'resume' ? storedDraft : null}
+            onCancel={() => router.back()}
+            onSaved={(id) => {
+              router.replace(`/konaklama/yonetim/${'genel-bakis'}?property=${id}` as never);
+            }}
+            onOpenManagement={(id, tab) => {
+              router.replace(`/konaklama/yonetim/${tab}?property=${id}` as never);
+            }}
+          />
+        )}
+      </View>
     </Screen>
   );
 }
@@ -151,7 +163,7 @@ function ResumeApplicationCard({
             <Ionicons name="documents-outline" size={18} color="#FFFFFF" />
           </View>
           <AppText variant="overline" style={styles.resumeOverline} numberOfLines={1}>
-            YARIM KALAN BAŞVURU
+            CONTINUE APPLICATION
           </AppText>
           <StatusPill
             label={`%${progress.percent}`}
@@ -174,7 +186,7 @@ function ResumeApplicationCard({
           <View
             style={[
               styles.resumeProgressFill,
-              { width: `${progress.percent}%`, backgroundColor: theme.colors.primary },
+              { width: `${Math.max(3, progress.percent)}%`, backgroundColor: theme.colors.primary },
             ]}
           />
         </View>
@@ -213,7 +225,8 @@ function ResumeApplicationCard({
           <Ionicons name="shield-checkmark-outline" size={14} color={theme.colors.textTertiary} />
           <AppText variant="caption" color="textTertiary" style={styles.flex}>
             Başvurudan çıksan bile doldurduğun alanlar bu cihazda otomatik olarak saklanır. Yeni
-            başvuru seçersen mevcut taslak silinir.
+            başvuru seçersen bu cihazdaki taslak temizlenir; daha önce sunucuya kaydedilen tesis
+            taslağı Otel Yönetimim&apos;de kalır.
           </AppText>
         </View>
       </View>
@@ -240,8 +253,21 @@ function formatRelativeTime(timestamp: number): string {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 10 },
-  back: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingTop: 4,
+    paddingBottom: 10,
+  },
+  back: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  overline: { fontSize: 9, letterSpacing: 1.6, marginBottom: 1 },
   autoBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -250,6 +276,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 999,
   },
+  resumeScroll: { paddingTop: 4, paddingBottom: 24, gap: 12 },
 
   resumeCard: { overflow: 'hidden' },
   resumeHero: { padding: 16, gap: 6 },
@@ -264,7 +291,12 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.18)',
   },
-  resumeOverline: { color: 'rgba(255,255,255,0.6)', fontSize: 9, letterSpacing: 1.6, flex: 1 },
+  resumeOverline: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 9,
+    letterSpacing: 1.6,
+    flex: 1,
+  },
   resumeName: { color: '#FFFFFF', marginTop: 2 },
   resumeMeta: { color: 'rgba(255,255,255,0.66)' },
 

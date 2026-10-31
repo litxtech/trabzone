@@ -10,7 +10,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { hasMapboxToken, staticMapUrl } from '../services/map-service';
 import type { MapCamera, MapPoint } from '../types';
 import { projectToPixels } from '../utils/geo';
-import { currentMapProvider, markerTone, toneColor } from '../utils/map-theme';
+import { currentMapProvider, markerTone, PREMIUM_MARKER, toneColor } from '../utils/map-theme';
 
 type Props = {
   camera: MapCamera;
@@ -77,12 +77,24 @@ export function MapCanvasFallback({ camera, markers = [], message, onMarkerPress
               >
                 <View
                   style={[
-                    styles.staticPinBody,
-                    { backgroundColor: point.color ?? toneColor(theme, markerTone(point.kind)) },
+                    point.premium ? styles.staticPremiumPin : styles.staticPinBody,
+                    point.premium
+                      ? {
+                          backgroundColor: PREMIUM_MARKER.background,
+                          borderColor: point.color ?? PREMIUM_MARKER.border,
+                        }
+                      : { backgroundColor: point.color ?? toneColor(theme, markerTone(point.kind)) },
                   ]}
                 >
-                  <AppText variant="caption" style={styles.staticPinText}>
-                    {point.kind === 'cluster' ? String(point.count ?? '') : '•'}
+                  <AppText
+                    variant="caption"
+                    style={
+                      point.premium
+                        ? { ...styles.staticPinText, color: point.textColor ?? PREMIUM_MARKER.text }
+                        : styles.staticPinText
+                    }
+                  >
+                    {point.kind === 'cluster' ? String(point.count ?? '') : (point.label ?? '•')}
                   </AppText>
                 </View>
               </Pressable>
@@ -162,4 +174,13 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
   },
   staticPinText: { color: '#FFFFFF', fontSize: 10 },
+  staticPremiumPin: {
+    minWidth: 40,
+    height: 24,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

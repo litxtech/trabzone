@@ -149,12 +149,12 @@ export async function uploadToR2(input: R2UploadInput): Promise<Result<R2UploadR
     return fail(cancelledError());
   }
   if (!signedUrl) {
-    return fail(appError('network', 'Büyük dosya yüklemesi başlatılamadı. Tekrar dene.'));
+    return fail(appError('network', 'Yükleme başlatılamadı. Bağlantını kontrol edip tekrar dene.'));
   }
 
   const size = await localFileSize(input.uri);
   const fs = await loadLegacyFileSystem();
-  const failed = appError('network', 'Video yüklenemedi. Bağlantını kontrol edip tekrar dene.');
+  const failed = appError('network', 'Dosya yüklenemedi. Bağlantını kontrol edip tekrar dene.');
 
   try {
     if (fs) {

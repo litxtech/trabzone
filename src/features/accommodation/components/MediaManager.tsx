@@ -10,6 +10,7 @@ import {
   useAccommodationMedia,
   useAddMedia,
   useDeleteMedia,
+  usePropertyInventory,
   useReorderMedia,
   useSetMediaCover,
   useUpdateMedia,
@@ -38,6 +39,7 @@ export function MediaManager({ propertyId }: { propertyId: string }) {
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
   const media = useAccommodationMedia(propertyId);
+  const inventory = usePropertyInventory(propertyId);
   const addMedia = useAddMedia(propertyId);
   const updateMedia = useUpdateMedia();
   const deleteMedia = useDeleteMedia();
@@ -47,12 +49,19 @@ export function MediaManager({ propertyId }: { propertyId: string }) {
   const [filter, setFilter] = useState<MediaCategory | 'all'>('all');
   const [uploading, setUploading] = useState(false);
   const [uploadNote, setUploadNote] = useState<string | null>(null);
+  const [uploadRoomTypeId, setUploadRoomTypeId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<MediaItem | null>(null);
   const [caption, setCaption] = useState('');
   const [editCategory, setEditCategory] = useState<MediaCategory>('general');
+  const [editRoomTypeId, setEditRoomTypeId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<MediaItem | null>(null);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+
+  const roomTypes = useMemo(
+    () => (inventory.data?.room_types ?? []).filter((room) => room.active),
+    [inventory.data?.room_types],
+  );
 
   const items = media.data?.items ?? [];
   const sorted = useMemo(
@@ -95,10 +104,11 @@ export function MediaManager({ propertyId }: { propertyId: string }) {
           continue;
         }
         const created = await addMedia.mutateAsync({
+          roomTypeId: uploadRoomTypeId,
           kind,
           storagePath: uploaded.data.path,
-          category: 'general',
-          cover: kind === 'image' && !sorted.some((item) => item.cover),
+          category: uploadRoomTypeId ? 'room' : 'general',
+          cover: kind === 'image' && !sorted.some((item) => item.cover && item.room_type_id === uploadRoomTypeId),
           sortOrder: sorted.length + done,
           caption: null,
         });
@@ -174,6 +184,28 @@ export function MediaManager({ propertyId }: { propertyId: string }) {
 
       {uploadNote ? <InfoBanner text={uploadNote} tone="primary" /> : null}
       {error ? <InlineError message={error} /> : null}
+
+      {/* Yükleme hedefi: tesis geneli veya belirli bir oda tipi. Oda tipine
+          bağlanan görsel, herkese açık detaydaki oda kartında önizlenir. */}
+      <View style={styles.targetRow}>
+        <View style={styles.targetLabel}>
+          <Ionicons name="bed-outline" size={13} color={theme.colors.textTertiary} />
+          <AppText variant="caption" color="textTertiary">
+            Yükleme hedefi
+          </AppText>
+        </View>
+        <View style={styles.filters}>
+          <Chip label="Tesis" active={uploadRoomTypeId === null} onPress={() => setUploadRoomTypeId(null)} />
+          {roomTypes.map((room) => (
+            <Chip
+              key={room.id}
+              label={room.name}
+              active={uploadRoomTypeId === room.id}
+              onPress={() => setUploadRoomTypeId(room.id)}
+            />
+          ))}
+        </View>
+      </View>
 
       <View style={styles.filters}>
         <Chip label="Tümü" active={filter === 'all'} onPress={() => setFilter('all')} />
@@ -286,6 +318,7 @@ export function MediaManager({ propertyId }: { propertyId: string }) {
                         setEditing(item);
                         setCaption(item.caption ?? '');
                         setEditCategory(item.category);
+                        setEditRoomTypeId(item.room_type_id ?? null);
                       }}
                     />
                     <IconAction
@@ -325,6 +358,7 @@ export function MediaManager({ propertyId }: { propertyId: string }) {
                   mediaId: editing.id,
                   caption: caption.trim() || null,
                   category: editCategory,
+                  roomTypeId: editRoomTypeId,
                 });
                 setEditing(null);
                 void media.refetch();
@@ -349,6 +383,25 @@ export function MediaManager({ propertyId }: { propertyId: string }) {
                 />
               ))}
             </View>
+          </View>
+          <View>
+            <AppText variant="caption" color="textSecondary" style={styles.fieldLabel}>
+              Bağlı olduğu oda tipi
+            </AppText>
+            <View style={styles.filters}>
+              <Chip label="Tesis geneli" active={editRoomTypeId === null} onPress={() => setEditRoomTypeId(null)} />
+              {roomTypes.map((room) => (
+                <Chip
+                  key={room.id}
+                  label={room.name}
+                  active={editRoomTypeId === room.id}
+                  onPress={() => setEditRoomTypeId(room.id)}
+                />
+              ))}
+            </View>
+            <AppText variant="caption" color="textTertiary" style={styles.fieldHint}>
+              Oda tipine bağlanan görsel, tesis detayındaki oda kartında kapak olarak önizlenir.
+            </AppText>
           </View>
         </View>
       </ModalSheet>
@@ -415,6 +468,8 @@ const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   actions: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  targetRow: { gap: 5 },
+  targetLabel: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   thumb: { width: '100%', aspectRatio: 4 / 3, backgroundColor: '#0B1220' },
   cardBody: { padding: 8, gap: 2 },
@@ -427,5 +482,6 @@ const styles = StyleSheet.create({
   onImage: { color: '#fff', fontSize: 9 },
   uploadRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   fieldLabel: { marginBottom: 5 },
+  fieldHint: { marginTop: 5 },
   modalFooter: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
 });

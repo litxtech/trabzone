@@ -6,8 +6,10 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { ShareSheet } from '@/components/navigation/ShareSheet';
-import { AppText } from '@/components/ui';
+import { AppText, Avatar } from '@/components/ui';
 import { requestTabScrollTop } from '@/features/navigation/tab-scroll';
+import { useMyProfile } from '@/features/profile/hooks/use-my-profile';
+import { mediaPublicUrl } from '@/features/profile/services/media-service';
 import { useReduceMotion } from '@/perf/use-reduce-motion';
 import { useKeyboard } from '@/providers/keyboard';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -38,6 +40,11 @@ export function AppTabBar({ state, emitter, navigateToTab, insets }: BottomTabBa
   const { isVisible: keyboardVisible } = useKeyboard();
   const reduceMotion = useReduceMotion();
   const [shareOpen, setShareOpen] = useState(false);
+
+  // Profil sekmesi simge yerine kullanıcının kendi avatarnı gösterir.
+  const { data: profile } = useMyProfile();
+  const profileAvatar = mediaPublicUrl('avatar', profile?.avatar_path);
+  const profileName = profile ? `${profile.first_name} ${profile.last_name}`.trim() : '';
 
   const hidden = useSharedValue(0);
   const focusedName = state.routes[state.index]?.name;
@@ -104,11 +111,41 @@ export function AppTabBar({ state, emitter, navigateToTab, insets }: BottomTabBa
         onLongPress={() => emitter.emit({ type: 'tabLongPress', target: route.key })}
         style={styles.tab}
       >
-        <Ionicons
-          name={focused ? config.activeIcon : config.icon}
-          size={23}
-          color={focused ? activeColor : inactiveColor}
-        />
+        {config.name === 'profile' ? (
+          <View
+            style={[
+              styles.avatarSlot,
+              {
+                borderColor: focused
+                  ? reelsActive
+                    ? '#FFFFFF'
+                    : theme.colors.primary
+                  : 'transparent',
+              },
+            ]}
+          >
+            {profileAvatar || profileName ? (
+              <Avatar
+                uri={profileAvatar}
+                name={profileName}
+                size={21}
+                recycleKey={profile?.id ?? 'me'}
+              />
+            ) : (
+              <Ionicons
+                name={focused ? 'person' : 'person-outline'}
+                size={22}
+                color={focused ? activeColor : inactiveColor}
+              />
+            )}
+          </View>
+        ) : (
+          <Ionicons
+            name={focused ? config.activeIcon : config.icon}
+            size={23}
+            color={focused ? activeColor : inactiveColor}
+          />
+        )}
         <AppText
           variant="caption"
           style={[styles.tabLabel, { color: focused ? activeColor : inactiveColor }]}
@@ -192,6 +229,14 @@ const styles = StyleSheet.create({
     minHeight: 46,
   },
   tabLabel: { fontSize: 10.5, lineHeight: 13 },
+  avatarSlot: {
+    width: 27,
+    height: 27,
+    borderRadius: 14,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   shareSlot: { width: 70, alignItems: 'center', justifyContent: 'center' },
   shareButton: {
     width: 56,

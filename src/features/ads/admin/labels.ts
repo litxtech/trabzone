@@ -55,19 +55,175 @@ export const PROHIBITED_CATEGORIES = [
   'Tütün, alkol ve uyuşturucu',
 ];
 
-export const DESTINATION_TYPES: { value: AdDestinationType; label: string; needs: 'none' | 'target' | 'url' | 'phone' | 'location' | 'category' }[] = [
-  { value: 'detail_page', label: 'Reklam detay sayfası', needs: 'none' },
-  { value: 'business', label: 'İşletme profili', needs: 'target' },
-  { value: 'market_listing', label: 'Marketplace ilanı', needs: 'target' },
-  { value: 'real_estate', label: 'Emlak ilanı', needs: 'target' },
-  { value: 'vehicle', label: 'Vasıta ilanı', needs: 'target' },
-  { value: 'job', label: 'İş ilanı', needs: 'target' },
-  { value: 'ride', label: 'Yolculuk ilanı', needs: 'target' },
-  { value: 'post', label: 'Herkese açık gönderi', needs: 'target' },
-  { value: 'category', label: 'Kategori sayfası', needs: 'category' },
-  { value: 'external_url', label: 'Harici web sitesi', needs: 'url' },
-  { value: 'phone', label: 'Telefon araması', needs: 'phone' },
-  { value: 'map_location', label: 'Harita konumu', needs: 'location' },
+export const DESTINATION_TYPES: {
+  value: AdDestinationType;
+  label: string;
+  description: string;
+  needs: 'none' | 'target' | 'url' | 'phone' | 'location' | 'category';
+}[] = [
+  {
+    value: 'detail_page',
+    label: 'Reklam detay sayfası',
+    description: 'Kullanıcı banner’a dokununca kendi reklam sayfan açılır.',
+    needs: 'none',
+  },
+  {
+    value: 'external_url',
+    label: 'Web sitesi',
+    description: 'Kendi sitene veya kampanya sayfana yönlendirir.',
+    needs: 'url',
+  },
+  {
+    value: 'phone',
+    label: 'Telefon araması',
+    description: 'Kullanıcı tek dokunuşla işletmeyi arar.',
+    needs: 'phone',
+  },
+  {
+    value: 'map_location',
+    label: 'Harita konumu',
+    description: 'Şehir ve ilçe seçerek işletme konumunu göster.',
+    needs: 'location',
+  },
+  {
+    value: 'business',
+    label: 'İşletme profili',
+    description: 'Trabzone’daki yayınlanmış işletme profiline gider.',
+    needs: 'target',
+  },
+  {
+    value: 'market_listing',
+    label: 'Marketplace ilanı',
+    description: 'Yayındaki marketplace ilanına gider.',
+    needs: 'target',
+  },
+  {
+    value: 'real_estate',
+    label: 'Emlak ilanı',
+    description: 'Yayındaki emlak ilanına gider.',
+    needs: 'target',
+  },
+  {
+    value: 'vehicle',
+    label: 'Vasıta ilanı',
+    description: 'Yayındaki vasıta ilanına gider.',
+    needs: 'target',
+  },
+  {
+    value: 'job',
+    label: 'İş ilanı',
+    description: 'Yayındaki iş ilanına gider.',
+    needs: 'target',
+  },
+  {
+    value: 'ride',
+    label: 'Yolculuk ilanı',
+    description: 'Yayındaki yolculuk ilanına gider.',
+    needs: 'target',
+  },
+  {
+    value: 'post',
+    label: 'Herkese açık gönderi',
+    description: 'Seçilen gönderiye gider.',
+    needs: 'target',
+  },
+  {
+    value: 'category',
+    label: 'Kategori sayfası',
+    description: 'Seçilen kategori listesine gider.',
+    needs: 'category',
+  },
+];
+
+/** Sihirbaz adımları — form dört anlaşılır aşamaya bölünür. */
+export const AD_STEPS: { key: string; title: string; description: string; icon: string }[] = [
+  {
+    key: 'basics',
+    title: 'Ne reklamı?',
+    description: 'Reklamveren, kampanya adı ve türü.',
+    icon: 'megaphone-outline',
+  },
+  {
+    key: 'targeting',
+    title: 'Kime, nerede?',
+    description: 'Şehir, ilçe, yerleşim ve tarih.',
+    icon: 'location-outline',
+  },
+  {
+    key: 'creative',
+    title: 'Görsel ve metin',
+    description: 'Banner metni, görseli ve butonu.',
+    icon: 'image-outline',
+  },
+  {
+    key: 'publish',
+    title: 'Yönlendirme ve yayın',
+    description: 'Tıklanınca ne olacak, bütçe ve kontrol.',
+    icon: 'rocket-outline',
+  },
+];
+
+/** Tek dokunuşla doldurulan hazır reklam şablonları. */
+export const AD_TEMPLATES: {
+  key: string;
+  label: string;
+  icon: string;
+  campaignType: string;
+  policyCategory: string;
+  title: string;
+  description: string;
+  ctaLabel: string;
+}[] = [
+  {
+    key: 'discount',
+    label: 'İndirim kampanyası',
+    icon: 'pricetag-outline',
+    campaignType: 'business_promo',
+    policyCategory: 'retail',
+    title: 'Bu hafta indirim var',
+    description: 'Seçili ürünlerde fırsatı kaçırma. Detaylar reklam sayfasında.',
+    ctaLabel: 'Fırsatı gör',
+  },
+  {
+    key: 'new_product',
+    label: 'Yeni ürün',
+    icon: 'sparkles-outline',
+    campaignType: 'business_promo',
+    policyCategory: 'general',
+    title: 'Yeni ürün raflarda',
+    description: 'Yeni gelen ürünleri ilk sen keşfet.',
+    ctaLabel: 'İncele',
+  },
+  {
+    key: 'opening',
+    label: 'Açılış / etkinlik',
+    icon: 'calendar-outline',
+    campaignType: 'event',
+    policyCategory: 'events',
+    title: 'Açılışa davetlisin',
+    description: 'Tarih ve konum bilgisi reklam sayfasında.',
+    ctaLabel: 'Detayları gör',
+  },
+  {
+    key: 'service',
+    label: 'Hizmet tanıtımı',
+    icon: 'construct-outline',
+    campaignType: 'service',
+    policyCategory: 'services',
+    title: 'Güvenilir yerel hizmet',
+    description: 'İhtiyacın olduğunda yanındayız. Hemen bilgi al.',
+    ctaLabel: 'Bilgi al',
+  },
+  {
+    key: 'listing',
+    label: 'İlan öne çıkar',
+    icon: 'layers-outline',
+    campaignType: 'listing_promo',
+    policyCategory: 'general',
+    title: 'İlanına daha çok göz',
+    description: 'İlanını öne çıkar, arayanlara daha hızlı ulaş.',
+    ctaLabel: 'İlanı gör',
+  },
 ];
 
 export const PLATFORMS: { value: AdPlatform; label: string }[] = [

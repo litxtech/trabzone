@@ -38,11 +38,21 @@ const RANK_LABELS: Record<RankKey, string> = {
 
 const formatNumber = (value: number) => Math.round(value).toLocaleString('tr-TR');
 
-const formatDay = (value: string) =>
-  new Date(`${value}T12:00:00`).toLocaleDateString('tr-TR', {
+/**
+ * Gün etiketi. `value` tam zaman damgası olarak da gelebilir; eskiden
+ * `${value}T12:00:00` geçersiz tarih üretip "RangeError: Invalid time value"
+ * fırlatıyordu. Artık yalnızca tarih öneki okunuyor, geçersiz değer "—" dönüyor.
+ */
+const formatDay = (value: string) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec((value ?? '').trim());
+  if (!match) return '—';
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString('tr-TR', {
     day: '2-digit',
     month: 'short',
   });
+};
 
 const formatDate = (value: string | null | undefined) => {
   if (!value) return '—';

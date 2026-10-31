@@ -31,6 +31,10 @@ const ACTION_LABELS: Record<string, string> = {
   'cash.transaction': 'Kasa hareketi oluşturuldu',
   'review_published': 'Yorum yayınlandı',
   'review_hidden': 'Yorum gizlendi',
+  'complaint.created': 'Şikayet / destek kaydı oluşturuldu',
+  'complaint.replied': 'Şikayete yanıt verildi',
+  'complaint.updated': 'Şikayet güncellendi',
+  'complaint.escalated': 'Şikayet Trabzone desteğine eskale edildi',
   'document.created': 'Belge oluşturuldu',
 };
 
@@ -39,6 +43,7 @@ const ICONS: Record<string, React.ComponentProps<typeof Ionicons>['name']> = {
   payment: 'card-outline',
   cash: 'wallet-outline',
   review: 'star-outline',
+  complaint: 'shield-checkmark-outline',
   document: 'document-text-outline',
   staff: 'people-outline',
   property: 'business-outline',

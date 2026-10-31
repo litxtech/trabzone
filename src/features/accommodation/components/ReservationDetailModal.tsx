@@ -20,6 +20,7 @@ import { exportDocumentPdf } from '../utils/pdf-excel-export';
 import {
   BOOKING_MODE_LABELS,
   SOURCE_LABELS,
+  centsToInput,
   formatDate,
   formatDateTime,
   formatMoneyCents,
@@ -107,6 +108,8 @@ export function ReservationDetailModal({
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentNote, setPaymentNote] = useState('');
   const [cashAccountId, setCashAccountId] = useState<string | null>(null);
+  /** Ödeme alındı kaydını geri alma (iade) onay paneli. */
+  const [paymentCancelOpen, setPaymentCancelOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [documentLoading, setDocumentLoading] = useState(false);
@@ -135,6 +138,7 @@ export function ReservationDetailModal({
     setEditMode(false);
     setAction(null);
     setPaymentOpen(false);
+    setPaymentCancelOpen(false);
     setError(null);
     setInfo(null);
   }, [data?.id]);
@@ -158,6 +162,7 @@ export function ReservationDetailModal({
     setEditMode(false);
     setAction(null);
     setPaymentOpen(false);
+    setPaymentCancelOpen(false);
     setError(null);
     setInfo(null);
     onClose();
@@ -227,6 +232,26 @@ export function ReservationDetailModal({
     }
   };
 
+  const remainingCents = data ? Math.max(0, data.total_cents - data.paid_cents) : 0;
+
+  /**
+   * "Ödeme alındı" kısayolu: kalan bakiyeyi peşin doldurur. Tahsilat
+   * kaydedildiğinde rezervasyonun ödeme durumu sunucuda otomatik güncellenir.
+   */
+  const openPaymentPanel = (kind: 'payment' | 'refund' = 'payment') => {
+    if (!data) return;
+    const seed = kind === 'payment' ? remainingCents : data.paid_cents;
+    setPaymentKind(kind);
+    setPaymentAmount(seed > 0 ? centsToInput(seed) : '');
+    setPaymentMethod('cash');
+    setPaymentNote('');
+    setPaymentOpen(true);
+    setPaymentCancelOpen(false);
+    setAction(null);
+    setError(null);
+    setInfo(null);
+  };
+
   const addPayment = async () => {
     if (!data) return;
     setError(null);
@@ -235,6 +260,15 @@ export function ReservationDetailModal({
       setError('Geçerli bir tutar gir.');
       return;
     }
+    /*
+     * Hesap seçilmediyse ödeme yöntemine uyan ilk kasa hesabı kullanılır.
+     * Aksi halde tahsilat rezervasyona işleniyor ama kasaya düşmüyordu.
+     */
+    const accountKind = paymentKind === 'charge' ? 'cash' : paymentMethod;
+    const accountId =
+      cashAccountId ??
+      (cash.data?.accounts ?? []).find((account) => account.kind === accountKind)?.id ??
+      null;
     try {
       await addFolio.mutateAsync({
         reservationId: data.id,
@@ -243,16 +277,50 @@ export function ReservationDetailModal({
         amountCents: amount,
         description: paymentNote.trim() || (paymentKind === 'payment' ? 'Rezervasyon tahsilatı' : paymentKind === 'refund' ? 'İade' : 'Ek hizmet'),
         method: paymentKind === 'payment' || paymentKind === 'refund' ? paymentMethod : null,
-        cashAccountId: paymentKind === 'payment' || paymentKind === 'refund' ? cashAccountId : null,
+        cashAccountId: paymentKind === 'payment' || paymentKind === 'refund' ? accountId : null,
         occurredOn: todayIso(),
       });
       setPaymentAmount('');
       setPaymentNote('');
       setPaymentOpen(false);
       setInfo('Kasa hareketi kaydedildi.');
-      await refresh();
+      // Ödeme sonrası detay açık kalır: kalan bakiye ve ödeme durumu güncellenir.
+      await detail.refetch();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Ödeme kaydedilemedi.');
+    }
+  };
+
+  /**
+   * "Ödeme alındı" işlemini geri alır: tahsil edilen tutar kadar iade
+   * hareketi yazar. Sunucu paid_cents değerini ve ödeme durumunu günceller;
+   * böylece kayıt silinmeden izlenebilir kalır.
+   */
+  const cancelPayment = async () => {
+    if (!data || data.paid_cents <= 0) return;
+    setError(null);
+    // Tahsilatın yapıldığı yöntem/kasa hesabı bulunursa iade aynı hesaba işlenir.
+    const lastPayment = [...data.folio].reverse().find((item) => item.kind === 'payment');
+    const method = (lastPayment?.method as 'cash' | 'pos' | 'bank' | null) ?? 'cash';
+    const accountId =
+      cashAccountId ?? (cash.data?.accounts ?? []).find((account) => account.kind === method)?.id ?? null;
+    try {
+      await addFolio.mutateAsync({
+        reservationId: data.id,
+        kind: 'refund',
+        category: 'other',
+        amountCents: data.paid_cents,
+        description: 'Ödeme alındı iptali',
+        method,
+        cashAccountId: accountId,
+        occurredOn: todayIso(),
+      });
+      setPaymentCancelOpen(false);
+      setPaymentOpen(false);
+      setInfo('Ödeme alındı iptal edildi.');
+      await detail.refetch();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Ödeme iptal edilemedi.');
     }
   };
 
@@ -315,6 +383,8 @@ export function ReservationDetailModal({
               onPress={() => {
                 setEditMode((current) => !current);
                 setAction(null);
+                setPaymentOpen(false);
+                setPaymentCancelOpen(false);
                 setError(null);
               }}
               style={styles.footerButton}
@@ -428,11 +498,45 @@ export function ReservationDetailModal({
                 ))}
                 <Pressable
                   accessibilityRole="button"
+                  accessibilityLabel="Ödeme alındı"
+                  onPress={() => {
+                    if (remainingCents > 0) {
+                      openPaymentPanel('payment');
+                    } else if (data.paid_cents > 0) {
+                      // Tahsilat tamamsa aynı düğme iptal onayını açar.
+                      setPaymentOpen(false);
+                      setPaymentCancelOpen(true);
+                      setAction(null);
+                      setError(null);
+                    }
+                  }}
+                  style={[
+                    styles.actionButton,
+                    {
+                      backgroundColor:
+                        remainingCents > 0 ? theme.colors.successSoft : theme.colors.primarySoft,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name={remainingCents > 0 ? 'cash' : 'checkmark-done'}
+                    size={15}
+                    color={remainingCents > 0 ? theme.colors.success : theme.colors.primaryDeep}
+                  />
+                  <AppText
+                    variant="caption"
+                    color={remainingCents > 0 ? 'success' : 'primaryDeep'}
+                    style={styles.actionLabel}
+                  >
+                    Ödeme alındı
+                  </AppText>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
                   accessibilityLabel="Ödeme ekle"
                   onPress={() => {
-                    setPaymentOpen(true);
-                    setPaymentAmount(String(((data.total_cents - data.paid_cents) / 100).toFixed(0)));
-                    setPaymentMethod('cash');
+                    openPaymentPanel('payment');
+                    setPaymentAmount('');
                   }}
                   style={[styles.actionButton, { backgroundColor: theme.colors.successSoft }]}
                 >
@@ -526,6 +630,32 @@ export function ReservationDetailModal({
                 </AccCard>
               ) : null}
 
+              {paymentCancelOpen ? (
+                <AccCard padding={13} style={[styles.actionPanel, { borderColor: theme.colors.danger }]}>
+                  <AppText variant="bodyStrong">Ödeme alındı iptal edilsin mi?</AppText>
+                  <AppText variant="caption" color="textTertiary">
+                    {formatMoneyCents(data.paid_cents, data.currency)} tutarındaki tahsilat iade
+                    hareketi olarak kaydedilir; rezervasyonun ödeme durumu yeniden hesaplanır.
+                    Kayıt silinmez, işlem geçmişinde iz kalır.
+                  </AppText>
+                  <View style={styles.buttonRow}>
+                    <Button
+                      label="Vazgeç"
+                      variant="outline"
+                      onPress={() => setPaymentCancelOpen(false)}
+                      style={styles.flex}
+                    />
+                    <Button
+                      label="Ödeme alındı iptal"
+                      variant="danger"
+                      loading={addFolio.isPending}
+                      onPress={() => void cancelPayment()}
+                      style={styles.flex}
+                    />
+                  </View>
+                </AccCard>
+              ) : null}
+
               <View style={{ gap: 6 }}>
                 <AppText variant="bodyStrong">İşlem geçmişi</AppText>
                 {data.history.length === 0 ? (
@@ -590,6 +720,65 @@ export function ReservationDetailModal({
           ) : (
             <View style={styles.editForm}>
               <InfoBanner text="Tarih, oda veya fiyat değişikliği sunucuda müsaitlik ve çakışma kontrolünden geçer. Dış kanal rezervasyonlarında kısıtlar uygulanabilir." />
+
+              <AccCard padding={13} style={[styles.actionPanel, { borderColor: theme.colors.borderStrong }]}>
+                <AppText variant="overline" color="primaryDeep">
+                  ÖDEME
+                </AppText>
+                <KeyValueRow
+                  label="Tahsil edilen"
+                  value={formatMoneyCents(data.paid_cents, data.currency)}
+                />
+                <KeyValueRow
+                  label="Kalan bakiye"
+                  value={formatMoneyCents(remainingCents, data.currency)}
+                />
+                {data.paid_cents > 0 ? (
+                  paymentCancelOpen ? (
+                    <View style={styles.buttonRow}>
+                      <Button
+                        label="Vazgeç"
+                        variant="outline"
+                        onPress={() => setPaymentCancelOpen(false)}
+                        style={styles.flex}
+                      />
+                      <Button
+                        label="Ödeme alındı iptal"
+                        variant="danger"
+                        loading={addFolio.isPending}
+                        onPress={() => void cancelPayment()}
+                        style={styles.flex}
+                      />
+                    </View>
+                  ) : (
+                    <Button
+                      label="Ödeme alındı iptal"
+                      variant="outline"
+                      leftIcon={
+                        <Ionicons name="close-circle-outline" size={16} color={theme.colors.danger} />
+                      }
+                      onPress={() => setPaymentCancelOpen(true)}
+                    />
+                  )
+                ) : (
+                  <AppText variant="caption" color="textTertiary">
+                    Tahsil edilmiş ödeme yok. Ödeme almak için üstteki Ödeme alındı düğmesini kullan.
+                  </AppText>
+                )}
+                {remainingCents > 0 ? (
+                  <Button
+                    label="Ödeme alındı"
+                    size="sm"
+                    variant="outline"
+                    leftIcon={<Ionicons name="cash-outline" size={16} color={theme.colors.success} />}
+                    onPress={() => {
+                      setEditMode(false);
+                      openPaymentPanel('payment');
+                    }}
+                  />
+                ) : null}
+              </AccCard>
+
               <View style={styles.row}>
                 <TextField label="Misafir adı" value={guestName} onChangeText={setGuestName} containerStyle={styles.flex} />
                 <TextField label="Telefon" value={guestPhone} onChangeText={setGuestPhone} keyboardType="phone-pad" containerStyle={styles.flex} />

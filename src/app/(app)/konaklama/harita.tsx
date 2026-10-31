@@ -1,19 +1,28 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 
 import { AppImage, AppText, Screen } from '@/components/ui';
 import { MapCanvas } from '@/features/map/components/MapCanvas';
-import type { MapPoint } from '@/features/map/types';
+import type { MapFocus } from '@/features/map/components/map-canvas-types';
+import type { MapCamera, MapPoint } from '@/features/map/types';
+import { boundsOf, zoomForBounds } from '@/features/map/utils/geo';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useRouter } from '@/utils/router';
 
 import { EmptyState, InlineError } from '@/features/accommodation/components/AccommodationUI';
 import { AURORA, GlassPill } from '@/features/accommodation/components/PremiumUI';
-import { usePropertySearch } from '@/features/accommodation/hooks/use-accommodation';
+import { usePropertyMapPoints } from '@/features/accommodation/hooks/use-accommodation';
 import { accommodationMediaUrl } from '@/features/accommodation/services/accommodation-media-service';
-import type { PropertyType } from '@/features/accommodation/types';
+import type { MapPropertyPoint, PropertyType } from '@/features/accommodation/types';
 import {
   PROPERTY_TYPE_LABELS,
   PROPERTY_TYPE_OPTIONS,
@@ -21,58 +30,134 @@ import {
   formatMoneyCents,
 } from '@/features/accommodation/utils/format';
 
-const TRABZON = { lat: 41.0027, lng: 39.7168, zoom: 11 };
+const TRABZON: MapCamera = { lat: 41.0027, lng: 39.7168, zoom: 11 };
+
+/** Tesis türüne göre premium iğne ikonu. */
+const TYPE_ICONS: Record<PropertyType, string> = {
+  hotel: 'bed',
+  bungalow: 'home',
+  apartment: 'business',
+  pension: 'cafe',
+  villa: 'sparkles',
+};
+
+const PRICE_FORMAT = new Intl.NumberFormat('tr-TR', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+});
 
 export default function AccommodationMapScreen() {
   const { theme, scheme } = useTheme();
   const router = useRouter();
+  const { width, height } = useWindowDimensions();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<PropertyType | null>(null);
 
-  const search = usePropertySearch({ limit: 100, offset: 0, sort: 'rating' });
-  const allProperties = useMemo(
-    () => (search.data?.items ?? []).filter((item) => item.lat != null && item.lng != null),
-    [search.data?.items],
-  );
+  const mapQuery = usePropertyMapPoints();
+  const allProperties = useMemo(() => mapQuery.data ?? [], [mapQuery.data]);
   const properties = useMemo(
     () => (typeFilter ? allProperties.filter((item) => item.property_type === typeFilter) : allProperties),
     [allProperties, typeFilter],
   );
+
+  const [camera, setCamera] = useState<MapCamera>(TRABZON);
+  const [focus, setFocus] = useState<MapFocus | null>(null);
+  // Kamera yalnızca iğne kümesi gerçekten değiştiğinde yeniden sığdırılır;
+  // arka plan yenilemeleri kullanıcının kaydırdığı görünümü bozmaz.
+  const fittedSignature = useRef('');
+
+  const fitCamera = useCallback(
+    (items: MapPropertyPoint[]) => {
+      const points = items
+        .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng))
+        .map((item) => ({ lat: item.lat, lng: item.lng }));
+      const bounds = boundsOf(points);
+      if (!bounds) {
+        setCamera(TRABZON);
+        setFocus({ camera: TRABZON, nonce: Date.now() });
+        return;
+      }
+      // Alt karusel ve üst arama katmanı haritanın bir kısmını kaplar; sığdırma
+      // hesabı görünür alanı kullanır ki iğneler panel altında kalmasın.
+      const viewport = {
+        width: Math.max(width - 32, 280),
+        height: Math.max(height - 400, 240),
+      };
+      const zoom =
+        points.length === 1
+          ? 14.5
+          : zoomForBounds(bounds, viewport);
+      const next: MapCamera = {
+        lat: (bounds.north + bounds.south) / 2,
+        lng: (bounds.east + bounds.west) / 2,
+        zoom,
+      };
+      setCamera(next);
+      setFocus({ camera: next, nonce: Date.now() });
+    },
+    [height, width],
+  );
+
+  useEffect(() => {
+    const signature = `${typeFilter ?? 'all'}|${properties.map((item) => item.id).join(',')}`;
+    if (signature === fittedSignature.current) {
+      return;
+    }
+    fittedSignature.current = signature;
+    fitCamera(properties);
+  }, [fitCamera, properties, typeFilter]);
 
   const markers: MapPoint[] = useMemo(
     () =>
       properties.map((property) => ({
         id: property.id,
         kind: 'place',
-        lat: property.lat as number,
-        lng: property.lng as number,
+        lat: property.lat,
+        lng: property.lng,
         title: property.name,
         subtitle: property.district,
         label: property.price_from_cents
-          ? new Intl.NumberFormat('tr-TR', { notation: 'compact', maximumFractionDigits: 1 }).format(
-              property.price_from_cents / 100,
-            )
-          : null,
-        tone: 'primary',
-        color: selectedId === property.id ? theme.colors.accent : theme.colors.primaryDeep,
+          ? `${PRICE_FORMAT.format(property.price_from_cents / 100)} ₺`
+          : PROPERTY_TYPE_LABELS[property.property_type],
+        icon: TYPE_ICONS[property.property_type],
+        premium: true,
+        // Seçili tesisin çerçevesi vurgu rengine döner.
+        color: selectedId === property.id ? theme.colors.accent : null,
         meta: { propertyId: property.id },
       })),
-    [properties, selectedId, theme.colors.accent, theme.colors.primaryDeep],
+    [properties, selectedId, theme.colors.accent],
   );
 
   const carousel = selectedId
     ? [...properties].sort((a, b) => (a.id === selectedId ? -1 : b.id === selectedId ? 1 : 0))
     : properties;
 
+  const selectProperty = (property: MapPropertyPoint) => {
+    setSelectedId(property.id);
+    const next: MapCamera = {
+      lat: property.lat,
+      lng: property.lng,
+      zoom: Math.max(camera.zoom, 15),
+    };
+    setCamera(next);
+    setFocus({ camera: next, nonce: Date.now() });
+  };
+
   return (
     <Screen padded={false} edges={['top', 'left', 'right']} style={styles.screen}>
       <MapCanvas
-        initialCamera={TRABZON}
+        initialCamera={camera}
+        focus={focus}
         markers={markers}
         dark={scheme === 'dark'}
         bottomInset={286}
-        onMarkerPress={(point) => setSelectedId(point.id)}
-        onCameraChange={() => undefined}
+        onMarkerPress={(point) => {
+          const property = properties.find((item) => item.id === point.id);
+          if (property) {
+            selectProperty(property);
+          }
+        }}
+        onCameraChange={setCamera}
       />
 
       <View style={styles.topOverlay} pointerEvents="box-none">
@@ -85,9 +170,17 @@ export default function AccommodationMapScreen() {
               TRABZONE KONAKLAMA
             </AppText>
             <AppText variant="bodyStrong" numberOfLines={1}>
-              {search.isLoading ? 'Harita yükleniyor…' : `${formatNumber(properties.length)} tesis haritada`}
+              {mapQuery.isLoading ? 'Harita yükleniyor…' : `${formatNumber(properties.length)} tesis haritada`}
             </AppText>
           </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Tüm tesisleri haritaya sığdır"
+            onPress={() => fitCamera(properties)}
+            style={[styles.topIcon, { backgroundColor: theme.colors.primarySoft }]}
+          >
+            <Ionicons name="scan-outline" size={18} color={theme.colors.primaryDeep} />
+          </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Liste görünümüne dön"
@@ -116,7 +209,7 @@ export default function AccommodationMapScreen() {
         </ScrollView>
       </View>
 
-      {search.isLoading ? (
+      {mapQuery.isLoading ? (
         <View style={[styles.loading, { backgroundColor: theme.colors.surface }]}>
           <ActivityIndicator color={theme.colors.primary} />
           <AppText variant="caption" color="textSecondary">
@@ -125,21 +218,25 @@ export default function AccommodationMapScreen() {
         </View>
       ) : null}
 
-      {search.isError ? (
+      {mapQuery.isError ? (
         <View style={[styles.errorWrap, { backgroundColor: theme.colors.surface }]}>
           <InlineError
-            message={search.error instanceof Error ? search.error.message : 'Harita verisi yüklenemedi.'}
-            onRetry={() => void search.refetch()}
+            message={mapQuery.error instanceof Error ? mapQuery.error.message : 'Harita verisi yüklenemedi.'}
+            onRetry={() => void mapQuery.refetch()}
           />
         </View>
       ) : null}
 
-      {!search.isLoading && !search.isError && properties.length === 0 ? (
+      {!mapQuery.isLoading && !mapQuery.isError && properties.length === 0 ? (
         <View style={[styles.emptyWrap, { backgroundColor: theme.colors.surface }]}>
           <EmptyState
             icon="map-outline"
             title="Haritada tesis yok"
-            message="Konum bilgisi eklenmiş yayınlanmış tesis bulunamadı."
+            message={
+              typeFilter
+                ? 'Bu türde konumu yayınlanmış tesis bulunamadı. Farklı bir tür seç.'
+                : 'Haritada yalnızca konumu girilmiş, yayında ve doğrulanmış tesisler görünür.'
+            }
             compact
           />
         </View>

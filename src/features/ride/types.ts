@@ -189,6 +189,8 @@ export type RideVehiclePublic = {
   fuel_type?: string;
   accessibility: Record<string, unknown>;
   photo_paths?: string[];
+  /** Araç belgeleri yönetici tarafından onaylanmış mı? */
+  verified?: boolean;
 };
 
 export type RideSearchItem = {
@@ -215,6 +217,11 @@ export type RideSearchItem = {
   route_mode: RideRouteMode;
   booking_mode: RideBookingMode;
   visibility: RideVisibility;
+  /** 0226: kartta "yayınlandı" zamanı ve kullanıcının aktif rezervasyonu. */
+  created_at?: string;
+  published_at?: string | null;
+  my_reservation_id?: string | null;
+  my_reservation_status?: ReservationStatus | null;
   driver: RideDriverPublic;
   vehicle: RideVehiclePublic;
   match: {

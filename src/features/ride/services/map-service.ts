@@ -10,6 +10,11 @@ export type DrivingRoute = {
 
 export type MapResult<T> = { ok: true; data: T } | { ok: false; reason: string };
 
+/** Mapbox anahtarı yapılandırılmış mı? */
+export function hasMapboxToken(): boolean {
+  return Boolean(env.mapboxToken);
+}
+
 /**
  * Mapbox Directions API. Anahtar yoksa ağ isteği yapılmaz ve çağıran taraf
  * "harita yapılandırılmadı" durumunu gerçek mesafe uydurmadan gösterir.
@@ -29,8 +34,10 @@ export async function fetchDrivingRoute(
     `https://api.mapbox.com/directions/v5/mapbox/driving/${points}` +
     `?geometries=geojson&overview=full&steps=false&language=tr&access_token=${env.mapboxToken}`;
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8_000);
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: controller.signal });
     if (!response.ok) {
       return { ok: false, reason: `map_http_${response.status}` };
     }
@@ -55,7 +62,52 @@ export async function fetchDrivingRoute(
     };
   } catch {
     return { ok: false, reason: 'network' };
+  } finally {
+    clearTimeout(timeout);
   }
+}
+
+const routeCache = new Map<string, DrivingRoute>();
+const routeInflight = new Map<string, Promise<MapResult<DrivingRoute>>>();
+
+function routeCacheKey(origin: LatLng, dest: LatLng, waypoints: LatLng[]): string {
+  const point = (p: LatLng) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`;
+  return [point(origin), ...waypoints.map(point), point(dest)].join('|');
+}
+
+/**
+ * Güzergâh geometrisini önbellekle getirir.
+ *
+ * Aynı ilan birden fazla ekranda (liste, detay, takip) açıldığında Directions
+ * API'ye tekrar tekrar gidilmez; başarılı sonuç süreç boyunca saklanır.
+ * `force` yalnızca kullanıcı "yeniden dene" dediğinde kullanılır.
+ */
+export function fetchDrivingRouteCached(
+  origin: LatLng,
+  dest: LatLng,
+  waypoints: LatLng[] = [],
+  force = false,
+): Promise<MapResult<DrivingRoute>> {
+  const key = routeCacheKey(origin, dest, waypoints);
+  if (!force) {
+    const cached = routeCache.get(key);
+    if (cached) {
+      return Promise.resolve({ ok: true, data: cached });
+    }
+    const pending = routeInflight.get(key);
+    if (pending) {
+      return pending;
+    }
+  }
+  const request = fetchDrivingRoute(origin, dest, waypoints).then((result) => {
+    routeInflight.delete(key);
+    if (result.ok) {
+      routeCache.set(key, result.data);
+    }
+    return result;
+  });
+  routeInflight.set(key, request);
+  return request;
 }
 
 export type GeocodeResult = {
@@ -111,33 +163,53 @@ export async function geocodePlace(query: string): Promise<MapResult<GeocodeResu
 }
 
 /**
- * Statik harita önizlemesi. Gerçek yol geometrisi varsa path olarak çizilir.
+ * Statik harita önizlemesi.
+ *
+ * Mapbox Static Images API'nin `auto` yerleşimi kullanılır: rota, başlangıç,
+ * varış ve ara duraklar tek istekte çizilir ve kare otomatik olarak sığdırılır.
+ * Eski sürüm overlays'ları `/` ile ayırdığı için API 404 dönüyordu; bu da
+ * ilan detayındaki haritanın boş görünmesine neden oluyordu.
+ *
  * Token yoksa null döner; istemci sahte harita göstermez.
  */
 export function staticMapUrl(input: {
   origin: LatLng;
   dest: LatLng;
   geometry?: { lat: number; lng: number }[];
+  waypoints?: LatLng[];
   width?: number;
   height?: number;
+  padding?: number;
+  dark?: boolean;
 }): string | null {
   if (!env.mapboxToken) {
     return null;
   }
-  const width = Math.min(Math.max(input.width ?? 720, 200), 1280);
-  const height = Math.min(Math.max(input.height ?? 360, 160), 720);
-  const line = simplify(input.geometry?.length ? input.geometry : [input.origin, input.dest], 40)
+  const width = Math.min(Math.max(Math.round(input.width ?? 720), 200), 640);
+  const height = Math.min(Math.max(Math.round(input.height ?? 360), 160), 640);
+  const padding = Math.min(Math.max(Math.round(input.padding ?? 46), 0), 120);
+  const points = input.geometry?.length ? input.geometry : [input.origin, input.dest];
+  const line = simplify(points, 60)
     .map((point) => `${point.lng.toFixed(5)},${point.lat.toFixed(5)}`)
     .join(',');
-  const encoded = encodeURIComponent(line).replace(/%2C/g, ',');
-  const overlay = `path-4+4169F5-0.9(${encoded})`;
-  const center = `${((input.origin.lng + input.dest.lng) / 2).toFixed(4)},${(
-    (input.origin.lat + input.dest.lat) / 2
-  ).toFixed(4)}`;
+
+  const overlays: string[] = [];
+  if (line) {
+    // Rota çizgisi: 4 px, marka mavisi, %92 opaklık.
+    overlays.push(`path-4+2F6BFF-0.92(${line})`);
+  }
+  overlays.push(`pin-s-a+22C55E(${input.origin.lng.toFixed(5)},${input.origin.lat.toFixed(5)})`);
+  overlays.push(`pin-s-b+4169F5(${input.dest.lng.toFixed(5)},${input.dest.lat.toFixed(5)})`);
+  (input.waypoints ?? []).slice(0, 3).forEach((point, index) => {
+    overlays.push(
+      `pin-s-${'cdef'[index]}+F59E0B(${point.lng.toFixed(5)},${point.lat.toFixed(5)})`,
+    );
+  });
+
+  const style = input.dark === false ? 'mapbox/light-v11' : 'mapbox/dark-v11';
   return (
-    `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${overlay}/` +
-    `geojson(${encodeURIComponent(JSON.stringify({ type: 'Point', coordinates: [input.origin.lng, input.origin.lat] }))})/` +
-    `${center},9,0/${width}x${height}@2x?padding=40&access_token=${env.mapboxToken}`
+    `https://api.mapbox.com/styles/v1/${style}/static/${overlays.join(',')}/auto/` +
+    `${width}x${height}@2x?padding=${padding}&access_token=${env.mapboxToken}`
   );
 }
 

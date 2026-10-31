@@ -132,22 +132,9 @@ export function DrawerMenu({ onClose }: { onClose: () => void }) {
         />
         <DrawerDivider />
         <DrawerRow
-          icon="map-outline"
-          label="Haritada Oteller"
-          onPress={() => go('/konaklama/harita')}
-        />
-        <DrawerDivider />
-        <DrawerRow
           icon="calendar-outline"
           label="Rezervasyonlarım"
           onPress={() => go('/konaklama/rezervasyonlarim')}
-        />
-        <DrawerDivider />
-        <DrawerRow
-          icon="add-circle-outline"
-          label="Otelimi Ekle"
-          hint="Ücretsiz tesis kaydı"
-          onPress={() => go('/konaklama/otel-ekle')}
         />
         <DrawerDivider />
         <DrawerRow

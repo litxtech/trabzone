@@ -166,6 +166,7 @@ export type AdCampaignListItem = {
   spent_cents: number;
   budget_cents: number | null;
   total_impression_cap: number | null;
+  target_cities: string[];
   target_districts: string[];
   placements: AdPlacementKey[];
   reports: number;
@@ -207,6 +208,7 @@ export type AdCampaignFull = {
   budget_cents: number | null;
   cpm_cents: number | null;
   spent_cents: number;
+  target_cities: string[];
   target_districts: string[];
   platforms: AdPlatform[];
   review_note: string | null;
@@ -276,6 +278,7 @@ export type AdCampaignPayload = {
   per_user_daily_cap: number;
   budget_cents: number | null;
   cpm_cents: number | null;
+  target_cities: string[];
   target_districts: string[];
   platforms: AdPlatform[];
   placements: AdPlacementKey[];
@@ -327,10 +330,15 @@ export type AdAnalytics = {
 
 export type AdTargeting = {
   profile_districts: { district: string; users: number }[];
+  profile_cities: { city: string; users: number }[];
   users_without_district: number;
+  users_without_city: number;
   campaign_targets: { district: string; campaigns: number }[];
+  campaign_city_targets: { city: string; campaigns: number }[];
   untargeted_campaigns: number;
+  untargeted_city_campaigns: number;
   impressions_by_district_30d: { district: string; impressions: number }[];
+  impressions_by_city_30d: { city: string; impressions: number }[];
 };
 
 export type AdMediaAsset = {

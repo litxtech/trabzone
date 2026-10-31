@@ -38,6 +38,7 @@ const PERMISSIONS: { key: string; label: string; group: string }[] = [
   { key: 'guests', label: 'Misafir kayıtları', group: 'Operasyon' },
   { key: 'housekeeping', label: 'Kat hizmetleri', group: 'Operasyon' },
   { key: 'messages', label: 'Mesajlar', group: 'Operasyon' },
+  { key: 'complaints', label: 'Şikayet ve destek', group: 'Operasyon' },
   { key: 'calendar.view', label: 'Takvimi görüntüle', group: 'Takvim' },
   { key: 'rooms', label: 'Oda yönetimi', group: 'Tanım' },
   { key: 'rooms.view', label: 'Odaları görüntüle', group: 'Tanım' },

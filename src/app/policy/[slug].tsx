@@ -38,6 +38,10 @@ const COPY: Record<string, { title: string; icon: keyof typeof Ionicons.glyphMap
   'marketplace-rules': { title: 'Marketplace Kuralları', icon: 'storefront-outline' },
   'real-estate-rules': { title: 'Emlak İlan Kuralları', icon: 'home-outline' },
   'vehicle-rules': { title: 'Araç İlan Kuralları', icon: 'car-outline' },
+  'accommodation-guest-rights': {
+    title: 'Misafir Hakları, Eşit Konaklama ve İşletmeci Yükümlülükleri Politikası',
+    icon: 'bed-outline',
+  },
 };
 
 export default function LegalPolicyScreen() {

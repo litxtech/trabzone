@@ -102,10 +102,9 @@ export function SocialAuthButtons({ onError, showInlineError = true }: Props) {
 
   const disabled = pending !== null;
 
-  // Her sağlayıcı yalnızca uygulama içinde gerçekten açılabiliyorsa gösterilir:
-  // Apple native oturumu iOS'a özeldir; Google native girişi istemci kimliği
-  // tanımlıysa çalışır. Aksi halde kullanıcıyı tarayıcıya göndermek yerine
-  // buton hiç gösterilmez.
+  // Her sağlayıcı bu platformda açılabiliyorsa gösterilir. Apple iOS'ta native
+  // oturumla, Android'de web yetkilendirmesiyle; Google ise native seçici veya
+  // tarayıcı tabanlı PKCE akışıyla çalışır.
   const availability = socialAvailability();
 
   if (!availability.any) {

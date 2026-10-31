@@ -2,12 +2,15 @@ import { rpcError } from '@/services/rpc';
 import { appError } from '@/services/errors';
 import { supabase } from '@/services/supabase/client';
 import { fail, ok, type Result } from '@/utils/result';
+import { env } from '@/config/env';
 
 import type {
   AccommodationContext,
   AccommodationDocument,
   ActivityListData,
   AdminProperty,
+  AdminPropertyClaim,
+  AdminPropertyClaimList,
   AdminPropertyList,
   BookResult,
   BulkRateAction,
@@ -19,6 +22,11 @@ import type {
   CashOverview,
   CashTransaction,
   CommissionSummary,
+  ComplaintAssigneeListData,
+  ComplaintCreateInput,
+  ComplaintDetail,
+  ComplaintListData,
+  ComplaintUpdateInput,
   DailyReport,
   Dashboard,
   DocumentsListData,
@@ -26,6 +34,13 @@ import type {
   FrontDeskData,
   GuestListData,
   HousekeepingData,
+  LiteApiAdminStatus,
+  LiteApiBookingInput,
+  LiteApiBookingResult,
+  LiteApiRateOffer,
+  LiteApiRatesInput,
+  LiteApiRatesResponse,
+  LiteApiSyncResult,
   ManagedProperty,
   ManagedRatePlan,
   ManagedRoom,
@@ -34,14 +49,17 @@ import type {
   MediaItem,
   MessageListData,
   MessageThreadListData,
+  MyComplaintListData,
   MyReservation,
   MyReservationDetail,
   PropertyDocumentListData,
   PropertyInventory,
   PropertyMissingResponse,
   PropertySettings,
+  PropertySource,
   PublicFilters,
   PublicProperty,
+  MapPropertyPoint,
   Quote,
   RateCalendarData,
   ReportData,
@@ -57,8 +75,10 @@ import type {
   StaffRole,
   WebTracking,
   BookingMode,
+  ClaimStatus,
   MediaCategory,
   PaymentStatus,
+  PolicyConsentStatus,
   ReservationStatus,
 } from '../types';
 
@@ -81,6 +101,107 @@ async function call<T>(name: string, args: Record<string, unknown> = {}): Promis
   return ok(data as T);
 }
 
+type LiteApiEndpointFailure = {
+  ok?: false;
+  reason?: string;
+  message?: string;
+  confirmed?: boolean;
+};
+
+function liteApiErrorCode(reason: string | undefined) {
+  switch (reason) {
+    case 'booking_disabled':
+      return 'forbidden' as const;
+    case 'rate_limited':
+      return 'rate_limited' as const;
+    case 'not_configured':
+      return 'unknown' as const;
+    case 'invalid_property':
+    case 'invalid_dates':
+    case 'invalid_offer':
+    case 'invalid_guest':
+    case 'payment_not_supported':
+    case 'not_external_property':
+      return 'invalid_input' as const;
+    case 'offer_expired':
+    case 'price_changed':
+      return 'invalid_input' as const;
+    default:
+      return 'unknown' as const;
+  }
+}
+
+/**
+ * Sunucudaki `/api/liteapi-*` uç noktalarına istek atar.
+ *
+ * Sağlayıcı anahtarı istemciye hiçbir zaman inmez. Yönetici ve rezervasyon
+ * çağrılarında Supabase oturum jetonu `Authorization` başlığıyla gönderilir.
+ */
+async function liteApiEndpoint<T>(
+  path: string,
+  body: Record<string, unknown>,
+  options: { auth?: boolean; signal?: AbortSignal } = {},
+): Promise<Result<T>> {
+  const base = env.appUrl.replace(/\/+$/, '');
+  let token: string | undefined;
+  if (options.auth) {
+    const { data } = await supabase.auth.getSession();
+    token = data.session?.access_token;
+    if (!token) {
+      return fail(appError('session_missing'));
+    }
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+      signal: options.signal,
+    });
+  } catch {
+    return fail(appError('network'));
+  }
+
+  let payload: (T & LiteApiEndpointFailure) | null = null;
+  try {
+    payload = (await response.json()) as T & LiteApiEndpointFailure;
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok || !payload || payload.ok === false) {
+    const reason = payload?.reason;
+    if (response.status === 429 || reason === 'rate_limited') {
+      return fail(appError('rate_limited'));
+    }
+    return fail(
+      appError(
+        liteApiErrorCode(reason),
+        payload?.message ||
+          (response.status === 503
+            ? 'LiteAPI sunucuda yapılandırılmadı. Yönetici API anahtarını eklemeli.'
+            : 'İşlem tamamlanamadı. Kısa süre sonra tekrar dene.'),
+      ),
+    );
+  }
+
+  return ok(payload as T);
+}
+
+function normalizePropertySource(value: unknown): PropertySource {
+  return value === 'liteapi' ? 'liteapi' : 'manual';
+}
+
+function normalizeClaimStatus(value: unknown): ClaimStatus {
+  return value === 'pending' || value === 'verified' || value === 'rejected' ? value : 'unclaimed';
+}
+
 function dateOnly(value: Date): string {
   const month = `${value.getMonth() + 1}`.padStart(2, '0');
   const day = `${value.getDate()}`.padStart(2, '0');
@@ -98,7 +219,8 @@ export function todayIso(): string {
 }
 
 export function isoAddDays(iso: string, days: number): string {
-  const [year, month, day] = iso.split('-').map(Number);
+  // Saat dilimi ekli zaman damgası da gelebilir; yalnızca tarih öneki okunur.
+  const [year, month, day] = iso.slice(0, 10).split('-').map(Number);
   return dateOnly(addDays(new Date(year ?? 1970, (month ?? 1) - 1, day ?? 1), days));
 }
 
@@ -210,8 +332,8 @@ export type SearchParams = {
   offset?: number;
 };
 
-export function searchProperties(params: SearchParams = {}): Promise<Result<SearchResponse>> {
-  return call<SearchResponse>('acc_search', {
+export async function searchProperties(params: SearchParams = {}): Promise<Result<SearchResponse>> {
+  const result = await call<SearchResponse>('acc_search_v2', {
     p_property_type: params.propertyType ?? null,
     p_district_id: params.districtId ?? null,
     p_guests: params.guests ?? null,
@@ -225,10 +347,120 @@ export function searchProperties(params: SearchParams = {}): Promise<Result<Sear
     p_limit: params.limit ?? 20,
     p_offset: params.offset ?? 0,
   });
+  if (!result.ok) return result;
+  return ok({
+    ...result.data,
+    items: (result.data.items ?? []).map((property) => ({
+      ...property,
+      source: normalizePropertySource(property.source),
+      claim_status: normalizeClaimStatus(property.claim_status),
+      payment_at_property: property.payment_at_property === true,
+      booking_enabled: property.booking_enabled === true,
+    })),
+  });
 }
 
-export function fetchPublicProperty(propertyId: string): Promise<Result<PublicProperty>> {
-  return call<PublicProperty>('acc_property_public', { p_property_id: propertyId });
+export async function fetchPublicProperty(propertyId: string): Promise<Result<PublicProperty>> {
+  const result = await call<PublicProperty>('acc_property_public_v2', { p_property_id: propertyId });
+  if (!result.ok) return result;
+  const data = result.data;
+  return ok({
+    ...data,
+    source: normalizePropertySource(data.source),
+    claim_status: normalizeClaimStatus(data.claim_status),
+    external_photos: Array.isArray(data.external_photos) ? data.external_photos : [],
+    payment_at_property: data.payment_at_property === true,
+    booking_enabled: data.booking_enabled === true,
+    commission_rate: Number(data.commission_rate) || 0,
+  });
+}
+
+/**
+ * Haritada gösterilecek tesisler. Sayfalama sınırına takılmayan ayrı bir
+ * fonksiyondur; yalnızca konumu olan yayınlanmış + doğrulanmış tesisler döner.
+ */
+export async function fetchMapProperties(limit = 500): Promise<Result<MapPropertyPoint[]>> {
+  const result = await call<MapPropertyPoint[]>('acc_map_points', { p_limit: limit });
+  if (!result.ok) {
+    return result;
+  }
+  const rows = Array.isArray(result.data) ? result.data : [];
+  return ok(
+    rows
+      .map((row) => {
+        const lat = Number(row?.lat);
+        const lng = Number(row?.lng);
+        if (!row?.id || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+          return null;
+        }
+        return {
+          ...row,
+          lat,
+          lng,
+          rating_avg: Number(row.rating_avg) || 0,
+          rating_count: Number(row.rating_count) || 0,
+          price_from_cents: row.price_from_cents == null ? null : Number(row.price_from_cents),
+          booking_modes: Array.isArray(row.booking_modes) ? row.booking_modes : [],
+          verified: row.verified !== false,
+          source: normalizePropertySource(row.source),
+        } satisfies MapPropertyPoint;
+      })
+      .filter((row): row is MapPropertyPoint => row !== null),
+  );
+}
+
+// -----------------------------------------------------------------------------
+// LiteAPI sağlayıcı köprüsü
+// -----------------------------------------------------------------------------
+
+export async function fetchLiteApiRates(
+  input: LiteApiRatesInput,
+  signal?: AbortSignal,
+): Promise<Result<LiteApiRatesResponse>> {
+  return liteApiEndpoint<LiteApiRatesResponse>(
+    '/api/liteapi-rates',
+    {
+      propertyId: input.propertyId,
+      checkIn: input.checkIn,
+      checkOut: input.checkOut,
+      adults: input.adults ?? 2,
+      children: input.children ?? 0,
+      childrenAges: input.childrenAges ?? [],
+      currency: input.currency ?? 'TRY',
+      refresh: input.refresh === true,
+    },
+    { signal },
+  );
+}
+
+export function bookLiteApiOffer(input: LiteApiBookingInput): Promise<Result<LiteApiBookingResult>> {
+  return liteApiEndpoint<LiteApiBookingResult>(
+    '/api/liteapi-book',
+    {
+      propertyId: input.propertyId,
+      offerId: input.offerId,
+      checkIn: input.checkIn,
+      checkOut: input.checkOut,
+      adults: input.adults ?? 2,
+      children: input.children ?? 0,
+      childrenAges: input.childrenAges ?? [],
+      currency: input.currency ?? 'TRY',
+      expectedPriceCents: input.expectedPriceCents,
+      guest: input.guest,
+    },
+    { auth: true },
+  );
+}
+
+/** API kaynaklı bir tesisi işletmeci olarak sahiplenme talebi oluşturur. */
+export function claimExternalProperty(
+  propertyId: string,
+  note?: string | null,
+): Promise<Result<{ claim_id: string; status: string }>> {
+  return call<{ claim_id: string; status: string }>('acc_claim_external_property', {
+    p_property_id: propertyId,
+    p_note: note ?? null,
+  });
 }
 
 export function quoteStay(input: {
@@ -384,6 +616,40 @@ export function saveProperty(
     p_property_id: options.propertyId ?? null,
     p_payload: input,
     p_submit: options.submit ?? false,
+  });
+}
+
+/** Otel başvurusunun zorunlu misafir hakları politikası kabul durumu. */
+export function fetchPolicyConsent(propertyId: string): Promise<Result<PolicyConsentStatus>> {
+  return call<PolicyConsentStatus>('acc_policy_consent', { p_property_id: propertyId });
+}
+
+export function acceptPolicy(input: {
+  propertyId: string;
+  terms: boolean;
+  noMarriageCertificate: boolean;
+  equalService: boolean;
+  userAgent?: string | null;
+  source?: 'mobile_application' | 'web_application';
+}): Promise<
+  Result<{
+    property_id: string;
+    slug: string;
+    version: number;
+    content_hash: string;
+    accepted: boolean;
+    accepted_at: string;
+  }>
+> {
+  return call('acc_policy_accept', {
+    p_property_id: input.propertyId,
+    p_flags: {
+      terms: input.terms,
+      no_marriage_certificate: input.noMarriageCertificate,
+      equal_service: input.equalService,
+    },
+    p_user_agent: input.userAgent ?? null,
+    p_source: input.source ?? 'mobile_application',
   });
 }
 
@@ -1062,7 +1328,14 @@ export function addMedia(input: {
 
 export function updateMedia(
   mediaId: string,
-  payload: { category?: MediaCategory; caption?: string | null; cover?: boolean; sortOrder?: number },
+  payload: {
+    category?: MediaCategory;
+    caption?: string | null;
+    cover?: boolean;
+    sortOrder?: number;
+    /** Boş string gönderilirse medya tesise taşınır. */
+    roomTypeId?: string | null;
+  },
 ): Promise<Result<MediaItem>> {
   return call<MediaItem>('acc_media_update', {
     p_media_id: mediaId,
@@ -1071,6 +1344,7 @@ export function updateMedia(
       ...(payload.caption !== undefined ? { caption: payload.caption } : {}),
       ...(payload.cover !== undefined ? { cover: payload.cover } : {}),
       ...(payload.sortOrder !== undefined ? { sort_order: payload.sortOrder } : {}),
+      ...(payload.roomTypeId !== undefined ? { room_type_id: payload.roomTypeId } : {}),
     },
   });
 }
@@ -1166,6 +1440,124 @@ export function setReviewStatus(
 }
 
 // -----------------------------------------------------------------------------
+// Şikayet ve destek yönetimi
+// -----------------------------------------------------------------------------
+
+export type ComplaintFilters = {
+  status?: string | null;
+  priority?: string | null;
+  category?: string | null;
+  query?: string | null;
+  assignedTo?: string | null;
+  limit?: number;
+  offset?: number;
+};
+
+export function fetchComplaints(
+  propertyId: string,
+  filters: ComplaintFilters = {},
+): Promise<Result<ComplaintListData>> {
+  return call<ComplaintListData>('acc_complaints_list', {
+    p_property_id: propertyId,
+    p_status: filters.status ?? null,
+    p_priority: filters.priority ?? null,
+    p_category: filters.category ?? null,
+    p_query: filters.query?.trim() || null,
+    p_assigned_to: filters.assignedTo ?? null,
+    p_limit: filters.limit ?? 60,
+    p_offset: filters.offset ?? 0,
+  });
+}
+
+export function fetchComplaint(complaintId: string): Promise<Result<ComplaintDetail>> {
+  return call<ComplaintDetail>('acc_complaint_get', { p_complaint_id: complaintId });
+}
+
+export function createComplaint(
+  propertyId: string,
+  input: ComplaintCreateInput,
+): Promise<Result<ComplaintDetail>> {
+  return call<ComplaintDetail>('acc_complaint_create', {
+    p_property_id: propertyId,
+    p_payload: input,
+  });
+}
+
+export function updateComplaint(
+  complaintId: string,
+  input: ComplaintUpdateInput,
+): Promise<Result<ComplaintDetail>> {
+  return call<ComplaintDetail>('acc_complaint_update', {
+    p_complaint_id: complaintId,
+    p_payload: input,
+  });
+}
+
+export function sendComplaintMessage(
+  complaintId: string,
+  body: string,
+  internal = false,
+): Promise<Result<ComplaintDetail>> {
+  return call<ComplaintDetail>('acc_complaint_message', {
+    p_complaint_id: complaintId,
+    p_body: body,
+    p_internal: internal,
+  });
+}
+
+export function escalateComplaint(
+  complaintId: string,
+  note?: string | null,
+): Promise<Result<ComplaintDetail>> {
+  return call<ComplaintDetail>('acc_complaint_escalate', {
+    p_complaint_id: complaintId,
+    p_note: note ?? null,
+  });
+}
+
+export function rateComplaint(
+  complaintId: string,
+  score: number,
+  comment?: string | null,
+): Promise<Result<ComplaintDetail>> {
+  return call<ComplaintDetail>('acc_complaint_rate', {
+    p_complaint_id: complaintId,
+    p_score: score,
+    p_comment: comment ?? null,
+  });
+}
+
+export function fetchComplaintAssignees(
+  propertyId: string,
+): Promise<Result<ComplaintAssigneeListData>> {
+  return call<ComplaintAssigneeListData>('acc_complaint_assignees', {
+    p_property_id: propertyId,
+  });
+}
+
+export function fetchMyComplaints(reservationId?: string | null): Promise<Result<MyComplaintListData>> {
+  return call<MyComplaintListData>('acc_my_complaints', {
+    p_reservation_id: reservationId ?? null,
+  });
+}
+
+export function createGuestComplaint(input: {
+  reservation_id: string;
+  category: ComplaintCreateInput['category'];
+  subject: string;
+  description: string;
+  priority?: ComplaintCreateInput['priority'];
+}): Promise<Result<ComplaintDetail>> {
+  return call<ComplaintDetail>('acc_complaint_guest_create', {
+    p_reservation_id: input.reservation_id,
+    p_category: input.category,
+    p_subject: input.subject,
+    p_description: input.description,
+    p_priority: input.priority ?? 'normal',
+  });
+}
+
+// -----------------------------------------------------------------------------
 // Belgeler
 // -----------------------------------------------------------------------------
 
@@ -1210,6 +1602,53 @@ export function fetchAdminProperties(status?: string): Promise<Result<AdminPrope
   return call<AdminPropertyList>('acc_admin_properties', { p_status: status ?? null });
 }
 
+export function fetchLiteApiAdminStatus(): Promise<Result<LiteApiAdminStatus>> {
+  return call<LiteApiAdminStatus>('acc_admin_liteapi_status');
+}
+
+export function triggerLiteApiSync(input: {
+  mode: 'test' | 'full';
+  limit?: number;
+  cursor?: number;
+  phase?: 'city' | 'radius';
+  runId?: string | null;
+  fetchDetail?: boolean;
+}): Promise<Result<LiteApiSyncResult>> {
+  return liteApiEndpoint<LiteApiSyncResult>(
+    '/api/liteapi-sync',
+    {
+      mode: input.mode,
+      limit: input.limit,
+      cursor: input.cursor ?? 0,
+      phase: input.phase ?? 'city',
+      runId: input.runId ?? null,
+      fetchDetail: input.fetchDetail,
+    },
+    { auth: true },
+  );
+}
+
+export function fetchAdminPropertyClaims(
+  status: 'pending' | 'approved' | 'rejected' | 'all' = 'pending',
+): Promise<Result<AdminPropertyClaimList>> {
+  return call<AdminPropertyClaimList>('acc_admin_property_claims', { p_status: status });
+}
+
+export function reviewAdminPropertyClaim(input: {
+  claimId: string;
+  approve: boolean;
+  note?: string | null;
+}): Promise<Result<{ ok: boolean; status: string; property_id: string }>> {
+  return call<{ ok: boolean; status: string; property_id: string }>(
+    'acc_admin_review_property_claim',
+    {
+      p_claim_id: input.claimId,
+      p_approve: input.approve,
+      p_note: input.note ?? null,
+    },
+  );
+}
+
 export function reviewProperty(input: {
   propertyId: string;
   approve: boolean;
@@ -1224,16 +1663,23 @@ export function reviewProperty(input: {
 
 export type {
   AdminProperty,
+  AdminPropertyClaim,
   BookingMode,
   Campaign,
   CashAccount,
   CashTransaction,
+  ClaimStatus,
+  LiteApiAdminStatus,
+  LiteApiRateOffer,
+  LiteApiRatesResponse,
+  LiteApiSyncResult,
   MediaItem,
   MessageThreadListData,
   MyReservation,
   PaymentStatus,
   PropertyInventory,
   PropertySettings,
+  PropertySource,
   PublicProperty,
   ReservationStatus,
 };

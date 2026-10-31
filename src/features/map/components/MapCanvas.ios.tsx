@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import type { MapPointKind } from '../types';
-import { initialsFor, markerTone, toneColor } from '../utils/map-theme';
+import { PREMIUM_MARKER, initialsFor, markerTone, toneColor } from '../utils/map-theme';
 import { MapCanvasFallback } from './MapCanvasFallback';
 import type { MapCanvasProps } from './map-canvas-types';
 
@@ -47,6 +47,7 @@ export function MapCanvas({
   userLocation,
   dark,
   interactive = true,
+  preview = false,
   onMarkerPress,
   onCameraChange,
   onMapPress,
@@ -99,6 +100,17 @@ export function MapCanvas({
             title: point.title,
             monogram: String(point.count ?? ''),
             tintColor: color,
+          };
+        }
+        // Premium işaret: Apple Maps balonunun rengi altın olur; fiyat/etiket
+        // monogramda, tesis adı çağrı başlığında gösterilir.
+        if (point.premium) {
+          return {
+            id: point.id,
+            coordinates: { latitude: point.lat, longitude: point.lng },
+            title: point.label ? `${point.title} · ${point.label}` : point.title,
+            monogram: point.label ?? initialsFor(point.title),
+            tintColor: point.color ?? PREMIUM_MARKER.border,
           };
         }
         if (point.label) {
@@ -184,7 +196,9 @@ export function MapCanvas({
     );
   }
 
-  if (!interactive) {
+  // Önizleme modunda da native harita gösterilir; dokunma davranışını çağıran
+  // ekran yönetir (kart genelde kendi basılabilir yüzeyinin içinde durur).
+  if (!interactive && !preview) {
     return (
       <MapCanvasFallback
         camera={baseCamera}

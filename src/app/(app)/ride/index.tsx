@@ -28,7 +28,7 @@ import {
 } from '@/features/ride/components/RideBits';
 import { RideOfferCard } from '@/features/ride/components/RideOfferCard';
 import { RideHeader } from '@/features/ride/components/RideHeader';
-import { useMyTrips, useRideProfile, useRideSearch } from '@/features/ride/hooks/use-ride';
+import { useMyTrips, useRideOffersRealtime, useRideProfile, useRideSearch } from '@/features/ride/hooks/use-ride';
 import type { RideScope } from '@/features/ride/types';
 import {
   SCOPE_LABEL,
@@ -67,6 +67,8 @@ export default function RideLobbyScreen() {
   const router = useRouter();
   const profile = useRideProfile();
   const trips = useMyTrips('upcoming');
+  // Açık ekran görünürken ilan kartları canlı güncellenir.
+  useRideOffersRealtime();
 
   const [scope, setScope] = useState<RideScope>('intracity');
   const [origin, setOrigin] = useState('');

@@ -20,6 +20,7 @@ import {
   useAdReportGenerate,
 } from '../hooks';
 import { CAMPAIGN_STATUS, formatCount, formatDateShort, formatMoneyCents } from '../labels';
+import { formatTargetLabel } from '../locations';
 import { adIssueLabel } from '../service';
 import type { AdCampaignListItem, AdCampaignStatus, AdTransition } from '../types';
 
@@ -78,6 +79,12 @@ export function CampaignsSection({
             <AppText variant="caption" color="textTertiary" numberOfLines={1}>
               {row.advertiser_name} · {row.title ?? 'Başlık yok'}
             </AppText>
+            <View style={styles.targetRow}>
+              <Ionicons name="location-outline" size={11} color={theme.colors.textTertiary} />
+              <AppText variant="caption" color="textTertiary" numberOfLines={1}>
+                {formatTargetLabel(row.target_cities ?? [], row.target_districts ?? [])}
+              </AppText>
+            </View>
             {row.destination_valid === false ? (
               <AppText variant="caption" color="danger" numberOfLines={1}>
                 {adIssueLabel(`destination_${row.destination_reason}`)}
@@ -455,6 +462,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1, minWidth: 0 },
   bold: { fontWeight: '700' },
   campaignCell: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 },
+  targetRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   thumb: { width: 54, height: 20 + 16, borderRadius: 8, overflow: 'hidden' },
   rowActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   searchWrap: {

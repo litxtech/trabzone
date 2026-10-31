@@ -25,9 +25,9 @@ export const typography = {
   },
   display: {
     fontFamily: fontFamilies.displayBold,
-    fontSize: 32,
-    lineHeight: 38,
-    letterSpacing: -0.6,
+    fontSize: 36,
+    lineHeight: 42,
+    letterSpacing: 0.3,
   },
   h1: {
     fontFamily: fontFamilies.display,
@@ -84,10 +84,10 @@ export const typography = {
     letterSpacing: Platform.select({ ios: 0.1, default: 0.2 }),
   },
   overline: {
-    fontFamily: fontFamilies.bold,
-    fontSize: 11,
-    lineHeight: 14,
-    letterSpacing: 1.1,
+    fontFamily: fontFamilies.displayBold,
+    fontSize: 13,
+    lineHeight: 18,
+    letterSpacing: 1.3,
   },
 } satisfies Record<string, TypeToken>;
 

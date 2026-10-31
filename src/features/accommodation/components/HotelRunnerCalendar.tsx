@@ -37,6 +37,7 @@ import {
   formatWeekdayShort,
   isoToDate,
   parseMoneyToCents,
+  reservationIsInactive,
   reservationTone,
   roomStatusTone,
   todayIso,
@@ -57,12 +58,12 @@ export type EmptyCalendarCell = {
 };
 
 const VIEW_OPTIONS: { value: CalendarViewMode; label: string; days: number; width: number }[] = [
-  { value: 'day', label: 'Günlük', days: 1, width: 320 },
-  { value: 'week', label: 'Haftalık', days: 7, width: 116 },
-  { value: 'fortnight', label: '14 gün', days: 14, width: 84 },
-  { value: 'month', label: 'Aylık', days: 30, width: 64 },
-  { value: 'compact', label: 'Kompakt', days: 14, width: 46 },
-  { value: 'wide', label: 'Geniş', days: 14, width: 150 },
+  { value: 'day', label: 'Günlük', days: 1, width: 300 },
+  { value: 'week', label: 'Haftalık', days: 7, width: 118 },
+  { value: 'fortnight', label: '14 gün', days: 14, width: 88 },
+  { value: 'month', label: 'Aylık', days: 30, width: 72 },
+  { value: 'compact', label: 'Kompakt', days: 14, width: 58 },
+  { value: 'wide', label: 'Geniş', days: 14, width: 152 },
 ];
 
 const MODE_OPTIONS = [
@@ -71,13 +72,59 @@ const MODE_OPTIONS = [
   { value: 'rooms', label: 'Odalar', icon: 'bed-outline' },
 ] as const;
 
-const HEADER_HEIGHT = 58;
-const TYPE_ROW_HEIGHT = 46;
-const PLAN_ROW_HEIGHT = 58;
-const ROOM_ROW_HEIGHT = 56;
-const POOL_ROW_HEIGHT = 54;
+type ModeIcon = React.ComponentProps<typeof Ionicons>['name'];
+
+const MODE_LABELS: Record<CalendarMode, string> = {
+  rates: 'Fiyat',
+  reservations: 'Rezervasyon',
+  rooms: 'Odalar',
+};
+
+const MODE_ICONS: Record<CalendarMode, ModeIcon> = {
+  rates: 'pricetags-outline',
+  reservations: 'albums-outline',
+  rooms: 'bed-outline',
+};
+
+const VIEW_LABELS: Record<CalendarViewMode, string> = {
+  day: 'Günlük',
+  week: 'Haftalık',
+  fortnight: '14 gün',
+  month: 'Aylık',
+  compact: 'Kompakt',
+  wide: 'Geniş',
+};
+
+const VIEW_SHEET_LABELS: Record<CalendarViewMode, string> = {
+  day: 'Günlük · 1 gün',
+  week: 'Haftalık · 7 gün',
+  fortnight: 'İki haftalık · 14 gün',
+  month: 'Aylık · 30 gün',
+  compact: 'Kompakt · 14 gün',
+  wide: 'Geniş · 14 gün',
+};
+
+/**
+ * HotelRunner ile aynı renk dili: gelen yeşil, gelip giden kırmızı,
+ * gelmeyen sarı. Sıralama operasyon önceliğine göre.
+ */
+const RESERVATION_LEGEND = [
+  { status: 'checked_in', label: 'Gelen' },
+  { status: 'checked_out', label: 'Giden' },
+  { status: 'no_show', label: 'Gelmedi' },
+  { status: 'awaiting_checkin', label: 'Giriş bekliyor' },
+  { status: 'confirmed', label: 'Onaylı' },
+  { status: 'pending', label: 'Bekliyor' },
+  { status: 'cancelled', label: 'İptal' },
+] as const;
+
+const HEADER_HEIGHT = 46;
+const TYPE_ROW_HEIGHT = 34;
+const PLAN_ROW_HEIGHT = 46;
+const ROOM_ROW_HEIGHT = 36;
+const POOL_ROW_HEIGHT = 36;
 const BAR_HEIGHT = 18;
-const LANE_GAP = 5;
+const LANE_GAP = 4;
 
 /** Bu durumlar odadaki envanteri bloke eder. */
 const OCCUPYING_STATUSES: CalendarReservation['status'][] = [
@@ -86,6 +133,8 @@ const OCCUPYING_STATUSES: CalendarReservation['status'][] = [
   'awaiting_checkin',
   'checked_in',
   'staying',
+  'checked_out',
+  'completed',
   'change_pending',
   'disputed',
 ];
@@ -158,7 +207,9 @@ function diffDays(from: string, to: string): number {
 }
 
 function monthShort(iso: string): string {
-  return new Intl.DateTimeFormat('tr-TR', { month: 'short' }).format(isoToDate(iso));
+  const date = isoToDate(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('tr-TR', { month: 'short' }).format(date);
 }
 
 function assignLanes(reservations: CalendarReservation[]) {
@@ -208,6 +259,8 @@ export function HotelRunnerCalendar({
   const [editor, setEditor] = useState<EditorTarget | null>(null);
   const [bulkSeed, setBulkSeed] = useState<BulkSeed | null>(null);
   const horizontalRef = useRef<ScrollViewInstance | null>(null);
+  /** Sabit tarih şeridi, gövde yatay kaydırıldığında aynı değere taşınır. */
+  const headerRef = useRef<ScrollViewInstance | null>(null);
 
   const config = VIEW_OPTIONS.find((option) => option.value === view) ?? VIEW_OPTIONS[2]!;
   const to = useMemo(() => addDaysIso(from, config.days), [from, config.days]);
@@ -226,7 +279,18 @@ export function HotelRunnerCalendar({
   const today = todayIso();
   const dayWidth = config.width;
   const gridWidth = dayWidth * days.length;
-  const leftWidth = layout.isDesktop ? 224 : 158;
+  // Sol sütun daraltıldı: oda adları tek satırda kısaltılır, takvime daha çok
+  // gün sığar. Mobilde daha da dar tutulur.
+  const leftWidth = layout.isDesktop ? 176 : 132;
+  /*
+   * Takvim ızgarası kendi içinde kayar: yönetici sayfayı aşağı çekmeden
+   * ekranın kalan yüksekliğinde mümkün olduğunca çok satır görür. Üst şerit
+   * (tarihler) sabit kaldığı için hangi günde olduğu hiç kaybolmaz.
+   */
+  const tableHeight = Math.max(
+    240,
+    layout.height - (layout.isDesktop ? 300 : 400),
+  );
 
   const roomTypeMap = useMemo(() => {
     const map = new Map<string, CalendarRoomType>();
@@ -235,9 +299,6 @@ export function HotelRunnerCalendar({
     }
     return map;
   }, [calendarData?.room_types]);
-
-  const roomCountOf = (roomTypeId: string): number =>
-    (roomTypeMap.get(roomTypeId)?.rooms ?? []).filter((room) => room.active).length;
 
   const occupancy = useMemo(() => {
     const map = new Map<string, Occupancy>();
@@ -316,7 +377,8 @@ export function HotelRunnerCalendar({
           height: TYPE_ROW_HEIGHT,
           roomTypeId: roomType.id,
           name: roomType.name,
-          roomCount: roomCountOf(roomType.id),
+          roomCount: (roomTypeMap.get(roomType.id)?.rooms ?? []).filter((room) => room.active)
+            .length,
           collapsed: isCollapsed,
         });
         if (isCollapsed) continue;
@@ -433,7 +495,7 @@ export function HotelRunnerCalendar({
     }
     return {
       from: minDate || from,
-      to: addDaysIso(maxDate || from, 1),
+      to: maxDate || from,
       roomTypes: rateData.room_types
         .filter((roomType) => selectedTypeIds.has(roomType.id))
         .map((roomType) => ({ id: roomType.id, name: roomType.name })),
@@ -445,21 +507,45 @@ export function HotelRunnerCalendar({
     };
   }, [from, rateData, selected]);
 
+  const fullBulkSeed = useMemo<BulkSeed>(
+    () => ({
+      from,
+      to: addDaysIso(to, -1),
+      roomTypes: (rateData?.room_types ?? []).map((roomType) => ({
+        id: roomType.id,
+        name: roomType.name,
+      })),
+      ratePlans: (rateData?.rate_plans ?? []).map((plan) => ({
+        id: plan.id,
+        name: plan.name,
+        room_type_id: plan.room_type_id,
+      })),
+    }),
+    [from, rateData, to],
+  );
+
   const rangeLabel = `${formatDateShort(from)} – ${formatDateShort(addDaysIso(to, -1))}`;
   const activeReservations = calendarData?.reservations.length ?? 0;
   const activePlans = rateData?.rate_plans.length ?? 0;
   const activeRoomTypes = rateData?.room_types.length ?? calendarData?.room_types.length ?? 0;
   const hasPlans = activePlans > 0;
 
+  /** Gövdeyi başa sararken sabit tarih şeridini de aynı noktaya getirir. */
+  const resetScroll = (animated = false) => {
+    horizontalRef.current?.scrollTo({ x: 0, animated });
+    headerRef.current?.scrollTo({ x: 0, animated });
+  };
+
   const shift = (direction: -1 | 1) => {
     setFrom((current) => addDaysIso(current, direction * config.days));
     setSelected([]);
+    resetScroll();
   };
 
   const goToday = () => {
     setFrom(today);
     setSelected([]);
-    horizontalRef.current?.scrollTo({ x: 0, animated: true });
+    resetScroll(true);
   };
 
   const changeMode = (next: CalendarMode) => {
@@ -467,13 +553,13 @@ export function HotelRunnerCalendar({
     setSelected([]);
     setSelectMode(false);
     setEditor(null);
-    horizontalRef.current?.scrollTo({ x: 0, animated: false });
+    resetScroll();
   };
 
   const changeView = (next: CalendarViewMode) => {
     setView(next);
     setSelected([]);
-    horizontalRef.current?.scrollTo({ x: 0, animated: false });
+    resetScroll();
   };
 
   const toggleCategory = (roomTypeId: string) =>
@@ -527,8 +613,16 @@ export function HotelRunnerCalendar({
     const end = Math.min(days.length, diffDays(from, reservation.check_out));
     if (end <= 0 || start >= days.length || end <= start) return null;
     const tone = reservationTone(reservation.status);
-    const width = (end - start) * dayWidth - 4;
-    const label = width >= 104 ? reservation.guest_name : width >= 46 ? tone.short : '';
+    const inactive = reservationIsInactive(reservation.status);
+    const width = (end - start) * dayWidth - 3;
+    /*
+     * Kutuda her zaman rezervasyon sahibinin adı önizlenir. Kutu çok daralırsa
+     * ad yerine durum kısaltması düşer; geniş kutuda gece sayısı ve oda eklenir.
+     * Tam bilgi kutuya dokununca açılan rezervasyon detayında görünür.
+     */
+    const showName = width >= 34;
+    const showMeta = width >= 132;
+    const meta = `${reservation.nights} gece${reservation.room_number ? ` · ${reservation.room_number}` : ''}`;
     return (
       <Pressable
         key={`${prefix}-${reservation.id}`}
@@ -544,17 +638,20 @@ export function HotelRunnerCalendar({
             height: BAR_HEIGHT,
             backgroundColor: tone.background,
             borderColor: tone.border,
+            opacity: inactive ? 0.62 : 1,
           },
         ]}
       >
         <View style={[styles.barStrip, { backgroundColor: tone.color }]} />
-        {label ? (
-          <AppText numberOfLines={1} style={[styles.barText, { color: tone.color }]}>
-            {label}
-          </AppText>
-        ) : null}
-        {width >= 150 && reservation.paid_cents > 0 ? (
-          <Ionicons name="cash-outline" size={10} color={tone.color} />
+        <AppText
+          numberOfLines={1}
+          style={[styles.barText, { color: tone.color }, inactive ? styles.barTextInactive : null]}
+        >
+          {showName ? reservation.guest_name : tone.short}
+          {showMeta ? ` · ${meta}` : ''}
+        </AppText>
+        {width >= 112 && reservation.payment_status === 'paid' ? (
+          <Ionicons name="checkmark-circle" size={9} color={tone.color} />
         ) : null}
       </Pressable>
     );
@@ -617,12 +714,10 @@ export function HotelRunnerCalendar({
       </>
     ) : mode === 'reservations' ? (
       <>
-        {(['pending', 'confirmed', 'awaiting_checkin', 'checked_in', 'cancelled'] as const).map(
-          (status) => {
-            const tone = reservationTone(status);
-            return <LegendDot key={status} color={tone.color} label={tone.label} />;
-          },
-        )}
+        {RESERVATION_LEGEND.map((entry) => {
+          const tone = reservationTone(entry.status);
+          return <LegendDot key={entry.status} color={tone.color} label={entry.label} />;
+        })}
       </>
     ) : (
       <>
@@ -650,7 +745,7 @@ export function HotelRunnerCalendar({
               onPress={() => shift(-1)}
               style={[styles.iconButton, { backgroundColor: theme.colors.surfaceMuted }]}
             >
-              <Ionicons name="chevron-back" size={18} color={theme.colors.text} />
+              <Ionicons name="chevron-back" size={17} color={theme.colors.text} />
             </Pressable>
             <Pressable
               accessibilityRole="button"
@@ -658,18 +753,20 @@ export function HotelRunnerCalendar({
               onPress={() => shift(1)}
               style={[styles.iconButton, { backgroundColor: theme.colors.surfaceMuted }]}
             >
-              <Ionicons name="chevron-forward" size={18} color={theme.colors.text} />
+              <Ionicons name="chevron-forward" size={17} color={theme.colors.text} />
             </Pressable>
             <View style={styles.rangeBlock}>
-              <AppText variant="bodyStrong">{rangeLabel}</AppText>
-              <AppText variant="caption" color="textTertiary">
+              <AppText variant="bodyStrong" numberOfLines={1} style={styles.rangeText}>
+                {rangeLabel}
+              </AppText>
+              <AppText variant="caption" color="textTertiary" numberOfLines={1}>
                 {loading ? 'Takvim yükleniyor' : subtitle}
               </AppText>
             </View>
           </View>
           <View style={styles.toolbarActions}>
             <Chip label="Bugün" icon="locate-outline" onPress={goToday} />
-            {mode === 'rates' ? (
+            {layout.isDesktop && mode === 'rates' ? (
               <>
                 <Chip
                   label="Çoklu seçim"
@@ -683,7 +780,7 @@ export function HotelRunnerCalendar({
                 <Chip
                   label="Toplu güncelle"
                   icon="layers-outline"
-                  onPress={() => setBulkSeed(selectionSeed ?? { from, to: addDaysIso(from, 1), roomTypes: [], ratePlans: [] })}
+                  onPress={() => setBulkSeed(selectionSeed ?? fullBulkSeed)}
                 />
               </>
             ) : null}
@@ -696,34 +793,111 @@ export function HotelRunnerCalendar({
               {calendar.isRefetching || rateCalendar.isRefetching ? (
                 <ActivityIndicator size="small" color={theme.colors.primary} />
               ) : (
-                <Ionicons name="refresh" size={17} color={theme.colors.textSecondary} />
+                <Ionicons name="refresh" size={16} color={theme.colors.textSecondary} />
               )}
             </Pressable>
           </View>
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.viewChips}>
-          {MODE_OPTIONS.map((option) => (
-            <Chip
-              key={option.value}
-              label={option.label}
-              icon={option.icon}
-              active={mode === option.value}
-              onPress={() => changeMode(option.value)}
+        {layout.isDesktop ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.viewChips}
+          >
+            {MODE_OPTIONS.map((option) => (
+              <Chip
+                key={option.value}
+                label={option.label}
+                icon={option.icon}
+                active={mode === option.value}
+                onPress={() => changeMode(option.value)}
+              />
+            ))}
+            <View style={[styles.chipDivider, { backgroundColor: theme.colors.divider }]} />
+            {VIEW_OPTIONS.map((option) => (
+              <Chip
+                key={option.value}
+                label={option.label}
+                active={view === option.value}
+                onPress={() => changeView(option.value)}
+              />
+            ))}
+          </ScrollView>
+        ) : (
+          /*
+           * Mobilde iki sıra çip yerine iki kompakt seçici: başlık alanı kısalır,
+           * ızgaraya daha çok dikey alan kalır. Seçenekler alttan açılan panelde.
+           */
+          <View style={styles.mobileSelectRow}>
+            <ToolbarSelect
+              value={mode}
+              label={MODE_LABELS[mode]}
+              icon={MODE_ICONS[mode]}
+              title="Takvim modu"
+              options={MODE_OPTIONS.map((option) => ({
+                value: option.value,
+                label: option.label,
+                icon: option.icon,
+              }))}
+              onSelect={(next) => changeMode(next as CalendarMode)}
             />
-          ))}
-          <View style={[styles.chipDivider, { backgroundColor: theme.colors.divider }]} />
-          {VIEW_OPTIONS.map((option) => (
-            <Chip
-              key={option.value}
-              label={option.label}
-              active={view === option.value}
-              onPress={() => changeView(option.value)}
+            <ToolbarSelect
+              value={view}
+              label={VIEW_LABELS[view]}
+              icon="calendar-outline"
+              title="Görünüm"
+              options={VIEW_OPTIONS.map((option) => ({
+                value: option.value,
+                label: VIEW_SHEET_LABELS[option.value],
+              }))}
+              onSelect={(next) => changeView(next as CalendarViewMode)}
             />
-          ))}
-        </ScrollView>
+            {mode === 'rates' ? (
+              <>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Çoklu seçim"
+                  accessibilityState={{ selected: selectMode }}
+                  onPress={() => {
+                    setSelectMode((current) => !current);
+                    setSelected([]);
+                  }}
+                  style={[
+                    styles.iconButton,
+                    {
+                      backgroundColor: selectMode
+                        ? theme.colors.primarySoft
+                        : theme.colors.surfaceMuted,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="checkbox-outline"
+                    size={16}
+                    color={selectMode ? theme.colors.primaryDeep : theme.colors.textSecondary}
+                  />
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Toplu güncelle"
+                  onPress={() => setBulkSeed(selectionSeed ?? fullBulkSeed)}
+                  style={[styles.iconButton, { backgroundColor: theme.colors.surfaceMuted }]}
+                >
+                  <Ionicons name="layers-outline" size={16} color={theme.colors.textSecondary} />
+                </Pressable>
+              </>
+            ) : null}
+          </View>
+        )}
 
-        <View style={styles.legend}>{legend}</View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.legend}
+        >
+          {legend}
+        </ScrollView>
 
         {mode === 'rates' && selectMode ? (
           <View
@@ -769,7 +943,96 @@ export function HotelRunnerCalendar({
         </View>
       ) : null}
 
-      <ScrollView nestedScrollEnabled showsVerticalScrollIndicator>
+      {/* Sabit tarih şeridi: dikey kaydırırken günler ekranda kalır. */}
+      <View style={[styles.headerBand, { borderBottomColor: theme.colors.divider }]}>
+        <View
+          style={[
+            styles.leftHead,
+            {
+              width: leftWidth,
+              backgroundColor: theme.colors.surfaceMuted,
+              borderRightColor: theme.colors.divider,
+            },
+          ]}
+        >
+          <AppText variant="caption" color="textTertiary" style={styles.leftHeadText} numberOfLines={1}>
+            {leftHeader}
+          </AppText>
+        </View>
+        <ScrollView
+          horizontal
+          ref={headerRef}
+          scrollEnabled={false}
+          showsHorizontalScrollIndicator={false}
+          style={styles.flex}
+        >
+          <View style={{ width: gridWidth, flexDirection: 'row', height: HEADER_HEIGHT }}>
+            {days.map((day) => {
+              const date = isoToDate(day);
+              const isToday = day === today;
+              const weekend = date.getDay() === 0 || date.getDay() === 6;
+              return (
+                <View
+                  key={day}
+                  style={[
+                    styles.dayHeader,
+                    {
+                      width: dayWidth,
+                      borderRightColor: theme.colors.divider,
+                      backgroundColor: isToday
+                        ? theme.colors.primaryDeep
+                        : weekend
+                          ? theme.colors.surfaceMuted
+                          : theme.colors.surface,
+                    },
+                  ]}
+                >
+                  <AppText
+                    style={[
+                      styles.weekday,
+                      {
+                        color: isToday
+                          ? theme.colors.onPrimary
+                          : weekend
+                            ? theme.colors.danger
+                            : theme.colors.textTertiary,
+                      },
+                    ]}
+                  >
+                    {formatWeekdayShort(day)}
+                  </AppText>
+                  <AppText
+                    style={[
+                      styles.dayNumber,
+                      { color: isToday ? theme.colors.onPrimary : theme.colors.text },
+                    ]}
+                  >
+                    {day.slice(8, 10)}
+                  </AppText>
+                  {dayWidth >= 72 ? (
+                    <AppText
+                      style={[
+                        styles.month,
+                        {
+                          color: isToday ? theme.colors.onPrimary : theme.colors.textTertiary,
+                        },
+                      ]}
+                    >
+                      {monthShort(day)}
+                    </AppText>
+                  ) : null}
+                </View>
+              );
+            })}
+          </View>
+        </ScrollView>
+      </View>
+
+      <ScrollView
+        nestedScrollEnabled
+        showsVerticalScrollIndicator
+        style={{ maxHeight: tableHeight }}
+      >
         <View style={styles.table}>
           <View
             style={[
@@ -777,20 +1040,7 @@ export function HotelRunnerCalendar({
               { width: leftWidth, borderRightColor: theme.colors.divider },
             ]}
           >
-            <View
-              style={[
-                styles.leftHead,
-                {
-                  backgroundColor: theme.colors.surfaceMuted,
-                  borderBottomColor: theme.colors.divider,
-                },
-              ]}
-            >
-              <AppText variant="caption" color="textTertiary" style={styles.leftHeadText}>
-                {leftHeader}
-              </AppText>
-            </View>
-            {rows.map((row) => (
+            {rows.map((row, index) => (
               <View
                 key={row.key}
                 style={[
@@ -799,7 +1049,11 @@ export function HotelRunnerCalendar({
                     height: row.height,
                     borderBottomColor: theme.colors.divider,
                     backgroundColor:
-                      row.kind === 'type' ? theme.colors.surfaceMuted : theme.colors.surface,
+                      row.kind === 'type'
+                        ? theme.colors.surfaceMuted
+                        : index % 2 === 1
+                          ? `${theme.colors.textTertiary}0A`
+                          : theme.colors.surface,
                   },
                 ]}
               >
@@ -832,7 +1086,12 @@ export function HotelRunnerCalendar({
                         {row.plan.name}
                       </AppText>
                       <AppText variant="caption" color="textTertiary" style={styles.tiny} numberOfLines={1}>
-                        {BOOKING_MODE_LABELS[row.plan.booking_mode]} · min {row.plan.min_stay}
+                        {layout.isMobile
+                          ? row.plan.booking_mode === 'instant'
+                            ? 'Anında'
+                            : 'Manuel'
+                          : BOOKING_MODE_LABELS[row.plan.booking_mode]}{' '}
+                        · min {row.plan.min_stay}
                       </AppText>
                     </View>
                   </View>
@@ -901,80 +1160,30 @@ export function HotelRunnerCalendar({
             ref={horizontalRef}
             nestedScrollEnabled
             showsHorizontalScrollIndicator
+            onScroll={(event) => {
+              // Tarih şeridi gövdeyle birlikte kayar; iki ayrı kaydırma hissi yok.
+              headerRef.current?.scrollTo({
+                x: event.nativeEvent.contentOffset.x,
+                animated: false,
+              });
+            }}
+            scrollEventThrottle={16}
+            style={styles.flex}
           >
             <View style={{ width: gridWidth }}>
-              <View style={styles.dayHeaderRow}>
-                {days.map((day) => {
-                  const date = isoToDate(day);
-                  const isToday = day === today;
-                  const weekend = date.getDay() === 0 || date.getDay() === 6;
-                  return (
-                    <View
-                      key={day}
-                      style={[
-                        styles.dayHeader,
-                        {
-                          width: dayWidth,
-                          borderRightColor: theme.colors.divider,
-                          borderBottomColor: theme.colors.divider,
-                          backgroundColor: isToday
-                            ? theme.colors.primaryDeep
-                            : weekend
-                              ? theme.colors.surfaceMuted
-                              : theme.colors.surface,
-                        },
-                      ]}
-                    >
-                      <AppText
-                        style={[
-                          styles.weekday,
-                          {
-                            color: isToday
-                              ? theme.colors.onPrimary
-                              : weekend
-                                ? theme.colors.danger
-                                : theme.colors.textTertiary,
-                          },
-                        ]}
-                      >
-                        {formatWeekdayShort(day)}
-                      </AppText>
-                      <AppText
-                        style={[
-                          styles.dayNumber,
-                          {
-                            color: isToday ? theme.colors.onPrimary : theme.colors.text,
-                          },
-                        ]}
-                      >
-                        {day.slice(8, 10)}
-                      </AppText>
-                      {dayWidth >= 64 ? (
-                        <AppText
-                          style={[
-                            styles.month,
-                            {
-                              color: isToday
-                                ? theme.colors.onPrimary
-                                : theme.colors.textTertiary,
-                            },
-                          ]}
-                        >
-                          {monthShort(day)}
-                        </AppText>
-                      ) : null}
-                    </View>
-                  );
-                })}
-              </View>
-
-              {rows.map((row) => {
+              {rows.map((row, rowIndex) => {
                 const weekend = (day: string) => {
                   const index = isoToDate(day).getDay();
                   return index === 0 || index === 6;
                 };
                 const baseBackground = (day: string) =>
-                  weekend(day) ? `${theme.colors.textTertiary}08` : 'transparent';
+                  day === today
+                    ? `${theme.colors.primary}12`
+                    : weekend(day)
+                      ? `${theme.colors.textTertiary}14`
+                      : rowIndex % 2 === 1
+                        ? `${theme.colors.textTertiary}0A`
+                        : 'transparent';
 
                 if (row.kind === 'type') {
                   return (
@@ -999,7 +1208,9 @@ export function HotelRunnerCalendar({
                           ? theme.colors.dangerSoft
                           : ratio >= 0.8
                             ? theme.colors.warningSoft
-                            : 'transparent';
+                            : day === today
+                              ? `${theme.colors.primary}12`
+                              : 'transparent';
                         const accent = soldOut
                           ? theme.colors.danger
                           : ratio >= 0.8
@@ -1125,7 +1336,8 @@ export function HotelRunnerCalendar({
                                       : `${available} oda`}
                               </AppText>
                             </View>
-                            {rate?.closed_to_arrival || rate?.closed_to_departure ? (
+                            {dayWidth >= 58 &&
+                            (rate?.closed_to_arrival || rate?.closed_to_departure) ? (
                               <View
                                 style={[
                                   styles.restrictionBadge,
@@ -1263,16 +1475,18 @@ export function HotelRunnerCalendar({
         ) : null}
       </ScrollView>
 
-      <View style={[styles.footer, { borderTopColor: theme.colors.divider }]}>
-        <Ionicons name="information-circle-outline" size={14} color={theme.colors.textTertiary} />
-        <AppText variant="caption" color="textTertiary" style={styles.flex}>
-          {mode === 'rates'
-            ? 'Hücreye dokunarak gecelik fiyat, müsait oda ve kısıtları düzenle. Çoklu seçimde seçtiğin günlere toplu işlem uygula.'
-            : mode === 'reservations'
-              ? 'Boş hücreye dokunarak rezervasyon oluştur; renkli bardan rezervasyon detayını aç.'
-              : 'Oda satırında blok ve rezervasyonları görürsün; boş hücre yeni rezervasyon başlatır.'}
-        </AppText>
-      </View>
+      {layout.isMobile ? null : (
+        <View style={[styles.footer, { borderTopColor: theme.colors.divider }]}>
+          <Ionicons name="information-circle-outline" size={14} color={theme.colors.textTertiary} />
+          <AppText variant="caption" color="textTertiary" style={styles.flex} numberOfLines={2}>
+            {mode === 'rates'
+              ? 'Hücreye dokunarak gecelik fiyat, müsait oda ve kısıtları düzenle. Çoklu seçimde seçtiğin günlere toplu işlem uygula.'
+              : mode === 'reservations'
+                ? 'Boş hücreye dokunarak rezervasyon oluştur; renkli bardan rezervasyon detayını aç.'
+                : 'Oda satırında blok ve rezervasyonları görürsün; boş hücre yeni rezervasyon başlatır.'}
+          </AppText>
+        </View>
+      )}
 
       <RateCellEditor
         propertyId={propertyId}
@@ -1286,7 +1500,7 @@ export function HotelRunnerCalendar({
           if (!editor) return;
           setBulkSeed({
             from: editor.date,
-            to: addDaysIso(editor.date, 1),
+            to: editor.date,
             roomTypes: [{ id: editor.roomTypeId, name: editor.roomTypeName }],
             ratePlans: [
               {
@@ -1313,7 +1527,7 @@ export function HotelRunnerCalendar({
         }}
         propertyId={propertyId}
         defaultFrom={bulkSeed?.from ?? from}
-        defaultTo={bulkSeed?.to ?? addDaysIso(from, 1)}
+        defaultTo={bulkSeed?.to ?? addDaysIso(to, -1)}
         roomTypes={bulkSeed?.roomTypes ?? []}
         ratePlans={bulkSeed?.ratePlans ?? []}
       />
@@ -1329,6 +1543,99 @@ function LegendDot({ color, label }: { color: string; label: string }) {
         {label}
       </AppText>
     </View>
+  );
+}
+
+/**
+ * Mobilde iki sıra çip yerine tek satırda duran kompakt seçici. Seçenekler
+ * alttan açılan panelde listelenir; başlık alanı kısalır, takvime yer açılır.
+ */
+function ToolbarSelect({
+  value,
+  label,
+  icon,
+  title,
+  options,
+  onSelect,
+}: {
+  value: string;
+  label: string;
+  icon: ModeIcon;
+  title: string;
+  options: { value: string; label: string; icon?: ModeIcon }[];
+  onSelect: (value: string) => void;
+}) {
+  const { theme } = useTheme();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${title}: ${label}`}
+        onPress={() => setOpen(true)}
+        style={[
+          styles.selectButton,
+          { backgroundColor: theme.colors.surfaceMuted, borderColor: theme.colors.border },
+        ]}
+      >
+        <Ionicons name={icon} size={13} color={theme.colors.textSecondary} />
+        <AppText variant="caption" color="text" numberOfLines={1} style={styles.selectLabel}>
+          {label}
+        </AppText>
+        <Ionicons name="chevron-down" size={12} color={theme.colors.textTertiary} />
+      </Pressable>
+
+      <ModalSheet
+        visible={open}
+        onClose={() => setOpen(false)}
+        title={title}
+        maxWidth={420}
+      >
+        <View style={{ gap: 6 }}>
+          {options.map((option) => {
+            const isActive = option.value === value;
+            return (
+              <Pressable
+                key={option.value}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isActive }}
+                onPress={() => {
+                  onSelect(option.value);
+                  setOpen(false);
+                }}
+                style={[
+                  styles.selectRow,
+                  {
+                    borderColor: isActive ? theme.colors.primaryDeep : theme.colors.border,
+                    backgroundColor: isActive ? theme.colors.primarySoft : theme.colors.surface,
+                  },
+                ]}
+              >
+                {option.icon ? (
+                  <Ionicons
+                    name={option.icon}
+                    size={16}
+                    color={isActive ? theme.colors.primaryDeep : theme.colors.textSecondary}
+                  />
+                ) : null}
+                <AppText
+                  variant="label"
+                  color={isActive ? 'primaryDeep' : 'text'}
+                  numberOfLines={1}
+                  style={styles.flex}
+                >
+                  {option.label}
+                </AppText>
+                {isActive ? (
+                  <Ionicons name="checkmark" size={16} color={theme.colors.primaryDeep} />
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      </ModalSheet>
+    </>
   );
 }
 
@@ -1392,7 +1699,7 @@ function RateCellEditor({
     try {
       const original = target.row;
       const nextPrice = parseMoneyToCents(price);
-      if (nextPrice != null && nextPrice !== (original?.base_price_cents ?? null)) {
+      if (nextPrice != null && nextPrice > 0 && nextPrice !== (original?.base_price_cents ?? null)) {
         await run('set_price', nextPrice / 100);
       }
       if (availability.trim() !== '' && Number(availability) !== (original?.available_rooms ?? null)) {
@@ -1506,7 +1813,6 @@ function RateCellEditor({
             <Ionicons name="add" size={16} color={theme.colors.text} />
           </Pressable>
           <Chip label="Dolu yap" icon="close-circle-outline" onPress={() => void quickSoldOut()} />
-          <Chip label="Otomatik" icon="sync-outline" onPress={() => setAvailability('')} />
         </View>
 
         <View style={styles.editorRow}>
@@ -1554,7 +1860,7 @@ function RateCellEditor({
           <InlineError message={error} />
         ) : (
           <AppText variant="caption" color="textTertiary">
-            Manuel müsaitlik boş bırakılırsa rezervasyon ve bloklardan otomatik hesaplanır. Onaylı
+            Manuel müsaitlik girmezsen rezervasyon ve bloklardan hesaplanan değer gösterilir. Onaylı
             rezervasyonların fiyatı değişmez.
           </AppText>
         )}
@@ -1564,33 +1870,72 @@ function RateCellEditor({
 }
 
 const styles = StyleSheet.create({
-  wrap: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, overflow: 'hidden' },
+  wrap: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
   flex: { flex: 1 },
-  toolbar: { borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 10, gap: 8 },
+  toolbar: { borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 8, gap: 7 },
   toolbarTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 10,
-    paddingHorizontal: 12,
-    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 10,
+    flexWrap: 'nowrap',
   },
-  navGroup: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
-  rangeBlock: { marginLeft: 4 },
-  toolbarActions: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  navGroup: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1 },
+  rangeBlock: { marginLeft: 3, flexShrink: 1, minWidth: 0 },
+  rangeText: { fontSize: 13, lineHeight: 17 },
+  toolbarActions: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   iconButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
   },
   viewChips: { gap: 6, paddingHorizontal: 12, alignItems: 'center' },
   chipDivider: { width: StyleSheet.hairlineWidth, height: 20, marginHorizontal: 4 },
-  legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 12 },
+  /* Mobil seçici satırı: tek satır, taşma yok. */
+  mobileSelectRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+  },
+  selectButton: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 32,
+    paddingHorizontal: 8,
+    borderRadius: 9,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  selectLabel: { flex: 1, minWidth: 0, fontSize: 11, lineHeight: 14 },
+  selectRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 10,
+    borderRadius: 11,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  legend: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingHorizontal: 12,
+    paddingVertical: 1,
+  },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  legendDot: { width: 7, height: 7, borderRadius: 4 },
-  legendText: { fontSize: 9 },
+  legendDot: { width: 6, height: 6, borderRadius: 3 },
+  legendText: { fontSize: 8, lineHeight: 10 },
   selectionBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1613,52 +1958,55 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   table: { flexDirection: 'row' },
+  /* Sabit tarih şeridi: sol köşe + yatay kaydırılan gün başlıkları. */
+  headerBand: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   leftColumn: { borderRightWidth: StyleSheet.hairlineWidth },
   leftHead: {
     height: HEADER_HEIGHT,
     justifyContent: 'center',
-    paddingHorizontal: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 9,
   },
-  leftHeadText: { fontSize: 9, letterSpacing: 0.4 },
+  leftHeadText: { fontSize: 9, lineHeight: 11, letterSpacing: 0.4 },
   leftCell: {
     justifyContent: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  typeCell: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  planCell: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 12 },
-  planBullet: { width: 5, height: 5, borderRadius: 3 },
+  typeCell: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  planCell: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 10 },
+  planBullet: { width: 4, height: 4, borderRadius: 2 },
   roomCell: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   roomStatusDot: { width: 6, height: 6, borderRadius: 3 },
-  roomNumber: { fontSize: 12 },
-  name: { fontSize: 11 },
-  tiny: { fontSize: 8, lineHeight: 11 },
-  dayHeaderRow: { flexDirection: 'row', height: HEADER_HEIGHT },
+  roomNumber: { fontSize: 12, lineHeight: 15 },
+  name: { fontSize: 11, lineHeight: 14 },
+  tiny: { fontSize: 8.5, lineHeight: 11 },
   dayHeader: {
     height: HEADER_HEIGHT,
     alignItems: 'center',
     justifyContent: 'center',
     borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  weekday: { fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.3 },
-  dayNumber: { fontSize: 16, lineHeight: 20, fontWeight: '700' },
-  month: { fontSize: 8 },
+  weekday: { fontSize: 9, lineHeight: 11, textTransform: 'uppercase', letterSpacing: 0.3 },
+  dayNumber: { fontSize: 15, lineHeight: 18, fontWeight: '700' },
+  month: { fontSize: 8.5, lineHeight: 10 },
   gridRow: { flexDirection: 'row', position: 'relative', borderBottomWidth: StyleSheet.hairlineWidth },
   cellBase: {
     height: '100%',
     borderRightWidth: StyleSheet.hairlineWidth,
     justifyContent: 'center',
-    paddingHorizontal: 5,
+    paddingHorizontal: 4,
     gap: 2,
   },
-  typeCellNumber: { fontSize: 13, lineHeight: 16, fontWeight: '700' },
-  occBar: { height: 3, borderRadius: 2, overflow: 'hidden', marginTop: 1 },
-  occBarFill: { height: 3, borderRadius: 2 },
-  ratePrice: { fontSize: 11, lineHeight: 14, fontWeight: '700' },
-  rateMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  rateMeta: { fontSize: 8, lineHeight: 10 },
+  typeCellNumber: { fontSize: 13, lineHeight: 15, fontWeight: '700' },
+  occBar: { height: 2.5, borderRadius: 2, overflow: 'hidden', marginTop: 1 },
+  occBarFill: { height: 2.5, borderRadius: 2 },
+  ratePrice: { fontSize: 11, lineHeight: 13, fontWeight: '700' },
+  rateMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  rateMeta: { fontSize: 8.5, lineHeight: 10 },
   manualDot: { width: 4, height: 4, borderRadius: 2 },
   restrictionBadge: {
     position: 'absolute',
@@ -1668,7 +2016,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  restrictionText: { fontSize: 7, fontWeight: '700' },
+  restrictionText: { fontSize: 7, lineHeight: 9, fontWeight: '700' },
   selectRing: {
     position: 'absolute',
     top: 1,
@@ -1680,16 +2028,17 @@ const styles = StyleSheet.create({
   },
   bar: {
     position: 'absolute',
-    borderRadius: 6,
+    borderRadius: 4,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    paddingRight: 4,
+    gap: 2,
+    paddingRight: 3,
     overflow: 'hidden',
   },
-  barStrip: { width: 3, height: '100%' },
-  barText: { fontSize: 10, lineHeight: 12, flexShrink: 1 },
+  barStrip: { width: 2.5, height: '100%' },
+  barText: { fontSize: 9, lineHeight: 11, flexShrink: 1 },
+  barTextInactive: { textDecorationLine: 'line-through' },
   blockBar: {
     position: 'absolute',
     borderRadius: 4,

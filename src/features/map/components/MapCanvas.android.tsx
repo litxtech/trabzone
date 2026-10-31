@@ -11,7 +11,7 @@ import { AppText } from '@/components/ui';
 
 import { MAP_KIND_ICON } from '../constants';
 import type { MapPoint } from '../types';
-import { initialsFor, markerTone, toneColor, toneSoftColor } from '../utils/map-theme';
+import { PREMIUM_MARKER, initialsFor, markerTone, toneColor, toneSoftColor } from '../utils/map-theme';
 import { MapCanvasFallback } from './MapCanvasFallback';
 import type { MapCanvasProps } from './map-canvas-types';
 
@@ -51,12 +51,16 @@ export function MapCanvas({
   userLocation,
   dark,
   interactive = true,
+  preview = false,
   onMarkerPress,
   onCameraChange,
   onMapPress,
 }: MapCanvasProps) {
   const { theme } = useTheme();
   const cameraRef = useRef<CameraHandle | null>(null);
+  // Kart içi önizlemede harita yalnızca görüntüdür; kaydırma/zoom çağıran
+  // ekranın kaydırma davranışını bozmamalıdır.
+  const gesturesEnabled = interactive && !preview;
 
   useEffect(() => {
     if (!focus) {
@@ -133,9 +137,9 @@ export function MapCanvas({
       compassEnabled={false}
       scaleBarEnabled={false}
       pitchEnabled={false}
-      rotateEnabled
-      scrollEnabled={interactive}
-      zoomEnabled={interactive}
+      rotateEnabled={gesturesEnabled}
+      scrollEnabled={gesturesEnabled}
+      zoomEnabled={gesturesEnabled}
       localizeLabels={{ locale: 'tr' }}
       onCameraChanged={(state) => {
         const center = state.properties.center as number[];
@@ -288,6 +292,51 @@ function Marker({
     );
   }
 
+  // Premium işaret (otel/tesis): altın çerçeveli koyu kart, ikon + etiket.
+  if (point.premium) {
+    return (
+      <MapboxMarker id={point.id} coordinate={[point.lng, point.lat]} anchor={{ x: 0.5, y: 1 }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${point.title}${point.label ? `, ${point.label}` : ''}`}
+          onPress={onPress}
+          style={styles.pinWrap}
+        >
+          <View
+            style={[
+              styles.premiumPin,
+              {
+                backgroundColor: PREMIUM_MARKER.background,
+                borderColor: point.color ?? PREMIUM_MARKER.border,
+              },
+            ]}
+          >
+            <View style={[styles.premiumIconWrap, { backgroundColor: PREMIUM_MARKER.iconBackground }]}>
+              <Ionicons
+                name={(point.icon as keyof typeof Ionicons.glyphMap | undefined) ?? 'bed'}
+                size={12}
+                color={PREMIUM_MARKER.iconColor}
+              />
+            </View>
+            <AppText
+              variant="label"
+              numberOfLines={1}
+              style={[styles.premiumLabel, { color: point.textColor ?? PREMIUM_MARKER.text }]}
+            >
+              {point.label ?? point.title}
+            </AppText>
+          </View>
+          <View
+            style={[
+              styles.premiumTip,
+              { backgroundColor: point.color ?? PREMIUM_MARKER.border },
+            ]}
+          />
+        </Pressable>
+      </MapboxMarker>
+    );
+  }
+
   if (point.label) {
     return (
       <MapboxMarker id={point.id} coordinate={[point.lng, point.lat]} anchor={{ x: 0.5, y: 1 }}>
@@ -431,6 +480,31 @@ const styles = StyleSheet.create({
   friendAvatar: { width: 37, height: 37, borderRadius: 18.5 },
   friendTip: { borderTopWidth: 7, borderLeftWidth: 6, borderRightWidth: 6, borderLeftColor: 'transparent', borderRightColor: 'transparent' },
   pinWrap: { alignItems: 'center' },
+  premiumPin: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    height: 32,
+    maxWidth: 118,
+    paddingHorizontal: 8,
+    borderRadius: 11,
+    borderWidth: 1.5,
+  },
+  premiumIconWrap: {
+    width: 19,
+    height: 19,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  premiumLabel: { fontSize: 11.5 },
+  premiumTip: {
+    width: 8,
+    height: 8,
+    marginTop: -4,
+    transform: [{ rotate: '45deg' }],
+    borderRadius: 1.5,
+  },
   pin: {
     width: 36,
     height: 36,

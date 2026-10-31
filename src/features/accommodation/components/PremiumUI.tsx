@@ -12,6 +12,7 @@ import {
 
 import { AppImage, AppText } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAccommodationLayout } from '../hooks/use-accommodation-layout';
 import { accommodationMediaUrl } from '../services/accommodation-media-service';
@@ -678,15 +679,26 @@ export function propertyTypeIcon(type: PropertySummary['property_type']): IconNa
 /**
  * Tesis detayındaki galeri mozaiği.
  * Masaüstünde 1 büyük + 4 küçük görsel, mobilde tek kapak.
+ * Video varsa küçük karolar oynatma rozetiyle gösterilir; sayaç hem fotoğraf
+ * hem video sayısını bildirir.
  */
+export type MosaicMedia = {
+  id: string;
+  uri: string;
+  /** Video için kapak/önizleme görseli. */
+  thumbUri?: string | null;
+  kind: 'image' | 'video';
+  caption: string | null;
+};
+
 export function PhotoMosaic({
-  images,
+  media,
   onPress,
   onBack,
   onShare,
   badge,
 }: {
-  images: { id: string; uri: string; caption: string | null }[];
+  media: MosaicMedia[];
   onPress: (index: number) => void;
   onBack: () => void;
   onShare: () => void;
@@ -694,19 +706,23 @@ export function PhotoMosaic({
 }) {
   const { theme } = useTheme();
   const layout = useAccommodationLayout();
+  const insets = useSafeAreaInsets();
   const desktop = layout.isDesktop;
-  const cover = images[0];
+  const cover = media[0];
+  const photoCount = media.filter((item) => item.kind === 'image').length;
+  const videoCount = media.length - photoCount;
+  const coverUri = cover ? (cover.kind === 'video' ? cover.thumbUri ?? null : cover.uri) : null;
 
   return (
     <View style={[styles.mosaic, desktop ? styles.mosaicDesktop : styles.mosaicMobile]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={cover ? 'Kapak fotoğrafını aç' : 'Fotoğraf yok'}
+        accessibilityLabel={cover ? 'Kapak medyasını aç' : 'Medya yok'}
         onPress={() => onPress(0)}
         style={styles.mosaicCover}
       >
-        {cover ? (
-          <AppImage source={{ uri: cover.uri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+        {coverUri ? (
+          <AppImage source={{ uri: coverUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
         ) : (
           <LinearGradient colors={[AURORA.indigo, AURORA.violet]} style={StyleSheet.absoluteFill} />
         )}
@@ -715,11 +731,16 @@ export function PhotoMosaic({
           style={StyleSheet.absoluteFill}
           pointerEvents="none"
         />
+        {cover?.kind === 'video' ? (
+          <View style={styles.mosaicPlay} pointerEvents="none">
+            <Ionicons name="play" size={26} color="#FFFFFF" />
+          </View>
+        ) : null}
         {!cover ? (
           <View style={styles.mosaicEmpty}>
             <Ionicons name="images-outline" size={30} color="rgba(255,255,255,0.7)" />
             <AppText variant="caption" style={styles.mosaicEmptyText}>
-              Fotoğraf eklenmemiş
+              Medya eklenmemiş
             </AppText>
           </View>
         ) : null}
@@ -727,28 +748,42 @@ export function PhotoMosaic({
 
       {desktop ? (
         <View style={styles.mosaicSide}>
-          {images.slice(1, 5).map((image, index) => (
-            <Pressable
-              key={image.id}
-              accessibilityRole="button"
-              accessibilityLabel={image.caption ?? `${index + 2}. fotoğraf`}
-              onPress={() => onPress(index + 1)}
-              style={styles.mosaicSideItem}
-            >
-              <AppImage source={{ uri: image.uri }} style={StyleSheet.absoluteFill} contentFit="cover" />
-              {index === 3 && images.length > 5 ? (
-                <View style={styles.mosaicMore}>
-                  <AppText variant="title" style={styles.mosaicMoreText}>
-                    +{images.length - 5}
-                  </AppText>
-                  <AppText variant="caption" style={styles.mosaicMoreText}>
-                    fotoğraf
-                  </AppText>
-                </View>
-              ) : null}
-            </Pressable>
-          ))}
-          {Array.from({ length: Math.max(0, 4 - Math.max(0, images.length - 1)) }).map((_, index) => (
+          {media.slice(1, 5).map((item, index) => {
+            const thumb = item.kind === 'video' ? item.thumbUri ?? null : item.uri;
+            return (
+              <Pressable
+                key={item.id}
+                accessibilityRole="button"
+                accessibilityLabel={item.caption ?? `${index + 2}. medya`}
+                onPress={() => onPress(index + 1)}
+                style={styles.mosaicSideItem}
+              >
+                {thumb ? (
+                  <AppImage source={{ uri: thumb }} style={StyleSheet.absoluteFill} contentFit="cover" />
+                ) : (
+                  <View style={[StyleSheet.absoluteFill, styles.mosaicSideFallback]}>
+                    <Ionicons name="play" size={18} color="rgba(255,255,255,0.85)" />
+                  </View>
+                )}
+                {item.kind === 'video' ? (
+                  <View style={styles.mosaicSidePlay} pointerEvents="none">
+                    <Ionicons name="play" size={12} color="#FFFFFF" />
+                  </View>
+                ) : null}
+                {index === 3 && media.length > 5 ? (
+                  <View style={styles.mosaicMore}>
+                    <AppText variant="title" style={styles.mosaicMoreText}>
+                      +{media.length - 5}
+                    </AppText>
+                    <AppText variant="caption" style={styles.mosaicMoreText}>
+                      medya
+                    </AppText>
+                  </View>
+                ) : null}
+              </Pressable>
+            );
+          })}
+          {Array.from({ length: Math.max(0, 4 - Math.max(0, media.length - 1)) }).map((_, index) => (
             <View
               key={`empty-${index}`}
               style={[styles.mosaicSideItem, { backgroundColor: theme.colors.surfaceMuted }]}
@@ -757,7 +792,10 @@ export function PhotoMosaic({
         </View>
       ) : null}
 
-      <View style={styles.mosaicTop} pointerEvents="box-none">
+      <View
+        style={[styles.mosaicTop, { top: insets.top + 12 }]}
+        pointerEvents="box-none"
+      >
         <IconSquare icon="chevron-back" onPress={onBack} accessibilityLabel="Geri" />
         <View style={styles.mosaicTopRight}>
           {badge}
@@ -765,16 +803,17 @@ export function PhotoMosaic({
         </View>
       </View>
 
-      {images.length > 0 ? (
+      {media.length > 0 ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Tüm fotoğrafları gör, ${images.length} fotoğraf`}
+          accessibilityLabel={`Tüm medyayı gör, ${media.length} öğe`}
           onPress={() => onPress(0)}
           style={styles.mosaicCounter}
         >
           <Ionicons name="images-outline" size={13} color="#FFFFFF" />
           <AppText variant="caption" style={styles.mosaicCounterText}>
-            {images.length} fotoğraf
+            {photoCount} fotoğraf
+            {videoCount > 0 ? ` · ${videoCount} video` : ''}
           </AppText>
         </Pressable>
       ) : null}
@@ -931,6 +970,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   mosaicMoreText: { color: '#FFFFFF' },
+  mosaicPlay: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(5,9,18,0.24)',
+  },
+  mosaicSideFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: AURORA.indigo,
+  },
+  mosaicSidePlay: {
+    position: 'absolute',
+    left: 6,
+    bottom: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(5,9,18,0.68)',
+  },
   mosaicTop: {
     position: 'absolute',
     top: 12,

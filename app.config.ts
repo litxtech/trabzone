@@ -19,7 +19,8 @@ const SOCIAL_AUTH_ENABLED = process.env.EXPO_PUBLIC_ENABLE_SOCIAL_AUTH === 'true
 /**
  * Google ile native giriş iOS'ta ters çevrilmiş istemci kimliğini URL şeması
  * olarak Info.plist'e yazar. Kimlik tanımlı değilse config plugin hiç
- * eklenmez; Google butonu uygulamada görünmez (bkz. SocialAuthButtons).
+ * eklenmez; Google girişi tarayıcı tabanlı PKCE akışıyla çalışmaya devam eder
+ * (bkz. SocialAuthButtons / EXPO_PUBLIC_GOOGLE_NATIVE_LOGIN).
  */
 const GOOGLE_IOS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim() ?? '';
 const GOOGLE_IOS_URL_SCHEME = GOOGLE_IOS_CLIENT_ID

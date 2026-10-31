@@ -22,6 +22,11 @@ export type MapCanvasProps = {
   /** Alt panelin kapladığı alan; kamera merkezi buna göre kaydırılır. */
   bottomInset?: number;
   interactive?: boolean;
+  /**
+   * Kart içi küçük önizleme. Etkileşim kapatılır, harita üstü kontrol ve
+   * bilgi katmanları gizlenir; dokunma çağrı ekranına bırakılır.
+   */
+  preview?: boolean;
   onMarkerPress: (point: MapPoint) => void;
   onCameraChange: (camera: MapCamera) => void;
   onMapPress?: (point: LatLng) => void;

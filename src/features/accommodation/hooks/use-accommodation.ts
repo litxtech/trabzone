@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Platform } from 'react-native';
 
 import type { Result } from '@/utils/result';
 
@@ -7,6 +8,11 @@ import type {
   BookingMode,
   CampaignStatus,
   CashAccountKind,
+  ComplaintCreateInput,
+  ComplaintUpdateInput,
+  LiteApiBookingInput,
+  LiteApiBookingResult,
+  LiteApiRatesInput,
   MediaCategory,
   PaymentStatus,
   ReservationAction,
@@ -21,7 +27,11 @@ export const accKeys = {
   filters: ['accommodation', 'filters'] as const,
   locationOptions: ['accommodation', 'location-options'] as const,
   search: (params: api.SearchParams) => ['accommodation', 'search', params] as const,
+  mapPoints: ['accommodation', 'map-points'] as const,
   property: (id: string) => ['accommodation', 'property', id] as const,
+  liteApiRates: (input: LiteApiRatesInput | null) =>
+    ['accommodation', 'liteapi-rates', input] as const,
+  liteApiAdmin: ['accommodation', 'liteapi-admin'] as const,
   myReservations: ['accommodation', 'my-reservations'] as const,
   myReservation: (id: string) => ['accommodation', 'my-reservation', id] as const,
   detail: (propertyId: string) => ['accommodation', 'detail', propertyId] as const,
@@ -58,13 +68,23 @@ export const accKeys = {
     ['accommodation', 'messages', propertyId, reservationId] as const,
   reviews: (propertyId: string, status: string) =>
     ['accommodation', 'reviews', propertyId, status] as const,
+  complaints: (propertyId: string, filters: api.ComplaintFilters) =>
+    ['accommodation', 'complaints', propertyId, filters] as const,
+  complaint: (id: string) => ['accommodation', 'complaint', id] as const,
+  complaintAssignees: (propertyId: string) =>
+    ['accommodation', 'complaint-assignees', propertyId] as const,
+  myComplaints: (reservationId: string) =>
+    ['accommodation', 'my-complaints', reservationId] as const,
   documents: (propertyId: string, kind: string) =>
     ['accommodation', 'documents', propertyId, kind] as const,
   propertyDocuments: (propertyId: string) =>
     ['accommodation', 'property-documents', propertyId] as const,
+  policyConsent: (propertyId: string) =>
+    ['accommodation', 'policy-consent', propertyId] as const,
   tracking: (propertyId: string) => ['accommodation', 'tracking', propertyId] as const,
   activity: (propertyId: string) => ['accommodation', 'activity', propertyId] as const,
   admin: (status: string) => ['accommodation', 'admin', status] as const,
+  adminClaims: (status: string) => ['accommodation', 'admin-claims', status] as const,
 };
 
 async function unwrap<T>(promise: Promise<Result<T>>): Promise<T> {
@@ -139,6 +159,49 @@ export function usePublicProperty(propertyId: string | null | undefined) {
     enabled: Boolean(propertyId),
     staleTime: 30_000,
   });
+}
+
+/**
+ * Haritadaki tesisler. Listeleme aramasından bağımsızdır: sayfalama sınırına
+ * takılmaz ve yalnızca koordinatı olan yayınlanmış tesisleri getirir.
+ */
+export function usePropertyMapPoints(enabled = true) {
+  return useQuery({
+    queryKey: accKeys.mapPoints,
+    queryFn: () => unwrap(api.fetchMapProperties()),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * LiteAPI canlı fiyat/müsaitlik sorgusu. Yalnızca tarih aralığı seçildiğinde
+ * çalışır; sağlayıcı maliyetini ve gereksiz çağrıları önlemek için sonuçlar
+ * sunucuda 5 dakika önbelleklenir.
+ */
+export function useLiteApiRates(input: LiteApiRatesInput | null) {
+  return useQuery({
+    queryKey: accKeys.liteApiRates(input),
+    queryFn: ({ signal }) => unwrap(api.fetchLiteApiRates(input as LiteApiRatesInput, signal)),
+    enabled: Boolean(
+      input?.propertyId && input.checkIn && input.checkOut && input.checkOut > input.checkIn,
+    ),
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+    retry: false,
+  });
+}
+
+export function useBookLiteApiOffer() {
+  return useWrite((input: LiteApiBookingInput): Promise<Result<LiteApiBookingResult>> =>
+    api.bookLiteApiOffer(input),
+  );
+}
+
+export function useClaimExternalProperty() {
+  return useWrite((input: { propertyId: string; note?: string | null }) =>
+    api.claimExternalProperty(input.propertyId, input.note ?? null),
+  );
 }
 
 export function useStayQuote(
@@ -217,6 +280,29 @@ export function useSaveProperty() {
     payload: api.PropertySaveInput;
     submit?: boolean;
   }) => api.saveProperty(input.payload, { propertyId: input.propertyId, submit: input.submit }));
+}
+
+/** Otel başvurusunda zorunlu misafir hakları politikası kabul durumu. */
+export function usePolicyConsent(propertyId: string | null | undefined) {
+  return useQuery({
+    queryKey: accKeys.policyConsent(propertyId ?? 'none'),
+    queryFn: () => unwrap(api.fetchPolicyConsent(propertyId as string)),
+    enabled: Boolean(propertyId),
+    staleTime: 30_000,
+  });
+}
+
+export function useAcceptPolicy(propertyId: string) {
+  return useWrite(
+    (flags: { terms: boolean; noMarriageCertificate: boolean; equalService: boolean }) =>
+      api.acceptPolicy({
+        propertyId,
+        ...flags,
+        source: Platform.OS === 'web' ? 'web_application' : 'mobile_application',
+        userAgent:
+          Platform.OS === 'web' && typeof navigator !== 'undefined' ? navigator.userAgent : null,
+      }),
+  );
 }
 
 export function useSavePropertySettings(propertyId: string) {
@@ -626,6 +712,7 @@ export function useUpdateMedia() {
     caption?: string | null;
     cover?: boolean;
     sortOrder?: number;
+    roomTypeId?: string | null;
   }) => api.updateMedia(input.mediaId, input),
   );
 }
@@ -720,6 +807,88 @@ export function useSetReviewStatus() {
 }
 
 // -----------------------------------------------------------------------------
+// Şikayet ve destek
+// -----------------------------------------------------------------------------
+
+export function useAccommodationComplaints(
+  propertyId: string | null | undefined,
+  filters: api.ComplaintFilters = {},
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: accKeys.complaints(propertyId ?? 'none', filters),
+    queryFn: () => unwrap(api.fetchComplaints(propertyId as string, filters)),
+    enabled: Boolean(propertyId) && enabled,
+    refetchInterval: 45_000,
+  });
+}
+
+export function useAccommodationComplaint(complaintId: string | null | undefined) {
+  return useQuery({
+    queryKey: accKeys.complaint(complaintId ?? 'none'),
+    queryFn: () => unwrap(api.fetchComplaint(complaintId as string)),
+    enabled: Boolean(complaintId),
+    refetchInterval: 20_000,
+  });
+}
+
+export function useComplaintAssignees(propertyId: string | null | undefined, enabled = true) {
+  return useQuery({
+    queryKey: accKeys.complaintAssignees(propertyId ?? 'none'),
+    queryFn: () => unwrap(api.fetchComplaintAssignees(propertyId as string)),
+    enabled: Boolean(propertyId) && enabled,
+    staleTime: 60_000,
+  });
+}
+
+export function useCreateComplaint(propertyId: string) {
+  return useWrite((input: ComplaintCreateInput) => api.createComplaint(propertyId, input));
+}
+
+export function useUpdateComplaint() {
+  return useWrite((input: { complaintId: string; patch: ComplaintUpdateInput }) =>
+    api.updateComplaint(input.complaintId, input.patch),
+  );
+}
+
+export function useSendComplaintMessage() {
+  return useWrite((input: { complaintId: string; body: string; internal?: boolean }) =>
+    api.sendComplaintMessage(input.complaintId, input.body, input.internal ?? false),
+  );
+}
+
+export function useEscalateComplaint() {
+  return useWrite((input: { complaintId: string; note?: string | null }) =>
+    api.escalateComplaint(input.complaintId, input.note),
+  );
+}
+
+export function useRateComplaint() {
+  return useWrite((input: { complaintId: string; score: number; comment?: string | null }) =>
+    api.rateComplaint(input.complaintId, input.score, input.comment),
+  );
+}
+
+export function useMyComplaints(reservationId?: string | null) {
+  return useQuery({
+    queryKey: accKeys.myComplaints(reservationId ?? 'all'),
+    queryFn: () => unwrap(api.fetchMyComplaints(reservationId)),
+    staleTime: 20_000,
+    refetchInterval: 45_000,
+  });
+}
+
+export function useCreateGuestComplaint() {
+  return useWrite((input: {
+    reservation_id: string;
+    category: ComplaintCreateInput['category'];
+    subject: string;
+    description: string;
+    priority?: ComplaintCreateInput['priority'];
+  }) => api.createGuestComplaint(input));
+}
+
+// -----------------------------------------------------------------------------
 // Belgeler
 // -----------------------------------------------------------------------------
 
@@ -760,6 +929,38 @@ export function useAdminProperties(status?: string) {
 
 export function useReviewProperty() {
   return useWrite(api.reviewProperty);
+}
+
+export function useLiteApiAdminStatus(enabled = true) {
+  return useQuery({
+    queryKey: accKeys.liteApiAdmin,
+    queryFn: () => unwrap(api.fetchLiteApiAdminStatus()),
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+/** Tek bir senkron partisi çalıştırır; tam senkron döngüsü yönetici ekranında yürütülür. */
+export function useLiteApiSync() {
+  return useWrite((input: Parameters<typeof api.triggerLiteApiSync>[0]) =>
+    api.triggerLiteApiSync(input),
+  );
+}
+
+export function useAdminPropertyClaims(
+  status: 'pending' | 'approved' | 'rejected' | 'all' = 'pending',
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: accKeys.adminClaims(status),
+    queryFn: () => unwrap(api.fetchAdminPropertyClaims(status)),
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+export function useReviewAdminPropertyClaim() {
+  return useWrite(api.reviewAdminPropertyClaim);
 }
 
 export type { BookingMode, PaymentStatus, ReservationStatus };

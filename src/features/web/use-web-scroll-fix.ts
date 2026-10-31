@@ -74,19 +74,43 @@ export function useWebScrollFix() {
       document.head.appendChild(style);
     }
 
+    /*
+     * Kaydırma sırasında `scroll` saniyede ~60 kez tetikleniyor. Ölçüm görünür
+     * alan yüksekliğini okuduğu için her olayda düzen (layout) sorgusu yapmak
+     * uzun sayfalarda kaydırmayı titretiyordu. Ölçüm kare başına en fazla bir
+     * kez çalışır ve yükseklik gerçekten değişmediyse DOM'a yazmaz.
+     */
+    let frame = 0;
+    const scheduleMeasure = () => {
+      if (typeof requestAnimationFrame !== 'function') {
+        measure();
+        return;
+      }
+      if (frame) {
+        return;
+      }
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        measure();
+      });
+    };
+
     const visualViewport = window.visualViewport;
-    window.addEventListener('resize', measure);
-    window.addEventListener('orientationchange', measure);
-    visualViewport?.addEventListener('resize', measure);
+    window.addEventListener('resize', scheduleMeasure);
+    window.addEventListener('orientationchange', scheduleMeasure);
+    visualViewport?.addEventListener('resize', scheduleMeasure);
     // Adres çubuğu kaydırma sırasında gizlenip açıldığında `resize` her tarayıcıda
     // tetiklenmiyor; kaydırma sonunda bir kez daha ölçmek boşluğu kapatıyor.
-    window.addEventListener('scroll', measure, { passive: true });
+    window.addEventListener('scroll', scheduleMeasure, { passive: true });
 
     return () => {
-      window.removeEventListener('resize', measure);
-      window.removeEventListener('orientationchange', measure);
-      visualViewport?.removeEventListener('resize', measure);
-      window.removeEventListener('scroll', measure);
+      if (frame && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(frame);
+      }
+      window.removeEventListener('resize', scheduleMeasure);
+      window.removeEventListener('orientationchange', scheduleMeasure);
+      visualViewport?.removeEventListener('resize', scheduleMeasure);
+      window.removeEventListener('scroll', scheduleMeasure);
     };
   }, []);
 }

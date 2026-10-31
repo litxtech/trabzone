@@ -53,12 +53,19 @@ export type HotelApplicationDraft = {
 };
 
 export const HOTEL_APPLICATION_STEPS = [
-  'Temel bilgiler',
+  'Tesis profili',
   'Konum ve iletişim',
-  'Ticari bilgiler',
+  'Ticari ve yetkili',
   'Olanaklar ve kurallar',
-  'Belgeler ve doğrulama',
+  'Fotoğraf ve belgeler',
+  'Onay ve gönder',
 ] as const;
+
+/** Zorunlu işletmeci kabul beyanının adımı. */
+export const POLICY_CONSENT_STEP = HOTEL_APPLICATION_STEPS.length - 1;
+
+/** Başvuruda onaylanması zorunlu politikanın hukuki belge adresi. */
+export const ACCOMMODATION_POLICY_SLUG = 'accommodation-guest-rights';
 
 export const EMPTY_HOTEL_APPLICATION: HotelApplicationForm = {
   name: '',
@@ -153,25 +160,25 @@ function normalizeForm(value: unknown): HotelApplicationForm {
 export function hasHotelApplicationContent(form: HotelApplicationForm): boolean {
   return Boolean(
     form.name.trim() ||
-      form.description.trim() ||
-      form.district.trim() ||
-      form.district_id ||
-      form.address.trim() ||
-      form.phone.trim() ||
-      form.email.trim() ||
-      form.tax_office.trim() ||
-      form.tax_number.trim() ||
-      form.invoice_title.trim() ||
-      form.contact_name.trim() ||
-      form.contact_phone.trim() ||
-      form.contact_email.trim() ||
-      form.room_capacity.trim() ||
-      form.website.trim() ||
-      form.amenities.length > 0 ||
-      form.cancellation_policy.trim() ||
-      form.pet_policy.trim() ||
-      form.child_policy.trim() ||
-      form.general_rules.trim(),
+    form.description.trim() ||
+    form.district.trim() ||
+    form.district_id ||
+    form.address.trim() ||
+    form.phone.trim() ||
+    form.email.trim() ||
+    form.tax_office.trim() ||
+    form.tax_number.trim() ||
+    form.invoice_title.trim() ||
+    form.contact_name.trim() ||
+    form.contact_phone.trim() ||
+    form.contact_email.trim() ||
+    form.room_capacity.trim() ||
+    form.website.trim() ||
+    form.amenities.length > 0 ||
+    form.cancellation_policy.trim() ||
+    form.pet_policy.trim() ||
+    form.child_policy.trim() ||
+    form.general_rules.trim(),
   );
 }
 
@@ -224,7 +231,8 @@ export async function readHotelApplicationDraft(
       version: 1,
       updatedAt,
       step: Math.min(Math.max(rawStep, 0), HOTEL_APPLICATION_STEPS.length - 1),
-      propertyId: typeof record.propertyId === 'string' && record.propertyId ? record.propertyId : null,
+      propertyId:
+        typeof record.propertyId === 'string' && record.propertyId ? record.propertyId : null,
       form,
     };
   } catch {

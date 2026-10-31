@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useMemo, useState } from 'react';
 import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppImage, AppText, Button, Screen, TextField } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -62,6 +63,7 @@ export default function MyReservationsScreen() {
   const { theme } = useTheme();
   const router = useRouter();
   const layout = useAccommodationLayout();
+  const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>('upcoming');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -96,7 +98,8 @@ export default function MyReservationsScreen() {
     <Screen
       scroll
       padded={false}
-      edges={['top', 'left', 'right']}
+      // Üst safe-area'yı Aurora bloğu boyasın: header tek parça görünsün.
+      edges={['left', 'right']}
       refreshControl={
         <RefreshControl
           refreshing={reservations.isRefetching && !reservations.isLoading}
@@ -106,7 +109,7 @@ export default function MyReservationsScreen() {
       }
     >
       <AuroraBackdrop style={styles.hero} colors={[AURORA.night, '#101A33', '#312A6B']}>
-        <View style={styles.heroTop}>
+        <View style={[styles.heroTop, { paddingTop: insets.top }]}>
           <IconSquare icon="chevron-back" accessibilityLabel="Geri" onPress={() => router.back()} />
           <View style={styles.heroBrand}>
             <AppText variant="overline" style={styles.brandOverline}>
@@ -397,6 +400,7 @@ function MyReservationSheet({
   onOpenProperty: (propertyId: string) => void;
 }) {
   const { theme } = useTheme();
+  const router = useRouter();
   const detail = useMyReservation(reservationId);
   const cancel = useCancelMyReservation();
   const createReview = useCreateReview();
@@ -535,6 +539,30 @@ function MyReservationSheet({
               </View>
               <Ionicons name="call" size={18} color={theme.colors.primaryDeep} />
             </View>
+
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push(`/konaklama/destek?reservation=${data.id}` as never)}
+              style={({ pressed }) => [
+                styles.supportCard,
+                {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
+            >
+              <View style={[styles.supportIcon, { backgroundColor: theme.colors.warningSoft }]}>
+                <Ionicons name="shield-checkmark-outline" size={17} color={theme.colors.warning} />
+              </View>
+              <View style={styles.flex}>
+                <AppText variant="bodyStrong">Sorun mu var? Destek isteyin</AppText>
+                <AppText variant="caption" color="textTertiary">
+                  Şikayet bildir, otelin yanıtını ve çözümü buradan takip et.
+                </AppText>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={theme.colors.textTertiary} />
+            </Pressable>
 
             {data.history.length > 0 ? (
               <View style={{ gap: 8 }}>
@@ -798,6 +826,15 @@ const styles = StyleSheet.create({
   panel: { borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, padding: 13 },
   contactCard: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 13, borderRadius: 14 },
   contactTitle: { fontSize: 10 },
+  supportCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  supportIcon: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   timeline: { borderLeftWidth: StyleSheet.hairlineWidth, paddingLeft: 2, gap: 0 },
   timelineRow: { flexDirection: 'row', gap: 8 },
   timelineRail: { width: 14, alignItems: 'center' },
