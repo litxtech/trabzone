@@ -10,10 +10,10 @@
  * `nextCursor` ile parça parça yürütülür.
  */
 
-const { runSyncBatch } = require('../server/liteapi/sync');
-const { isConfigured } = require('../server/liteapi/config');
-const { verifyAdmin } = require('../server/liteapi/supabase');
-const { sendJson, readJsonBody } = require('../server/http-utils');
+const { runSyncBatch } = require('../sync');
+const { isConfigured } = require('../config');
+const { verifyAdmin } = require('../supabase');
+const { sendJson, readJsonBody } = require('../../http-utils');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {

@@ -14,10 +14,10 @@
  * Yanıt yalnızca sağlayıcı gerçekten onayladığında `confirmed: true` olur.
  */
 
-const { bookOffer } = require('../server/liteapi/booking');
-const { isConfigured } = require('../server/liteapi/config');
-const { verifyUser } = require('../server/liteapi/supabase');
-const { sendJson, readJsonBody, clientIp, createRateLimiter } = require('../server/http-utils');
+const { bookOffer } = require('../booking');
+const { isConfigured } = require('../config');
+const { verifyUser } = require('../supabase');
+const { sendJson, readJsonBody, clientIp, createRateLimiter } = require('../../http-utils');
 
 const isRateLimited = createRateLimiter({ windowMs: 60_000, max: 10 });
 

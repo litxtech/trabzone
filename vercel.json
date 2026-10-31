@@ -56,17 +56,9 @@
       "memory": 512,
       "maxDuration": 15
     },
-    "api/liteapi-sync.js": {
+    "api/liteapi.js": {
       "memory": 1024,
       "maxDuration": 60
-    },
-    "api/liteapi-rates.js": {
-      "memory": 512,
-      "maxDuration": 30
-    },
-    "api/liteapi-book.js": {
-      "memory": 512,
-      "maxDuration": 30
     }
   },
   "redirects": [
@@ -89,6 +81,9 @@
     { "source": "/news/:slug", "destination": "/haber/:slug", "permanent": true }
   ],
   "rewrites": [
+    { "source": "/api/liteapi-sync", "destination": "/api/liteapi?route=sync" },
+    { "source": "/api/liteapi-rates", "destination": "/api/liteapi?route=rates" },
+    { "source": "/api/liteapi-book", "destination": "/api/liteapi?route=book" },
     { "source": "/about", "destination": "/seo/about.html" },
     { "source": "/contact", "destination": "/seo/contact.html" },
     { "source": "/support", "destination": "/seo/support.html" },

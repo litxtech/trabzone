@@ -241,17 +241,36 @@ function formatPolicyDate(value) {
   return time ? `${date} ${time}` : date;
 }
 
+/**
+ * LiteAPI iptal politikasını diziye indirger.
+ *
+ * Sağlayıcı politikayı bazen doğrudan dizi, bazen
+ * `{ cancelPolicyInfos: [...], refundableTag, hotelRemarks }` nesnesi olarak
+ * döndürür. İkisi de aynı biçime getirilir.
+ */
+function cancellationEntries(policies) {
+  if (!policies || typeof policies !== 'object') return [];
+  if (Array.isArray(policies)) return policies;
+  return asArray(
+    policies.cancelPolicyInfos ?? policies.cancelPolicies ?? policies.policies ?? policies.entries,
+  );
+}
+
 function cancellationText(policies) {
   if (typeof policies === 'string' && policies.trim()) return policies.trim();
-  if (!Array.isArray(policies) || policies.length === 0) return null;
+  const entries = cancellationEntries(policies);
+  if (entries.length === 0) return null;
   const parts = [];
-  for (const policy of policies.slice(0, 4)) {
+  for (const policy of entries.slice(0, 4)) {
     if (typeof policy === 'string') {
       parts.push(policy);
       continue;
     }
     if (!policy || typeof policy !== 'object') continue;
-    const from = formatPolicyDate(policy.from ?? policy.deadline ?? policy.date);
+    // LiteAPI son teslim tarihini `cancelTime` alanında gönderir.
+    const from = formatPolicyDate(
+      policy.from ?? policy.deadline ?? policy.date ?? policy.cancelTime,
+    );
     const amount = pickNumber(policy.amount, policy.penaltyAmount, policy.charge);
     const percent = pickNumber(policy.percentage, policy.percent, policy.penaltyPercentage);
     const currency = pickString(policy.currency);
@@ -351,17 +370,27 @@ function normalizeOffers(payload, context = {}) {
       offer?.propertyPay === true ||
       offer?.payAtProperty === true;
     const policies = offer?.cancellationPolicies ?? offer?.cancellationPolicy ?? offer?.policies;
+    const policyEntries = cancellationEntries(policies);
     const refundableRaw = offer?.refundable;
-    const refundableTag = pickString(offer?.refundableTag, offer?.refundable_tag)?.toUpperCase() ?? null;
+    // LiteAPI `refundableTag` alanını politika nesnesinin içinde gönderiyor:
+    // RFN = iade edilebilir, NRF / NRFN = iade edilmez.
+    const refundableTag =
+      pickString(
+        offer?.refundableTag,
+        offer?.refundable_tag,
+        policies && typeof policies === 'object' && !Array.isArray(policies)
+          ? policies.refundableTag
+          : null,
+      )?.toUpperCase() ?? null;
     const refundable =
       typeof refundableRaw === 'boolean'
         ? refundableRaw
         : refundableTag === 'RFN'
           ? true
-          : refundableTag === 'NRF'
+          : refundableTag === 'NRF' || refundableTag === 'NRFN'
             ? false
-            : Array.isArray(policies) && policies.length > 0
-              ? policies.some((policy) => {
+            : policyEntries.length > 0
+              ? policyEntries.some((policy) => {
                   const amount = pickNumber(policy?.amount, policy?.penaltyAmount, policy?.charge);
                   const percent = pickNumber(policy?.percentage, policy?.percent, policy?.penaltyPercentage);
                   // LiteAPI ücretsiz iptal penceresini 0 tutarlı politika ile bildirir.
@@ -377,9 +406,10 @@ function normalizeOffers(payload, context = {}) {
           room?.name,
           room?.roomTypeName,
           room?.roomName,
-          room?.description,
+          offer?.name,
           offer?.roomName,
           offer?.roomType,
+          room?.description,
         ) || 'Oda',
       boardName:
         pickString(

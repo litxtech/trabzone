@@ -10,9 +10,9 @@
  * istemciye hiçbir zaman dönmez.
  */
 
-const { searchPropertyRates } = require('../server/liteapi/booking');
-const { isConfigured } = require('../server/liteapi/config');
-const { sendJson, readJsonBody, clientIp, createRateLimiter } = require('../server/http-utils');
+const { searchPropertyRates } = require('../booking');
+const { isConfigured } = require('../config');
+const { sendJson, readJsonBody, clientIp, createRateLimiter } = require('../../http-utils');
 
 const isRateLimited = createRateLimiter({ windowMs: 60_000, max: 30 });
 
