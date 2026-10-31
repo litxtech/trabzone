@@ -93,13 +93,21 @@ function buildClientSecret({ teamId, keyId, clientId, privateKey, days }) {
   };
 }
 
-/** Apple token ucunda istemci kimlik dogrulamasini dener (kod sahte). */
+/**
+ * Apple'da istemci kimlik dogrulamasini gercekten sinar.
+ *
+ * ONEMLI: `authorization_code` grant'inda Apple once `code` degerini kontrol
+ * eder; sahte bir kod her zaman `invalid_grant` doner. Bu yuzden gecersiz bir
+ * sir bile "OK" gibi gorunur (yanlis pozitif). Dogru arac `client_credentials`
+ * grant'idir: Apple orada istemciyi ilk kontrol eder ve sir gecersizse
+ * `invalid_client`, gecerliyse `invalid_scope` doner (bu grant Apple'da
+ * desteklenmedigi icin scope hatasi beklenen sonuctur).
+ */
 async function verifyWithApple(clientId, secret) {
   const body = new URLSearchParams({
     client_id: clientId,
     client_secret: secret,
-    code: 'invalid-test-code',
-    grant_type: 'authorization_code',
+    grant_type: 'client_credentials',
   });
   const response = await fetch('https://appleid.apple.com/auth/token', {
     method: 'POST',
@@ -107,9 +115,14 @@ async function verifyWithApple(clientId, secret) {
     body,
   });
   const text = await response.text();
-  // Istemci sirri gecerliyse Apple sahte kodu "invalid_grant" ile reddeder;
-  // "invalid_client" ise anahtar/kimlik eslesmiyor demektir.
-  return { ok: !/invalid_client/i.test(text), detail: text.slice(0, 200) };
+  let error = '';
+  try {
+    error = JSON.parse(text).error ?? '';
+  } catch {
+    error = text.slice(0, 60);
+  }
+  // invalid_client -> imza/kid/team/client eslesmiyor; digerleri -> kimlik onaylandi.
+  return { ok: error !== 'invalid_client', detail: `${error || 'ok'} (${response.status})` };
 }
 
 async function pushToSupabase(clientId, secret, projectRef, accessToken) {
