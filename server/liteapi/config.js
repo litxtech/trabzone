@@ -6,23 +6,53 @@
  * uç noktalarıyla konuşur.
  */
 
-const CONTENT_BASE_URL =
-  process.env.LITEAPI_CONTENT_BASE_URL || 'https://api.liteapi.travel/v3.0';
-const BOOKING_BASE_URL =
-  process.env.LITEAPI_BOOKING_BASE_URL || 'https://book.liteapi.travel/v3.0';
+/**
+ * Ortam değişkeni okuyucuları.
+ *
+ * Değerler panolardan/CLI'dan yapıştırıldığında sonunda `\n` veya `\r`
+ * kalabiliyor. Bu, `"true\r"` gibi değerlerin sessizce `false` sayılmasına ve
+ * bozuk bir ödeme yöntemi (`"CREDIT\r"`) gönderilmesine yol açtı; tüm değerler
+ * tek yerde kırpılır.
+ */
+function envString(name) {
+  const raw = process.env[name];
+  if (raw === undefined) return undefined;
+  return String(raw).replace(/[\r\n\t]+/g, '').trim();
+}
 
 function intEnv(name, fallback, min, max) {
-  const raw = Number(process.env[name]);
+  const raw = Number(envString(name));
   if (!Number.isFinite(raw)) return fallback;
   const value = Math.trunc(raw);
   return Math.min(Math.max(value, min), max);
 }
 
 function boolEnv(name, fallback) {
-  const raw = process.env[name];
+  const raw = envString(name);
   if (raw === undefined || raw === '') return fallback;
-  return raw === 'true' || raw === '1';
+  return raw.toLowerCase() === 'true' || raw === '1';
 }
+
+const CONTENT_BASE_URL = envString('LITEAPI_CONTENT_BASE_URL') || 'https://api.liteapi.travel/v3.0';
+const BOOKING_BASE_URL = envString('LITEAPI_BOOKING_BASE_URL') || 'https://book.liteapi.travel/v3.0';
+
+/**
+ * Misafir uyruğu = Nuitee'de **pazar**. Müsaitlik ve fiyat bu değere göre
+ * değişiyor: aynı tesis/tarih `TR` pazarında "no availability" dönerken `US`
+ * pazarında satılabilir olabiliyor. Trabzon'daki sağlayıcı tesislerinin büyük
+ * bölümü TR pazarında boş döndüğü için sıralı pazar denemesi yapılır; para
+ * birimi değişmez (LITEAPI_CURRENCY neyse o kalır).
+ */
+const GUEST_NATIONALITIES = (() => {
+  const primary = (envString('LITEAPI_GUEST_NATIONALITY') || 'TR').toUpperCase().slice(0, 2);
+  const fallbacks = (envString('LITEAPI_GUEST_NATIONALITY_FALLBACKS') || 'US')
+    .split(',')
+    .map((entry) => entry.trim().toUpperCase().slice(0, 2))
+    .filter(Boolean);
+  return [primary, ...fallbacks].filter(
+    (value, index, list) => value && list.indexOf(value) === index,
+  );
+})();
 
 const TRABZON = Object.freeze({
   countryCode: 'TR',
@@ -57,8 +87,16 @@ const config = {
   /** Bir tur fiyat yanıtında dönen en fazla teklif. */
   maxOffers: intEnv('LITEAPI_MAX_OFFERS', 40, 1, 100),
 
-  defaultCurrency: (process.env.LITEAPI_CURRENCY || 'TRY').toUpperCase().slice(0, 3),
-  guestNationality: (process.env.LITEAPI_GUEST_NATIONALITY || 'TR').toUpperCase().slice(0, 2),
+  defaultCurrency: (envString('LITEAPI_CURRENCY') || 'TRY').toUpperCase().slice(0, 3),
+  guestNationality: GUEST_NATIONALITIES[0] || 'TR',
+  /** Fiyat sorgusunda denenecek pazar sırası (birincil + yedek). */
+  guestNationalities: GUEST_NATIONALITIES,
+  /**
+   * Fiyat sorgusunda denenecek en fazla pazar sayısı. Ölçümde üçüncü/dördüncü
+   * pazar (DE, GB) ek tesis getirmedi; her ek pazar gecikmeyi artırdığı için
+   * iki pazar yeterli.
+   */
+  rateMarkets: GUEST_NATIONALITIES.slice(0, 2),
 
   /**
    * Canlı rezervasyon iki ayrı onay gerektirir:
@@ -71,6 +109,31 @@ const config = {
     boolEnv('LITEAPI_BOOKING_ENABLED', false) &&
     boolEnv('LITEAPI_BOOKING_OWNER_APPROVED', false),
   bookingOwnerApproved: boolEnv('LITEAPI_BOOKING_OWNER_APPROVED', false),
+  /**
+   * Ön ödemeli (NUITEE_PAY) rezervasyonda platformun sağlayıcıya ödeme yöntemi.
+   * Varsayılan `CREDIT`: LiteAPI hesap bakiyesinden ödeme (NUITEE_PAY). Kartla
+   * ödeme yalnızca PCI uç noktası + kart bilgisi gerektirdiği için kullanılmaz.
+   * Sağlayıcı farklı bir yöntem dönerse ortam değişkeniyle değiştirilebilir.
+   */
+  prepaidPaymentMethod: (envString('LITEAPI_PREPAID_PAYMENT_METHOD') || 'CREDIT')
+    .toUpperCase()
+    .slice(0, 32),
+  /**
+   * İlk ödeme yöntemi reddedilirse denenecek yedekler (virgülle ayrılmış).
+   * Sıra önemli: bakiye → hesaba tanımlı kart → cüzdan.
+   */
+  prepaidPaymentFallbacks: (envString('LITEAPI_PREPAID_PAYMENT_FALLBACKS') ||
+    'ACC_CREDIT_CARD,WALLET')
+    .split(',')
+    .map((method) => method.trim().toUpperCase())
+    .filter(Boolean),
+  /**
+   * Platform marjı (basis point). 1500 = %15. Sağlayıcı fiyatına eklenir;
+   * misafire yalnızca toplam fiyat gösterilir. 0..10000 arasında sınırlanır.
+   */
+  markupBps: intEnv('LITEAPI_MARKUP_BPS', 1500, 0, 10_000),
+  /** Fiyat listesinin istemcide kendini yenileme aralığı (saniye). */
+  priceRefreshSeconds: intEnv('LITEAPI_PRICE_REFRESH_SECONDS', 300, 60, 3600),
 };
 
 function apiKey() {

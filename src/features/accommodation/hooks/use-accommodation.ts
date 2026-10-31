@@ -12,6 +12,7 @@ import type {
   ComplaintUpdateInput,
   LiteApiBookingInput,
   LiteApiBookingResult,
+  LiteApiListPricesInput,
   LiteApiRatesInput,
   MediaCategory,
   PaymentStatus,
@@ -29,8 +30,18 @@ export const accKeys = {
   search: (params: api.SearchParams) => ['accommodation', 'search', params] as const,
   mapPoints: ['accommodation', 'map-points'] as const,
   property: (id: string) => ['accommodation', 'property', id] as const,
+  publicReviews: (id: string) => ['accommodation', 'public-reviews', id] as const,
+  availability: (input: {
+    propertyId: string;
+    checkIn: string;
+    checkOut: string;
+    adults: number;
+    children: number;
+  }) => ['accommodation', 'availability', input] as const,
   liteApiRates: (input: LiteApiRatesInput | null) =>
     ['accommodation', 'liteapi-rates', input] as const,
+  liteApiListPrices: (input: LiteApiListPricesInput | null) =>
+    ['accommodation', 'liteapi-list-prices', input] as const,
   liteApiAdmin: ['accommodation', 'liteapi-admin'] as const,
   myReservations: ['accommodation', 'my-reservations'] as const,
   myReservation: (id: string) => ['accommodation', 'my-reservation', id] as const,
@@ -86,6 +97,22 @@ export const accKeys = {
   admin: (status: string) => ['accommodation', 'admin', status] as const,
   adminClaims: (status: string) => ['accommodation', 'admin-claims', status] as const,
 };
+
+/**
+ * Genel vitrin (Konaklama ana sayfa + harita) önbellek politikası.
+ *
+ * Kullanıcı konaklamaya her girdiğinde tüm tesis listesi yeniden indirilmez:
+ * liste bellekten anında çizilir, yeni tesis/fiyat varsa ekran açıkken
+ * sessizce (arka planda) tazelenir.
+ *
+ * - `staleTime`: bu süre boyunca veri taze sayılır, ağ isteği atılmaz.
+ * - `gcTime`: ekrandan çıkılsa bile liste bu süre bellekte kalır; dönüşte
+ *   iskelet (skeleton) veya "yükleniyor" bloğu görünmez.
+ * - `refetchInterval`: ekran açıkken yapılan sessiz tazeleme aralığı.
+ */
+const PUBLIC_LIST_STALE_MS = 3 * 60_000;
+const PUBLIC_LIST_GC_MS = 60 * 60_000;
+const PUBLIC_LIST_BACKGROUND_REFRESH_MS = 2 * 60_000;
 
 async function unwrap<T>(promise: Promise<Result<T>>): Promise<T> {
   const result = await promise;
@@ -147,8 +174,16 @@ export function usePropertySearch(params: api.SearchParams, enabled = true) {
     queryKey: accKeys.search(params),
     queryFn: () => unwrap(api.searchProperties(params)),
     enabled,
-    staleTime: 30_000,
+    staleTime: PUBLIC_LIST_STALE_MS,
+    gcTime: PUBLIC_LIST_GC_MS,
     placeholderData: (previous) => previous,
+    // Ekrana dönüşte tam liste isteği atılmaz: önbellek anında çizilir.
+    refetchOnMount: false,
+    // Uygulama/sekme odağa döndüğünde sessizce tazelenir (ekran boşalmaz).
+    refetchOnWindowFocus: true,
+    // Ekran açık kaldığı sürece periyodik sessiz tazeleme: yeni tesis veya
+    // güncellenen fiyatlar arka planda listeye yansır.
+    refetchInterval: PUBLIC_LIST_BACKGROUND_REFRESH_MS,
   });
 }
 
@@ -157,7 +192,83 @@ export function usePublicProperty(propertyId: string | null | undefined) {
     queryKey: accKeys.property(propertyId ?? 'none'),
     queryFn: () => unwrap(api.fetchPublicProperty(propertyId as string)),
     enabled: Boolean(propertyId),
+    staleTime: 2 * 60_000,
+    gcTime: 30 * 60_000,
+    // Detaya her girişte tesis yeniden indirilmez; önbellek anında çizilir ve
+    // odağa dönüşte sessizce tazelenir.
+    refetchOnMount: false,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * Otel detayındaki misafir yorumları ve fotoğrafları. Yorum gönderimi bu
+ * sorguyu geçersiz kıldığı için panel gönderim sonrası anında tazelenir.
+ */
+export function usePublicReviews(propertyId: string | null | undefined) {
+  return useQuery({
+    queryKey: accKeys.publicReviews(propertyId ?? 'none'),
+    queryFn: () => unwrap(api.fetchPublicReviews(propertyId as string)),
+    enabled: Boolean(propertyId),
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * Liste kartlarındaki "gecelik başlangıç" fiyatı (LiteAPI).
+ *
+ * Content API'de sabit fiyat olmadığı için yalnızca fiyatı henüz yazılmamış
+ * tesisler için çağrılır; dönen fiyatlar sunucuda da tesis kaydına yazılır,
+ * yani bir sonraki açılışta kart doğrudan fiyatlı gelir.
+ */
+export function useLiteApiListPrices(input: LiteApiListPricesInput | null) {
+  return useQuery({
+    queryKey: accKeys.liteApiListPrices(input),
+    queryFn: ({ signal }) => unwrap(api.fetchLiteApiListPrices(input as LiteApiListPricesInput, signal)),
+    enabled: Boolean(
+      input &&
+        input.propertyIds.length > 0 &&
+        input.checkIn &&
+        input.checkOut &&
+        input.checkOut > input.checkIn,
+    ),
+    staleTime: 10 * 60_000,
+    gcTime: 60 * 60_000,
+    retry: false,
+    // Liste her açılışında sağlayıcıya toplu fiyat sorusu atılmaz; önbellek
+    // varken kullanılır, yalnızca odağa dönüşte sessizce tazelenir.
+    refetchOnMount: false,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * Tesis detayındaki canlı oda müsaitliği ve fiyatlar.
+ *
+ * Sonuç bir dakikada bir sessizce yenilenir; kullanıcı tarih veya misafir
+ * sayısını değiştirdiğinde anahtar değiştiği için liste anında tazelenir.
+ */
+export function usePropertyAvailability(
+  input: {
+    propertyId: string;
+    checkIn: string;
+    checkOut: string;
+    adults: number;
+    children: number;
+  } | null,
+) {
+  return useQuery({
+    queryKey: accKeys.availability(
+      input ?? { propertyId: 'none', checkIn: '', checkOut: '', adults: 0, children: 0 },
+    ),
+    queryFn: () => unwrap(api.fetchPropertyAvailability(input as NonNullable<typeof input>)),
+    enabled: Boolean(
+      input?.propertyId && input.checkIn && input.checkOut && input.checkOut > input.checkIn,
+    ),
     staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -170,14 +281,20 @@ export function usePropertyMapPoints(enabled = true) {
     queryKey: accKeys.mapPoints,
     queryFn: () => unwrap(api.fetchMapProperties()),
     enabled,
-    staleTime: 30_000,
+    staleTime: PUBLIC_LIST_STALE_MS,
+    gcTime: PUBLIC_LIST_GC_MS,
+    refetchOnMount: false,
+    refetchOnWindowFocus: true,
+    refetchInterval: PUBLIC_LIST_BACKGROUND_REFRESH_MS,
   });
 }
 
 /**
- * LiteAPI canlı fiyat/müsaitlik sorgusu. Yalnızca tarih aralığı seçildiğinde
- * çalışır; sağlayıcı maliyetini ve gereksiz çağrıları önlemek için sonuçlar
- * sunucuda 5 dakika önbelleklenir.
+ * LiteAPI canlı fiyat/müsaitlik sorgusu.
+ *
+ * Fiyatlar tarih seçilmeden de hazır olmalıdır; bu yüzden çağıran taraf
+ * varsayılan bir tarih aralığı verir. Sonuçlar sunucuda 5 dakika önbelleklenir
+ * ve liste bu aralıkla sessizce kendini yeniler (kullanıcı beklemez).
  */
 export function useLiteApiRates(input: LiteApiRatesInput | null) {
   return useQuery({
@@ -187,8 +304,14 @@ export function useLiteApiRates(input: LiteApiRatesInput | null) {
       input?.propertyId && input.checkIn && input.checkOut && input.checkOut > input.checkIn,
     ),
     staleTime: 60_000,
-    gcTime: 5 * 60_000,
+    gcTime: 30 * 60_000,
     retry: false,
+    refetchInterval: (query) => {
+      const seconds = query.state.data?.refreshSeconds;
+      return (seconds && seconds >= 60 ? seconds : 300) * 1000;
+    },
+    // Sekmeye dönüldüğünde fiyat bayat kalmasın.
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -196,6 +319,52 @@ export function useBookLiteApiOffer() {
   return useWrite((input: LiteApiBookingInput): Promise<Result<LiteApiBookingResult>> =>
     api.bookLiteApiOffer(input),
   );
+}
+
+/**
+ * Ön ödemeli rezervasyon: taslak açar ve Stripe Checkout adresini döner.
+ *
+ * İki sunucu çağrısı tek mutasyonda zincirlenir; kart bilgisi hiçbir adımda
+ * Trabzone sunucusuna girmez. Dönen `url` tarayıcıda/uygulamada açılır.
+ */
+export function useStartPrepaidBooking() {
+  return useWrite(
+    async (
+      input: LiteApiBookingInput & { productName?: string },
+    ): Promise<Result<{ bookingId: string; url: string; amountCents: number; currency: string; paymentId: string }>> => {
+      const draft = await api.createLiteApiDraft(input);
+      if (!draft.ok) return draft;
+      const session = await api.startStripeCheckout(draft.data.bookingId, input.productName);
+      if (!session.ok) return session;
+      return {
+        ok: true,
+        data: {
+          bookingId: draft.data.bookingId,
+          url: session.data.url,
+          amountCents: session.data.amountCents,
+          currency: session.data.currency,
+          paymentId: session.data.paymentId,
+        },
+      };
+    },
+  );
+}
+
+/** Stripe ödeme durumunu (sunucu doğrulamalı) belirli aralıkla okur. */
+export function useStripePaymentStatus(
+  input: { bookingId?: string | null; paymentId?: string | null },
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['accommodation', 'stripe-status', input.bookingId ?? null, input.paymentId ?? null],
+    queryFn: () => unwrap(api.fetchStripePaymentStatus(input)),
+    enabled: enabled && Boolean(input.bookingId || input.paymentId),
+    staleTime: 5_000,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'paid' || status === 'refunded' || status === 'failed' ? false : 4_000;
+    },
+  });
 }
 
 export function useClaimExternalProperty() {
@@ -235,6 +404,15 @@ export function useMyReservations() {
   });
 }
 
+/** Misafirin LiteAPI (ön ödemeli) rezervasyonları. */
+export function useMyLiteApiBookings() {
+  return useQuery({
+    queryKey: ['accommodation', 'my-liteapi-bookings'],
+    queryFn: () => unwrap(api.fetchMyLiteApiBookings()),
+    staleTime: 20_000,
+  });
+}
+
 export function useMyReservation(id: string | null | undefined) {
   return useQuery({
     queryKey: accKeys.myReservation(id ?? 'none'),
@@ -251,6 +429,10 @@ export function useCancelMyReservation() {
 
 export function useCreateReview() {
   return useWrite(api.createReview);
+}
+
+export function useSubmitPublicReview() {
+  return useWrite(api.submitPublicReview);
 }
 
 // -----------------------------------------------------------------------------

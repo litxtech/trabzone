@@ -12,7 +12,7 @@
  * Anahtar tanımlı değilse 503 `{ ok: false, reason: 'not_configured' }`.
  */
 
-const { searchPlaces } = require('../server/place-search');
+const { searchPlaces } = require('../../place-search');
 
 const RATE_WINDOW_MS = 60 * 1000;
 const RATE_MAX_REQUESTS = 40;

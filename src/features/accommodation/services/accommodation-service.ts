@@ -37,6 +37,12 @@ import type {
   LiteApiAdminStatus,
   LiteApiBookingInput,
   LiteApiBookingResult,
+  LiteApiDraftResult,
+  LiteApiListPricesInput,
+  LiteApiListPricesResponse,
+  MyLiteApiBooking,
+  StripeCheckoutResult,
+  StripePaymentStatusResult,
   LiteApiRateOffer,
   LiteApiRatesInput,
   LiteApiRatesResponse,
@@ -59,6 +65,9 @@ import type {
   PropertySource,
   PublicFilters,
   PublicProperty,
+  PublicPropertyAvailability,
+  PublicReview,
+  PublicReviewFeed,
   MapPropertyPoint,
   Quote,
   RateCalendarData,
@@ -376,10 +385,74 @@ export async function fetchPublicProperty(propertyId: string): Promise<Result<Pu
 }
 
 /**
+ * Otel detayındaki misafir yorumları. Fotoğraflar ve giriş yapmış kullanıcının
+ * kendi yorumu (düzenlemek için) aynı çağrıda gelir.
+ */
+export async function fetchPublicReviews(propertyId: string): Promise<Result<PublicReviewFeed>> {
+  return call<PublicReviewFeed>('acc_public_reviews', {
+    p_property_id: propertyId,
+    p_limit: 50,
+  });
+}
+
+export type SubmitPublicReviewInput = {
+  propertyId: string;
+  rating: number;
+  comment?: string | null;
+  cleanliness?: number | null;
+  staffScore?: number | null;
+  locationScore?: number | null;
+  valueScore?: number | null;
+  photoPaths?: string[];
+};
+
+/**
+ * Giriş yapmış herkesin yorum ve fotoğraf göndermesi. Aynı tesis için ikinci
+ * gönderim mevcut yorumu düzenler; sunucu tarafında tekilleştirilir.
+ */
+export function submitPublicReview(
+  input: SubmitPublicReviewInput,
+): Promise<Result<PublicReview>> {
+  return call<PublicReview>('acc_review_submit', {
+    p_property_id: input.propertyId,
+    p_rating: input.rating,
+    p_comment: input.comment ?? null,
+    p_cleanliness: input.cleanliness ?? null,
+    p_staff_score: input.staffScore ?? null,
+    p_location_score: input.locationScore ?? null,
+    p_value_score: input.valueScore ?? null,
+    p_photo_paths: input.photoPaths ?? [],
+  });
+}
+
+/**
+ * Tesis detayı için canlı oda müsaitliği ve fiyatları.
+ *
+ * Tek RPC çağrısında her oda tipinin kalan oda sayısı ile oda bazlı en düşük
+ * toplam/gecelik fiyatı ve fiyat planı kırılımını döner. Liste, `sold_out`
+ * veya `bookable: false` olan odalar gizlenerek gösterilir.
+ */
+export async function fetchPropertyAvailability(input: {
+  propertyId: string;
+  checkIn: string;
+  checkOut: string;
+  adults: number;
+  children?: number;
+}): Promise<Result<PublicPropertyAvailability>> {
+  return call<PublicPropertyAvailability>('acc_property_availability', {
+    p_property_id: input.propertyId,
+    p_check_in: input.checkIn,
+    p_check_out: input.checkOut,
+    p_adults: input.adults,
+    p_children: input.children ?? 0,
+  });
+}
+
+/**
  * Haritada gösterilecek tesisler. Sayfalama sınırına takılmayan ayrı bir
  * fonksiyondur; yalnızca konumu olan yayınlanmış + doğrulanmış tesisler döner.
  */
-export async function fetchMapProperties(limit = 500): Promise<Result<MapPropertyPoint[]>> {
+export async function fetchMapProperties(limit = 1000): Promise<Result<MapPropertyPoint[]>> {
   const result = await call<MapPropertyPoint[]>('acc_map_points', { p_limit: limit });
   if (!result.ok) {
     return result;
@@ -433,6 +506,31 @@ export async function fetchLiteApiRates(
   );
 }
 
+/**
+ * Liste ekranındaki kartlar için toplu gecelik fiyat.
+ *
+ * LiteAPI Content API sabit fiyat taşımadığı için tesis detayı açılmamış
+ * oteller "fiyat için iletişim" gösteriyordu. Bu çağrı görünen kartların
+ * tümü için tek sağlayıcı isteğiyle fiyat çeker.
+ */
+export async function fetchLiteApiListPrices(
+  input: LiteApiListPricesInput,
+  signal?: AbortSignal,
+): Promise<Result<LiteApiListPricesResponse>> {
+  return liteApiEndpoint<LiteApiListPricesResponse>(
+    '/api/liteapi-prices',
+    {
+      propertyIds: input.propertyIds.slice(0, 40),
+      checkIn: input.checkIn,
+      checkOut: input.checkOut,
+      adults: input.adults ?? 2,
+      children: input.children ?? 0,
+      currency: input.currency ?? 'TRY',
+    },
+    { signal },
+  );
+}
+
 export function bookLiteApiOffer(input: LiteApiBookingInput): Promise<Result<LiteApiBookingResult>> {
   return liteApiEndpoint<LiteApiBookingResult>(
     '/api/liteapi-book',
@@ -450,6 +548,63 @@ export function bookLiteApiOffer(input: LiteApiBookingInput): Promise<Result<Lit
     },
     { auth: true },
   );
+}
+
+/**
+ * Ön ödemeli akış — 1. adım: rezervasyon taslağı açar.
+ *
+ * Sağlayıcıya rezervasyon gönderilmez; yalnızca fiyat sunucuda tazelenir ve
+ * ödeme için taslak hazırlanır. Kart bilgisi hiçbir zaman Trabzone sunucusuna
+ * girmez; tahsilat Stripe Checkout sayfasında yapılır.
+ */
+export function createLiteApiDraft(
+  input: LiteApiBookingInput,
+): Promise<Result<LiteApiDraftResult>> {
+  return liteApiEndpoint<LiteApiDraftResult>(
+    '/api/liteapi-draft',
+    {
+      propertyId: input.propertyId,
+      offerId: input.offerId,
+      checkIn: input.checkIn,
+      checkOut: input.checkOut,
+      adults: input.adults ?? 2,
+      children: input.children ?? 0,
+      childrenAges: input.childrenAges ?? [],
+      currency: input.currency ?? 'TRY',
+      expectedPriceCents: input.expectedPriceCents,
+      guest: input.guest,
+    },
+    { auth: true },
+  );
+}
+
+/** Taslak için Stripe Checkout oturumu açar ve ödeme sayfası adresini döner. */
+export function startStripeCheckout(
+  bookingId: string,
+  productName?: string,
+): Promise<Result<StripeCheckoutResult>> {
+  return liteApiEndpoint<StripeCheckoutResult>(
+    '/api/stripe-checkout',
+    { bookingId, productName },
+    { auth: true },
+  );
+}
+
+/** Ödeme durumunu sunucudan (Stripe ile doğrulanmış olarak) okur. */
+export function fetchStripePaymentStatus(input: {
+  bookingId?: string | null;
+  paymentId?: string | null;
+}): Promise<Result<StripePaymentStatusResult>> {
+  return liteApiEndpoint<StripePaymentStatusResult>(
+    '/api/stripe-status',
+    { bookingId: input.bookingId ?? undefined, paymentId: input.paymentId ?? undefined },
+    { auth: true },
+  );
+}
+
+/** Misafirin sağlayıcı (LiteAPI) rezervasyonları ve Stripe ödeme durumları. */
+export function fetchMyLiteApiBookings(): Promise<Result<MyLiteApiBooking[]>> {
+  return call<MyLiteApiBooking[]>('acc_my_liteapi_bookings');
 }
 
 /** API kaynaklı bir tesisi işletmeci olarak sahiplenme talebi oluşturur. */

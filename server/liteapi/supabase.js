@@ -88,6 +88,44 @@ async function serviceRpc(name, args = {}) {
   return payload;
 }
 
+/**
+ * Servis rolüyle PostgREST tablosundan satır okur.
+ *
+ * `params` doğrudan PostgREST sorgu parametreleridir (`select`, `id`, `eq.`…).
+ * RLS servis rolünde devre dışıdır; bu yardımcı yalnızca sunucuda kullanılır.
+ */
+async function serviceSelect(table, params = {}) {
+  const { url, serviceKey } = serviceConfig();
+  if (!url || !serviceKey) {
+    const error = new Error('Supabase servis yapılandırması eksik.');
+    error.code = 'supabase_not_configured';
+    throw error;
+  }
+
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue;
+    query.set(key, String(value));
+  }
+
+  const response = await fetch(`${url}/rest/v1/${table}?${query.toString()}`, {
+    headers: {
+      apikey: serviceKey,
+      Authorization: `Bearer ${serviceKey}`,
+      Accept: 'application/json',
+    },
+  });
+  const payload = await readJson(response);
+  if (!response.ok) {
+    const error = new Error(errorMessage(payload, `Supabase ${table} okunamadı.`));
+    error.code = 'supabase_select_failed';
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return Array.isArray(payload) ? payload : [];
+}
+
 /** Kullanıcı JWT'siyle anon anahtarını kullanarak RPC çağırır. */
 async function userRpc(name, args, accessToken) {
   const { url, anonKey } = anonConfig();
@@ -204,6 +242,7 @@ module.exports = {
   anonConfig,
   hasServiceConfig,
   serviceRpc,
+  serviceSelect,
   userRpc,
   verifyAdmin,
   verifyUser,

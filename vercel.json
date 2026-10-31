@@ -44,13 +44,13 @@
       "memory": 1024,
       "maxDuration": 15
     },
-    "api/place-search.js": {
+    "api/place.js": {
       "memory": 512,
       "maxDuration": 15
     },
-    "api/place-photo.js": {
-      "memory": 512,
-      "maxDuration": 15
+    "api/stripe-payments.js": {
+      "memory": 1024,
+      "maxDuration": 30
     },
     "api/sitemap.js": {
       "memory": 512,
@@ -83,7 +83,16 @@
   "rewrites": [
     { "source": "/api/liteapi-sync", "destination": "/api/liteapi?route=sync" },
     { "source": "/api/liteapi-rates", "destination": "/api/liteapi?route=rates" },
+    { "source": "/api/liteapi-prices", "destination": "/api/liteapi?route=prices" },
     { "source": "/api/liteapi-book", "destination": "/api/liteapi?route=book" },
+    { "source": "/api/liteapi-draft", "destination": "/api/liteapi?route=draft" },
+    { "source": "/api/liteapi-warm", "destination": "/api/liteapi?route=warm" },
+    { "source": "/api/place-search", "destination": "/api/place?route=search" },
+    { "source": "/api/place-photo", "destination": "/api/place?route=photo" },
+    { "source": "/api/stripe-checkout", "destination": "/api/stripe-payments?route=checkout" },
+    { "source": "/api/stripe-status", "destination": "/api/stripe-payments?route=status" },
+    { "source": "/api/stripe-webhook", "destination": "/api/stripe-payments?route=webhook" },
+    { "source": "/api/stripe-refund", "destination": "/api/stripe-payments?route=refund" },
     { "source": "/about", "destination": "/seo/about.html" },
     { "source": "/contact", "destination": "/seo/contact.html" },
     { "source": "/support", "destination": "/seo/support.html" },

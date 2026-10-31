@@ -203,6 +203,7 @@ export interface MapPropertyPoint {
 
 export interface PublicReview {
   id: string;
+  reservation_id?: string | null;
   guest_name: string;
   guest_avatar_path: string | null;
   rating: number;
@@ -212,7 +213,21 @@ export interface PublicReview {
   value_score: number | null;
   comment: string | null;
   owner_reply: string | null;
+  /** Misafirin yüklediği yorum fotoğraflarının depo yolları. */
+  photo_paths: string[];
+  /** Yorum, tamamlanmış bir konaklamaya bağlı mı? */
+  stay_verified?: boolean;
+  /** Otel paneli listesinde görünür (yalnızca kendi yorumum için). */
+  status?: 'published' | 'hidden';
   created_at: string;
+}
+
+/** Otel detayındaki yorum panelinin tek çağrıda aldığı veri. */
+export interface PublicReviewFeed {
+  items: PublicReview[];
+  my_review: PublicReview | null;
+  count: number;
+  average: number;
 }
 
 export interface PublicCampaign {
@@ -275,6 +290,59 @@ export interface PublicRoomType {
   cover_path: string | null;
   photos: string[];
   rate_plans: PublicRatePlan[];
+}
+
+/**
+ * `acc_property_availability` yanıtındaki tek bir fiyat planı.
+ * `bookable` false ise plan, seçilen tarihlerde satılamaz (dolu, kapalı gün,
+ * min/max konaklama veya kapasite engeli).
+ */
+export interface PublicRatePlanAvailability {
+  rate_plan_id: string;
+  name: string;
+  booking_mode: BookingMode;
+  available_rooms: number;
+  sold_out: boolean;
+  subtotal_cents: number;
+  discount_cents: number;
+  total_cents: number;
+  nightly_cents: number;
+  has_discount: boolean;
+  min_stay: number;
+  max_stay: number | null;
+  min_stay_ok: boolean;
+  max_stay_ok: boolean;
+  closed_to_arrival: boolean;
+  closed_to_departure: boolean;
+  bookable: boolean;
+}
+
+/** Seçilen tarih aralığında bir oda tipinin canlı stok ve fiyat özeti. */
+export interface PublicRoomAvailability {
+  room_type_id: string;
+  name: string;
+  currency: string;
+  available_rooms: number;
+  capacity_ok: boolean;
+  sold_out: boolean;
+  bookable: boolean;
+  best_total_cents: number | null;
+  best_nightly_cents: number | null;
+  best_discount_cents: number;
+  rate_plans: PublicRatePlanAvailability[];
+}
+
+/** Tesis detayında `anlık` müsaitlik ve fiyat listesi. */
+export interface PublicPropertyAvailability {
+  property_id: string;
+  check_in: string;
+  check_out: string;
+  nights: number;
+  adults: number;
+  children: number;
+  currency: string;
+  generated_at: string;
+  rooms: PublicRoomAvailability[];
 }
 
 export interface PublicProperty {
@@ -1062,6 +1130,8 @@ export interface Review {
   value_score: number | null;
   comment: string | null;
   owner_reply: string | null;
+  photo_paths: string[];
+  stay_verified?: boolean;
   status: 'published' | 'hidden';
   created_at: string;
   replied_at: string | null;
@@ -1526,6 +1596,8 @@ export interface LiteApiRatesResponse {
   offers: LiteApiRateOffer[];
   cached: boolean;
   fetchedAt: string | null;
+  /** Listenin istemcide yenilenme aralığı (saniye). */
+  refreshSeconds?: number;
 }
 
 export interface LiteApiRatesInput {
@@ -1537,6 +1609,36 @@ export interface LiteApiRatesInput {
   childrenAges?: number[];
   currency?: string;
   refresh?: boolean;
+}
+
+/**
+ * Liste ekranındaki kartlar için toplu "gecelik başlangıç" fiyatı.
+ * Sağlayıcıya tek çağrıda sorulur; yanıt yalnızca gösterilecek fiyatı taşır.
+ */
+export interface LiteApiListPricesInput {
+  propertyIds: string[];
+  checkIn: string;
+  checkOut: string;
+  adults?: number;
+  children?: number;
+  currency?: string;
+}
+
+export interface LiteApiListPriceItem {
+  propertyId: string;
+  /** Gecelik, platform marjı dahil satış fiyatı (kuruş). */
+  priceCents: number;
+  currency: string;
+}
+
+export interface LiteApiListPricesResponse {
+  ok: true;
+  stay: { checkIn: string; checkOut: string; nights: number; adults: number; children: number };
+  currency: string;
+  items: LiteApiListPriceItem[];
+  /** Sağlayıcı çağrısı düştü; liste bir sonraki yenilemede tekrar dener. */
+  degraded?: boolean;
+  refreshSeconds?: number;
 }
 
 export interface LiteApiGuestInput {
@@ -1559,6 +1661,90 @@ export interface LiteApiBookingResult {
   confirmed: boolean;
   providerBookingId: string | null;
   message: string;
+}
+
+/** Ön ödemeli akış: sağlayıcıya gitmeden açılan rezervasyon taslağı. */
+export interface LiteApiDraftResult {
+  bookingId: string;
+  priceCents: number;
+  currency: string;
+  roomName?: string;
+  paymentAtProperty?: boolean;
+}
+
+export type StripePaymentStatus =
+  | 'none'
+  | 'pending'
+  | 'open'
+  | 'paid'
+  | 'failed'
+  | 'expired'
+  | 'refunded'
+  | 'partially_refunded'
+  | 'disputed';
+
+export interface StripeCheckoutResult {
+  paymentId: string;
+  status: StripePaymentStatus;
+  amountCents: number;
+  currency: string;
+  /** Stripe Checkout ödeme sayfası adresi. */
+  url: string;
+  reused?: boolean;
+}
+
+export interface StripePaymentStatusResult {
+  bookingId: string | null;
+  paymentId: string | null;
+  status: StripePaymentStatus;
+  amountCents: number | null;
+  paidCents: number | null;
+  currency: string | null;
+  url: string | null;
+  booking: {
+    bookingId?: string;
+    status?: 'intent' | 'pending_provider' | 'confirmed' | 'failed' | 'cancelled';
+    confirmed?: boolean;
+    providerBookingId?: string | null;
+    already?: boolean;
+    inFlight?: boolean;
+  } | null;
+  refunded: boolean;
+}
+
+/** Misafirin sağlayıcı (LiteAPI) üzerinden yaptığı konaklama rezervasyonu. */
+export interface MyLiteApiBooking {
+  id: string;
+  status: 'intent' | 'pending_provider' | 'confirmed' | 'failed' | 'cancelled';
+  check_in: string;
+  check_out: string;
+  adults: number;
+  children: number;
+  nights: number;
+  price_cents: number | null;
+  currency: string;
+  room_name: string;
+  board_name: string | null;
+  refundable: boolean | null;
+  payment_at_property: boolean;
+  provider_booking_id: string | null;
+  error: string | null;
+  created_at: string;
+  property: {
+    id: string;
+    name: string;
+    district: string | null;
+    cover_path: string | null;
+    phone: string | null;
+  };
+  payment: {
+    id: string;
+    status: StripePaymentStatus;
+    amount_cents: number;
+    refunded_cents: number;
+    currency: string;
+    checkout_url: string | null;
+  } | null;
 }
 
 export interface LiteApiSyncSample {

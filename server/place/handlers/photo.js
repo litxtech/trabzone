@@ -12,7 +12,7 @@
  * Anahtar tanımlı değilse 503 `{ ok: false, reason: 'not_configured' }`.
  */
 
-const { findPlacePhoto } = require('../server/place-photo');
+const { findPlacePhoto } = require('../../place-photo');
 
 const RATE_WINDOW_MS = 60 * 1000;
 // Bir liste ekranı tek seferde onlarca kart açabilir; arama ucundan geniş tutulur.

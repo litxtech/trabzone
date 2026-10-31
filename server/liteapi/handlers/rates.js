@@ -11,7 +11,7 @@
  */
 
 const { searchPropertyRates } = require('../booking');
-const { isConfigured } = require('../config');
+const { isConfigured, config } = require('../config');
 const { sendJson, readJsonBody, clientIp, createRateLimiter } = require('../../http-utils');
 
 const isRateLimited = createRateLimiter({ windowMs: 60_000, max: 30 });
@@ -66,8 +66,9 @@ module.exports = async function handler(req, res) {
       refresh: body.refresh === true,
     });
 
-    // Tekliflerde sağlayıcının ham nesnesi istemciye gönderilmez.
-    const offers = result.offers.map(({ raw, ...offer }) => offer);
+    // Tekliflerde sağlayıcının ham nesnesi ve platform marjı istemciye
+    // gönderilmez; misafir yalnızca nihai satış fiyatını görür.
+    const offers = result.offers.map(({ raw, basePriceCents, markupCents, ...offer }) => offer);
     sendJson(res, 200, {
       ok: true,
       hotelId: result.hotelId,
@@ -83,6 +84,8 @@ module.exports = async function handler(req, res) {
       offers,
       cached: result.cached,
       fetchedAt: result.fetchedAt,
+      // İstemci listeyi bu aralıkla sessizce yeniler (marj bilgisi değildir).
+      refreshSeconds: config.priceRefreshSeconds,
     });
   } catch (cause) {
     const code = cause && cause.code ? cause.code : 'rates_failed';

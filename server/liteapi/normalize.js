@@ -290,22 +290,25 @@ function cancellationText(policies) {
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 
-function extractPaymentTypes(offer) {
-  const sources = [
-    offer?.paymentTypes,
-    offer?.paymentType,
-    offer?.payment?.paymentTypes,
-    offer?.payment?.type,
-    offer?.paymentOptions,
-  ];
+function extractPaymentTypes(...candidates) {
   const values = [];
-  for (const source of sources) {
-    for (const entry of asArray(source)) {
-      if (typeof entry === 'string' && entry.trim()) {
-        values.push(entry.trim().toUpperCase());
-      } else if (entry && typeof entry === 'object') {
-        const name = pickString(entry.type, entry.name, entry.code);
-        if (name) values.push(name.toUpperCase());
+  for (const offer of candidates) {
+    if (!offer || typeof offer !== 'object') continue;
+    const sources = [
+      offer?.paymentTypes,
+      offer?.paymentType,
+      offer?.payment?.paymentTypes,
+      offer?.payment?.type,
+      offer?.paymentOptions,
+    ];
+    for (const source of sources) {
+      for (const entry of asArray(source)) {
+        if (typeof entry === 'string' && entry.trim()) {
+          values.push(entry.trim().toUpperCase());
+        } else if (entry && typeof entry === 'object') {
+          const name = pickString(entry.type, entry.name, entry.code);
+          if (name) values.push(name.toUpperCase());
+        }
       }
     }
   }
@@ -325,13 +328,26 @@ function flattenOffers(payload, context) {
       return;
     }
     for (const room of rooms) {
-      const offers = asArray(room.offers ?? room.rates ?? room.ratePlans);
-      if (offers.length === 0) {
-        entries.push({ hotelId, room, offer: room });
+      // LiteAPI yapısı: `roomTypes[]` öğesi TEK bir tekliftir (`offerId`,
+      // `offerRetailRate` burada); `rates[]` ise doluluk başına fiyat
+      // detayıdır. Rezervasyon yalnızca `offerId` ile yapılabildiği için
+      // teklifi üst seviyeden okumak zorunlu — `rates[].rateId` rezervasyonda
+      // işe yaramaz.
+      const parentOfferId = pickString(room.offerId, room.offer_id, room.id);
+      const rates = asArray(room.offers ?? room.rates ?? room.ratePlans);
+      if (parentOfferId) {
+        // Teklif birden çok doluluk satırı taşıyorsa hepsi birlikte satılır;
+        // fiyat üst seviyedeki `offerRetailRate` (toplam) olur.
+        const single = rates.length === 1 ? rates[0] : null;
+        entries.push({ hotelId, room, offer: room, rate: single, rateCount: rates.length });
         continue;
       }
-      for (const offer of offers) {
-        entries.push({ hotelId, room, offer });
+      if (rates.length === 0) {
+        entries.push({ hotelId, room, offer: room, rate: null, rateCount: 0 });
+        continue;
+      }
+      for (const rate of rates) {
+        entries.push({ hotelId, room, offer: rate, rate, rateCount: rates.length });
       }
     }
   };
@@ -354,28 +370,59 @@ function normalizeOffers(payload, context = {}) {
   const offers = [];
   const seen = new Set();
 
-  for (const { hotelId, room, offer } of entries) {
+  for (const { hotelId, room, offer, rate, rateCount } of entries) {
     if (!offer || typeof offer !== 'object') continue;
-    const offerId = pickString(offer.offerId, offer.id, offer.rateId, offer.offer_id);
-    if (!offerId) continue;
-    if (seen.has(offerId)) continue;
-    seen.add(offerId);
+    // Rezervasyona giden kimlik: teklif (roomType) seviyesindeki `offerId`.
+    // `rateId` yalnızca alt satır kimliğidir, `/rates/prebook` bunu kabul etmez.
+    const bookingOfferId = pickString(
+      offer.offerId,
+      offer.offer_id,
+      room?.offerId,
+      room?.offer_id,
+      offer.id,
+      rate?.offerId,
+      rate?.rateId,
+    );
+    if (!bookingOfferId) continue;
+    // Aynı teklif birden çok kez listelenmesin (teklif, satış birimidir).
+    const dedupeKey = bookingOfferId;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
 
-    const price = extractOfferPrice(offer);
+    // Fiyat: teklif seviyesindeki toplam (`offerRetailRate`) esastır; tek
+    // satırlı tekliflerde satır fiyatı da aynıdır. Çok satırlı bir teklifte
+    // hepsi birlikte satıldığı için teklif toplamı kullanılmalı.
+    const price =
+      extractOfferPrice(offer).amount !== null
+        ? extractOfferPrice(offer)
+        : rate
+          ? extractOfferPrice(rate)
+          : extractOfferPrice(offer);
     if (price.amount === null || price.amount < 0) continue;
 
-    const paymentTypes = extractPaymentTypes(offer);
+    // Doluluk/board/iptal bilgisi genelde satırda (`rates[]`) bulunur.
+    const detail = rate && typeof rate === 'object' ? rate : offer;
+    const paymentSource = rateCount > 1 ? offer : detail;
+    const paymentTypes = extractPaymentTypes(paymentSource, offer, rate);
     const propertyPay =
       paymentTypes.includes('PROPERTY_PAY') ||
       offer?.propertyPay === true ||
       offer?.payAtProperty === true;
-    const policies = offer?.cancellationPolicies ?? offer?.cancellationPolicy ?? offer?.policies;
+    const policies =
+      detail?.cancellationPolicies ??
+      detail?.cancellationPolicy ??
+      detail?.policies ??
+      offer?.cancellationPolicies ??
+      offer?.cancellationPolicy ??
+      offer?.policies;
     const policyEntries = cancellationEntries(policies);
-    const refundableRaw = offer?.refundable;
+    const refundableRaw = typeof detail?.refundable === 'boolean' ? detail.refundable : offer?.refundable;
     // LiteAPI `refundableTag` alanını politika nesnesinin içinde gönderiyor:
     // RFN = iade edilebilir, NRF / NRFN = iade edilmez.
     const refundableTag =
       pickString(
+        detail?.refundableTag,
+        detail?.refundable_tag,
         offer?.refundableTag,
         offer?.refundable_tag,
         policies && typeof policies === 'object' && !Array.isArray(policies)
@@ -399,13 +446,14 @@ function normalizeOffers(payload, context = {}) {
               : null;
 
     offers.push({
-      offerId,
+      offerId: bookingOfferId,
       hotelId: hotelId || context.hotelId || null,
       roomName:
         pickString(
           room?.name,
           room?.roomTypeName,
           room?.roomName,
+          detail?.name,
           offer?.name,
           offer?.roomName,
           offer?.roomType,
@@ -413,6 +461,10 @@ function normalizeOffers(payload, context = {}) {
         ) || 'Oda',
       boardName:
         pickString(
+          detail?.boardName,
+          detail?.boardType,
+          detail?.mealPlan,
+          detail?.board,
           offer?.boardName,
           offer?.boardType,
           offer?.mealPlan,
@@ -430,8 +482,20 @@ function normalizeOffers(payload, context = {}) {
       onlinePayment: paymentTypes.some((type) =>
         ['CREDIT_CARD', 'ONLINE_PAY', 'PAYMENT_GATEWAY'].includes(type),
       ),
-      maxOccupancy: pickNumber(offer?.maxOccupancy, offer?.occupancy, room?.maxOccupancy),
-      availableRooms: pickNumber(offer?.availableRooms, offer?.remaining, room?.availableRooms),
+      maxOccupancy: pickNumber(
+        detail?.maxOccupancy,
+        detail?.occupancy,
+        offer?.maxOccupancy,
+        offer?.occupancy,
+        room?.maxOccupancy,
+      ),
+      availableRooms: pickNumber(
+        detail?.availableRooms,
+        detail?.remaining,
+        offer?.availableRooms,
+        room?.availableRooms,
+      ),
+      rateId: pickString(detail?.rateId, detail?.rate_id, rate?.rateId),
       raw: offer,
     });
   }

@@ -7,6 +7,7 @@ export { Card } from './Card';
 export { IconButton } from './IconButton';
 export { Divider, PressableRow, Row, Spacer } from './Layout';
 export { BrandWordmark, Logo, Wordmark } from './Logo';
+export { QuickRefreshControl, type QuickRefreshControlProps } from './QuickRefreshControl';
 export { Screen } from './Screen';
 export { ScreenHeader, type ScreenHeaderProps } from './ScreenHeader';
 export { Skeleton, SkeletonBlock } from './Skeleton';

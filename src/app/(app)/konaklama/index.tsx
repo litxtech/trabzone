@@ -1,9 +1,8 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { memo, useCallback, useMemo, useState } from 'react';
 import {
   Pressable,
-  RefreshControl,
   ScrollView,
   StyleSheet,
   View,
@@ -12,7 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppImage, AppText, Screen, TextField } from '@/components/ui';
+import { AppImage, AppText, Screen, TextField, QuickRefreshControl } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useRouter } from '@/utils/router';
 
@@ -24,7 +23,6 @@ import {
   Chip,
   EmptyState,
   InlineError,
-  LoadingBlock,
 } from '@/features/accommodation/components/AccommodationUI';
 import {
   AURORA,
@@ -42,11 +40,13 @@ import {
 } from '@/features/accommodation/components/PublicFilterSheet';
 import {
   useAccommodationContext,
+  useLiteApiListPrices,
   usePropertySearch,
   usePublicFilters,
 } from '@/features/accommodation/hooks/use-accommodation';
 import { useAccommodationLayout } from '@/features/accommodation/hooks/use-accommodation-layout';
 import { accommodationMediaUrl } from '@/features/accommodation/services/accommodation-media-service';
+import { isoAddDays, todayIso } from '@/features/accommodation/services/accommodation-service';
 import type { PropertyType } from '@/features/accommodation/types';
 import {
   PROPERTY_TYPE_LABELS,
@@ -95,9 +95,12 @@ export default function KonaklamaHubScreen() {
   const [filters, setFilters] = useState<PublicSearchState>(DEFAULT_SEARCH_STATE);
   const [gridWidth, setGridWidth] = useState(0);
   // Kademeli çizim penceresi. Sonuç kümesi değiştiğinde sayaç ayrı bir effect
-  // ile sıfırlanmaz; veri sürümü eşleşmediğinde pencere doğrudan baştan
-  // hesaplanır (React'in önerdiği "effect'siz reset" deseni).
-  const [cardWindow, setCardWindow] = useState({ version: 0, count: INITIAL_VISIBLE_CARDS });
+  // ile sıfırlanmaz; arama kriteri anahtarı eşleşmediğinde pencere doğrudan
+  // baştan hesaplanır (React'in önerdiği "effect'siz reset" deseni).
+  const [cardWindow, setCardWindow] = useState<{ version: string; count: number }>({
+    version: '',
+    count: INITIAL_VISIBLE_CARDS,
+  });
 
   const context = useAccommodationContext();
   const publicFilters = usePublicFilters();
@@ -121,7 +124,61 @@ export default function KonaklamaHubScreen() {
   );
 
   const results = usePropertySearch(params);
-  const properties = useMemo(() => results.data?.items ?? [], [results.data?.items]);
+  const baseProperties = useMemo(() => results.data?.items ?? [], [results.data?.items]);
+
+  /**
+   * Sağlayıcı (LiteAPI) tesislerinde fiyat Content API'de gelmez; tarih +
+   * doluluk ile canlı sorulur. Görünen kartlar tek istekle fiyatlanır:
+   *   - tarih seçilmemişse yalnızca fiyatı hiç yazılmamış tesisler,
+   *   - tarih seçilmişse tüm sağlayıcı tesisleri (fiyat o tarihlere ait olmalı).
+   */
+  const hasPickedDates = Boolean(
+    filters.checkIn && filters.checkOut && filters.checkOut > filters.checkIn,
+  );
+  const priceTargets = useMemo(
+    () =>
+      baseProperties
+        .filter(
+          (property) =>
+            property.source === 'liteapi' && (hasPickedDates || !property.price_from_cents),
+        )
+        .map((property) => property.id),
+    [baseProperties, hasPickedDates],
+  );
+
+  const priceStay = useMemo(() => {
+    const checkIn = filters.checkIn || isoAddDays(todayIso(), 1);
+    const checkOut =
+      filters.checkOut && filters.checkOut > checkIn ? filters.checkOut : isoAddDays(checkIn, 2);
+    return { checkIn, checkOut };
+  }, [filters.checkIn, filters.checkOut]);
+
+  const livePrices = useLiteApiListPrices(
+    priceTargets.length > 0
+      ? {
+          propertyIds: priceTargets,
+          checkIn: priceStay.checkIn,
+          checkOut: priceStay.checkOut,
+          adults: filters.guests,
+        }
+      : null,
+  );
+
+  /** Sunucudan gelen liste + canlı fiyatlar birleşik görünüm. */
+  const properties = useMemo(() => {
+    const items = livePrices.data?.items;
+    if (!items || items.length === 0) return baseProperties;
+    const byId = new Map(items.map((item) => [item.propertyId, item]));
+    return baseProperties.map((property) => {
+      const live = byId.get(property.id);
+      if (!live || !live.priceCents) return property;
+      return {
+        ...property,
+        price_from_cents: live.priceCents,
+        currency: live.currency || property.currency,
+      };
+    });
+  }, [baseProperties, livePrices.data]);
   const ownedProperties = context.data?.items ?? [];
   const pendingReservations = ownedProperties.reduce((total, item) => total + item.pending_reservations, 0);
   const pendingTasks = ownedProperties.reduce((total, item) => total + item.pending_tasks, 0);
@@ -182,19 +239,19 @@ export default function KonaklamaHubScreen() {
         description: 'Yaklaşan konaklamalar',
         icon: 'calendar-outline',
       },
-      {
-        key: 'new-property',
-        label: hasProperties ? 'Yeni tesis' : 'Otelimi ekle',
-        description: 'Ücretsiz başvuru',
-        icon: 'add-circle-outline',
-      },
-      {
-        key: 'manage',
-        label: 'Otel yönetimim',
-        description: hasProperties ? summary || 'Panel ve takvim' : 'Tesisini ekleyip yönet',
-        icon: 'briefcase-outline',
-        badge: pendingReservations,
-      },
+      // Tesis ekleme/başvuru akışı ziyaretçi menüsünde yer almaz; yalnızca
+      // tesisi olan işletmeciler yönetim merkezine buradan ulaşır.
+      ...(hasProperties
+        ? [
+            {
+              key: 'manage',
+              label: 'Otel yönetimim',
+              description: summary || 'Panel ve takvim',
+              icon: 'briefcase-outline' as const,
+              badge: pendingReservations,
+            },
+          ]
+        : []),
       {
         key: 'map',
         label: 'Haritada gör',
@@ -212,19 +269,22 @@ export default function KonaklamaHubScreen() {
     [gridWidth, layout.columns],
   );
 
-  const dataVersion = results.dataUpdatedAt;
+  // Kademeli çizim penceresi yalnızca arama kriterleri değişince baştan
+  // hesaplanır. Arka plan tazelemesi (yeni veri) pencereyi küçültmez; kullanıcı
+  // "Daha fazla" ile açtığı kartları kaybetmez.
+  const resultKey = useMemo(() => JSON.stringify(params), [params]);
   const visibleCards =
-    cardWindow.version === dataVersion ? cardWindow.count : INITIAL_VISIBLE_CARDS;
+    cardWindow.version === resultKey ? cardWindow.count : INITIAL_VISIBLE_CARDS;
 
   const showMoreCards = useCallback(() => {
     setCardWindow((current) => {
-      const base = current.version === dataVersion ? current.count : INITIAL_VISIBLE_CARDS;
+      const base = current.version === resultKey ? current.count : INITIAL_VISIBLE_CARDS;
       if (base >= properties.length) {
         return current;
       }
-      return { version: dataVersion, count: Math.min(base + CARD_LOAD_STEP, properties.length) };
+      return { version: resultKey, count: Math.min(base + CARD_LOAD_STEP, properties.length) };
     });
-  }, [dataVersion, properties.length]);
+  }, [resultKey, properties.length]);
 
   const openProperty = useCallback(
     (propertyId: string) => router.push(`/konaklama/${propertyId}` as never),
@@ -247,12 +307,8 @@ export default function KonaklamaHubScreen() {
       router.push('/konaklama/rezervasyonlarim' as never);
       return;
     }
-    if (key === 'new-property') {
-      router.push('/konaklama/otel-ekle' as never);
-      return;
-    }
     if (key === 'manage') {
-      router.push((ownedProperties.length > 0 ? '/konaklama/yonetim' : '/konaklama/otel-ekle') as never);
+      router.push('/konaklama/yonetim' as never);
       return;
     }
     if (key === 'map') {
@@ -276,7 +332,7 @@ export default function KonaklamaHubScreen() {
       onScroll={handleScroll}
       scrollEventThrottle={120}
       refreshControl={
-        <RefreshControl
+        <QuickRefreshControl
           refreshing={results.isRefetching && !results.isLoading}
           onRefresh={() => void results.refetch()}
           tintColor={theme.colors.primary}
@@ -595,7 +651,7 @@ export default function KonaklamaHubScreen() {
               </View>
             ))}
           </View>
-        ) : results.isError ? (
+        ) : results.isError && properties.length === 0 ? (
           <InlineError
             message={results.error instanceof Error ? results.error.message : 'Tesisler yüklenemedi.'}
             onRetry={() => void results.refetch()}
@@ -639,8 +695,6 @@ export default function KonaklamaHubScreen() {
             ) : null}
           </>
         )}
-
-        {results.isFetching && !results.isLoading ? <LoadingBlock label="Güncelleniyor…" height={54} /> : null}
 
         <View style={[styles.footNote, { borderTopColor: theme.colors.divider }]}>
           <Ionicons name="shield-checkmark-outline" size={16} color={theme.colors.textTertiary} />

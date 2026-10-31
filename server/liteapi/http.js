@@ -194,6 +194,10 @@ async function searchRates(body) {
   return request('POST', config.contentBaseUrl, '/hotels/rates', { body });
 }
 
+async function prebookRate(body) {
+  return request('POST', config.bookingBaseUrl, '/rates/prebook', { body });
+}
+
 async function bookRate(body) {
   return request('POST', config.bookingBaseUrl, '/rates/book', { body });
 }
@@ -203,6 +207,7 @@ module.exports = {
   listHotels,
   getHotelDetail,
   searchRates,
+  prebookRate,
   bookRate,
   request,
 };
