@@ -202,30 +202,6 @@ function readUrlParam(url: string, key: string): string | null {
 }
 
 /**
- * Sağlayıcının sunucuda gerçekten kullanılabilir olduğunu sorar.
- *
- * GoTrue, istemci sırrı tanımlanmamış sağlayıcılar için `/authorize` ucunda
- * `400 missing OAuth secret` döner (yönlendirme yapmadan). Bu durumda
- * kullanıcıyı boş bir tarayıcı sayfasına göndermek yerine anlaşılır bir mesaj
- * gösterilir. `skip_http_redirect` desteklenen sürümlerde gereksiz yönlendirmeyi
- * engeller.
- */
-async function providerReady(provider: SocialProvider, redirectTo: string): Promise<boolean> {
-  const url =
-    `${env.supabaseUrl}/auth/v1/authorize?provider=${provider}` +
-    `&skip_http_redirect=true&redirect_to=${encodeURIComponent(redirectTo)}`;
-  try {
-    const response = await fetch(url, {
-      headers: { apikey: env.supabasePublishableKey },
-    });
-    return response.ok;
-  } catch {
-    // Ağ hatasında akışı burada kesmeyiz; tarayıcı kendi hatasını gösterir.
-    return true;
-  }
-}
-
-/**
  * Tarayıcı tabanlı (PKCE) OAuth oturumu açar ve dönen adresi verir.
  *
  * iOS'ta `ASWebAuthenticationSession`, Android'de Custom Tabs kullanılır;
@@ -309,13 +285,12 @@ async function completeOAuthCallback(
  */
 async function signInWithOAuthBrowser(provider: SocialProvider): Promise<Result<Session>> {
   const redirectTo = AUTH_REDIRECT_URL;
-  // Apple'ın web akışı sunucuda istemci sırrı ve geçerli bir Services ID ister.
-  // Android'de ve native modülü olmayan iOS derlemelerinde tek yol bu olduğu
-  // için önce hazır olup olmadığı sorulur; eksikse kullanıcı Apple'ın boş hata
-  // sayfası yerine net bir mesaj görür.
-  if (provider === 'apple' && !(await providerReady('apple', redirectTo))) {
-    return fail(appError('oauth_unavailable', APPLE_NOT_CONFIGURED_MESSAGE));
-  }
+
+  // NOT: Buraya bir "sağlayıcı hazır mı" ön isteği konmaz. O istek
+  // `/auth/v1/authorize` ucunu çağırıp Apple'ın giriş sayfasını da indirdiği
+  // için Apple sayfası açılmadan yarım saniyeden fazla gecikme ekliyordu.
+  // Sağlayıcı yapılandırması eksikse hata `completeOAuthCallback` içinde
+  // `error_description` olarak geri döner ve aşağıda anlaşılır mesaja çevrilir.
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider,
@@ -814,8 +789,20 @@ export type SignUpMetadata = {
  * kullanıcıya ikinci kez sorulmaz.
  */
 export async function getSignUpMetadata(): Promise<SignUpMetadata> {
-  const { data, error } = await supabase.auth.getUser();
-  const metadata = (!error && data.user?.user_metadata) || {};
+  // Yerel oturum okunur: `/auth/v1/user` isteği, giriş sonrası yönlendirmeyi
+  // gereksiz bir gidiş-dönüş kadar geciktiriyordu. Metadata zaten oturum
+  // jetonuyla birlikte gelir.
+  let metadata: Record<string, unknown> = {};
+  const { data: sessionData } = await supabase.auth.getSession();
+  const localUser = sessionData.session?.user;
+  if (localUser) {
+    metadata = (localUser.user_metadata ?? {}) as Record<string, unknown>;
+  } else {
+    const { data, error } = await supabase.auth.getUser();
+    if (!error && data.user?.user_metadata) {
+      metadata = data.user.user_metadata as Record<string, unknown>;
+    }
+  }
 
   const read = (key: string): string | null => {
     const value = metadata[key];

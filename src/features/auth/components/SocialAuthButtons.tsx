@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from '@/utils/router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
@@ -6,9 +7,8 @@ import Svg, { Path } from 'react-native-svg';
 
 import { AppText } from '@/components/ui';
 import { finishSignUpFromMetadata } from '@/features/auth/signup-completion';
+import { prefetchPostLoginData } from '@/features/auth/post-login-prefetch';
 import { socialAvailability } from '@/features/auth/social-availability';
-import { fetchPendingAcceptances } from '@/features/legal/services/legal-service';
-import { fetchMyProfile } from '@/features/profile/services/profile-service';
 import {
   signInWithApple,
   signInWithGoogle,
@@ -48,6 +48,7 @@ function GoogleMark({ size = 19 }: { size?: number }) {
 
 export function SocialAuthButtons({ onError, showInlineError = true }: Props) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [pending, setPending] = useState<SocialProvider | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,44 +61,53 @@ export function SocialAuthButtons({ onError, showInlineError = true }: Props) {
       setError(null);
       setPending(provider);
 
-      const result =
-        provider === 'apple' ? await signInWithApple() : await signInWithGoogle();
+      try {
+        const result =
+          provider === 'apple' ? await signInWithApple() : await signInWithGoogle();
 
-      setPending(null);
-
-      if (!result.ok) {
-        if (result.error.code === 'oauth_cancelled') {
+        if (!result.ok) {
+          if (result.error.code === 'oauth_cancelled') {
+            return;
+          }
+          haptics.error();
+          setError(result.error.message);
+          if (!showInlineError) {
+            Alert.alert('Giriş yapılamadı', result.error.message);
+          }
+          onError?.(result.error.message);
           return;
         }
-        haptics.error();
-        setError(result.error.message);
-        if (!showInlineError) {
-          Alert.alert('Giriş yapılamadı', result.error.message);
-        }
-        onError?.(result.error.message);
-        return;
-      }
 
-      const [profile, pendingResult] = await Promise.all([
-        fetchMyProfile(),
-        fetchPendingAcceptances(),
-      ]);
-      const completed = profile.ok && profile.data?.onboarding_completed;
-      haptics.success();
-      if (!completed) {
-        // Kayıt sırasında verilen bilgiler duruyorsa profil tamamlama ekranı
-        // yeniden gösterilmez; profil doğrudan tamamlanır.
-        const destination = await finishSignUpFromMetadata();
-        router.replace(destination);
-        return;
+        // Profil, bekleyen onaylar ve roller tek turda paralel çekilir; sonuçlar
+        // sorgu önbelleğine yazılır. Yönlendirilen ekran aynı verileri yeniden
+        // istemez.
+        const { profile, pending: pendingResult } = await prefetchPostLoginData(queryClient);
+
+        const completed = profile.ok && profile.data?.onboarding_completed;
+        haptics.success();
+        if (!completed) {
+          // Kayıt sırasında verilen bilgiler duruyorsa profil tamamlama ekranı
+          // yeniden gösterilmez; profil doğrudan tamamlanır. Yukarıda çekilen
+          // veriler tekrar sorulmaz (fazladan gidiş-dönüş yok).
+          const destination = await finishSignUpFromMetadata({
+            profile,
+            pending: pendingResult,
+          });
+          router.replace(destination);
+          return;
+        }
+        if (pendingResult.ok && pendingResult.data.length > 0) {
+          router.replace('/legal/consent');
+          return;
+        }
+        router.replace('/feed');
+      } finally {
+        // Yönlendirme tamamlanana kadar buton meşgul kalır: kullanıcı bu arada
+        // ikinci kez dokunup akışı yeniden başlatamaz.
+        setPending(null);
       }
-      if (pendingResult.ok && pendingResult.data.length > 0) {
-        router.replace('/legal/consent');
-        return;
-      }
-      router.replace('/feed');
     },
-    [onError, pending, router, showInlineError],
+    [onError, pending, queryClient, router, showInlineError],
   );
 
   const disabled = pending !== null;

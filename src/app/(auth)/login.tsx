@@ -18,8 +18,8 @@ import { socialAvailability } from '@/features/auth/social-availability';
 import { FormError } from '@/features/auth/components/FormError';
 import { loginSchema, type LoginValues } from '@/features/auth/validators';
 import { PolicyLinks } from '@/features/legal/components/RegistrationPolicies';
-import { fetchPendingAcceptances } from '@/features/legal/services/legal-service';
-import { fetchMyProfile } from '@/features/profile/services/profile-service';
+import { prefetchPostLoginData } from '@/features/auth/post-login-prefetch';
+import { profileQueryKeys } from '@/features/profile/hooks/use-my-profile';
 import { signInWithPassword } from '@/services/supabase/auth';
 import { useAuthStatus, useSession } from '@/stores/auth-store';
 import { haptics } from '@/utils/haptics';
@@ -69,7 +69,7 @@ function LoginScreen() {
       return;
     }
 
-    const [profile, pending] = await Promise.all([fetchMyProfile(), fetchPendingAcceptances()]);
+    const { profile, pending } = await prefetchPostLoginData(queryClient);
     rememberAccount({
       id: result.data.user.id,
       email: result.data.user.email ?? values.email,
@@ -82,9 +82,10 @@ function LoginScreen() {
     const completed = profile.ok && profile.data?.onboarding_completed;
     if (!completed) {
       // Kayıt sırasında verilen bilgiler duruyorsa profil tamamlama ekranı
-      // yeniden gösterilmez; profil doğrudan tamamlanır.
-      const destination = await finishSignUpFromMetadata();
-      await queryClient.invalidateQueries({ queryKey: ['my-profile'] });
+      // yeniden gösterilmez; profil doğrudan tamamlanır. Çekilen veriler
+      // tekrar sorulmaz.
+      const destination = await finishSignUpFromMetadata({ profile, pending });
+      await queryClient.invalidateQueries({ queryKey: profileQueryKeys.me });
       router.replace(destination);
       return;
     }

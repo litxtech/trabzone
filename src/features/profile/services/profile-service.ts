@@ -2,6 +2,7 @@ import type { PostgrestError } from '@supabase/supabase-js';
 
 import { appError, type AppError } from '@/services/errors';
 import { supabase } from '@/services/supabase/client';
+import { currentUserId } from '@/services/supabase/session-user';
 import { fail, ok, type Result } from '@/utils/result';
 
 export type Profile = {
@@ -41,20 +42,7 @@ const mapProfileError = (error: PostgrestError): AppError => {
   }
 };
 
-async function currentUserId(): Promise<string | null> {
-  const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user) {
-    return null;
-  }
-  return data.user.id;
-}
-
-export async function fetchMyProfile(): Promise<Result<Profile | null>> {
-  const userId = await currentUserId();
-  if (!userId) {
-    return ok(null);
-  }
-
+async function fetchMyProfileWithId(userId: string): Promise<Result<Profile | null>> {
   const { data, error } = await supabase
     .from('profiles')
     .select(PROFILE_COLUMNS)
@@ -66,6 +54,15 @@ export async function fetchMyProfile(): Promise<Result<Profile | null>> {
   }
 
   return ok(data);
+}
+
+export async function fetchMyProfile(): Promise<Result<Profile | null>> {
+  const userId = await currentUserId();
+  if (!userId) {
+    return ok(null);
+  }
+
+  return fetchMyProfileWithId(userId);
 }
 
 export async function fetchMyRoles(): Promise<string[]> {
